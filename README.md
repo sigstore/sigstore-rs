@@ -1,3 +1,8 @@
+Continuous integration | Docs | License
+ ----------------------|------|---------
+ [![Continuous integration](https://github.com/flavio/sigstore-rs/actions/workflows/tests.yml/badge.svg)](https://github.com/flavio/sigstore-rs/actions/workflows/tests.yml) | [![Docs](https://img.shields.io/badge/docs-%20-blue)](https://flavio.github.io/sigstore-rs/sigstore) |  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+
+
 This is an experimental crate to interact with [sigstore](https://sigstore.dev/).
 
 This is under high development, many features and checks are still missing.
