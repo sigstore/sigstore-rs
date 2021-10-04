@@ -1,6 +1,9 @@
 This is an experimental crate to interact with [sigstore](https://sigstore.dev/).
 
-This is under high development, many features and probably checks are still missing.
+This is under high development, many features and checks are still missing.
+
+Right now I've been focusing on implementing the verification bits required
+to verify something that has been previously signed with `cosign`.
 
 ## Examples
 
