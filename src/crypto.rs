@@ -87,7 +87,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.into());
+        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
         assert!(outcome.is_ok());
     }
 
@@ -105,7 +105,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         let msg = "hello world";
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.into());
+        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
         assert!(outcome.is_err());
     }
 
@@ -123,7 +123,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.into());
+        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
         assert!(outcome.is_err());
     }
 
@@ -141,7 +141,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.into());
+        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
         assert!(outcome.is_err());
     }
 
