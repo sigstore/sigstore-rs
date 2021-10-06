@@ -27,7 +27,7 @@ cosign sign -key cosign.key registry-testing.svc.lan/busybox
 ```
 
 Verify the image signature using the example program defined under
-`examples/verify`:
+[`examples/verify`](https://github.com/flavio/sigstore-rs/tree/main/examples/verify):
 
 ```console
 cargo run --example verify -- -k cosign.pub registry-testing.svc.lan/busybox
