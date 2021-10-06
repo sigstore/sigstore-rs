@@ -2,6 +2,8 @@
 //!
 //! This is under high development, many features and probably checks are still missing.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use oci_distribution::{secrets::RegistryAuth, Reference};
 
@@ -19,6 +21,7 @@ mod distribution;
 use distribution::{image_signature_layers, image_signatures};
 
 pub mod simple_signing;
+use simple_signing::SimpleSigning;
 
 /// Calculate the cosign image reference.
 /// This is the location cosign stores signatures.
@@ -40,22 +43,29 @@ pub async fn triangulate(
     Ok((reference, manifest_digest))
 }
 
-/// Verify validity of the signatures stored inside of the image
-/// produced by cosign.
+/// Ensure the provided key is used to sign at least one of the layers of the
+/// signature image produced by cosign.
 ///
-/// Currently this function uses the verification key provided by
-/// the user to ensure all the signatures are valid.
+/// Returns the list of SimpleSigning objects that have been signed by the given
+/// key.
 pub async fn verify(
     client: &mut Client,
     auth: &RegistryAuth,
     source_image_digest: String,
     cosign_image: Reference,
     public_key: String,
-) -> Result<()> {
+    annotations: Option<HashMap<String, String>>,
+) -> Result<Vec<SimpleSigning>> {
     let verification_key = new_verification_key(public_key)?;
     let signatures = image_signatures(client, &cosign_image, auth).await?;
     let layers = image_signature_layers(client, &cosign_image, auth).await?;
-    verify_layers(source_image_digest, layers, signatures, &verification_key)
+    verify_layers(
+        source_image_digest,
+        layers,
+        signatures,
+        annotations,
+        &verification_key,
+    )
 }
 
 #[cfg(test)]

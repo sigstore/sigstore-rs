@@ -5,6 +5,7 @@ use ecdsa::signature::Verifier;
 use ecdsa::{Signature, VerifyingKey};
 use oci_distribution::client::ImageLayer;
 use p256::pkcs8::FromPublicKey;
+use tracing::{debug, error, info};
 
 use crate::distribution::SIGSTORE_OCI_MEDIA_TYPE;
 use crate::simple_signing::SimpleSigning;
@@ -18,14 +19,19 @@ pub(crate) fn new_verification_key(contents: String) -> Result<CosignVerificatio
         .map_err(|e| anyhow!("Cannot load key: {:?}", e))
 }
 
-/// Verify all the layers part of the image containing all the signatures
+/// Find all the layers that have been signed with the given key.
+/// Return a list of `SimpleSigning` objects that have been signed by
+/// the given key
 pub(crate) fn verify_layers(
     image_manifest_digest: String,
     layers: Vec<ImageLayer>,
     signatures: HashMap<String, String>,
+    annotations: Option<HashMap<String, String>>,
     verification_key: &CosignVerificationKey,
-) -> Result<()> {
-    let mut verified_layers = 0;
+) -> Result<Vec<SimpleSigning>> {
+    let mut verified_layers: Vec<SimpleSigning> = Vec::new();
+    let annotations = annotations.unwrap_or_default();
+
     for layer in layers {
         if layer.media_type != SIGSTORE_OCI_MEDIA_TYPE {
             continue;
@@ -37,21 +43,34 @@ pub(crate) fn verify_layers(
                 layer_digest
             )
         })?;
-        verify_signature(verification_key, layer_signature, &layer.data)?;
+        if verify_signature(verification_key, layer_signature, &layer.data).is_err() {
+            // the given key wasn't used to sign this layer, move on
+            info!("skipping layer, it wasn't signed with the given key");
+            continue;
+        }
 
         let ss: SimpleSigning = serde_json::from_slice(&layer.data)
             .map_err(|e| anyhow!("Cannot decode Simple Signing data: {:?}", e))?;
+        debug!(simple_signing = ?ss);
         if ss.critical.image.docker_manifest_digest != image_manifest_digest {
-            return Err(anyhow!("The image manifest digest does not match with the one reported inside of the Simple Signing metadata"));
+            let msg = "The image manifest digest does not match with the one reported inside of the Simple Signing metadata";
+            error!(
+                simple_signing = ?ss,
+                expected_manifest_digest = image_manifest_digest.as_str(),
+                msg,
+            );
+            continue;
         }
-        verified_layers += 1;
+        if ss.satisfies_annotations(&annotations) {
+            verified_layers.push(ss);
+        }
     }
-    if verified_layers == 0 {
+    if verified_layers.is_empty() {
         Err(anyhow!(
-            "The signature object didn't have any layer verified"
+            "The signature object didn't have any layer signed with the given key"
         ))
     } else {
-        Ok(())
+        Ok(verified_layers)
     }
 }
 
@@ -169,7 +188,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         };
         let layers = vec![layer];
 
-        let outcome = verify_layers(image_manifest_digest, layers, signatures, &verification_key);
+        let outcome = verify_layers(
+            image_manifest_digest,
+            layers,
+            signatures,
+            None,
+            &verification_key,
+        );
         assert!(outcome.is_ok());
     }
 
@@ -196,7 +221,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         };
         let layers = vec![layer];
 
-        let outcome = verify_layers(image_manifest_digest, layers, signatures, &verification_key);
+        let outcome = verify_layers(
+            image_manifest_digest,
+            layers,
+            signatures,
+            None,
+            &verification_key,
+        );
         assert!(outcome.is_err());
     }
 
@@ -224,7 +255,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         };
         let layers = vec![layer];
 
-        let outcome = verify_layers(image_manifest_digest, layers, signatures, &verification_key);
+        let outcome = verify_layers(
+            image_manifest_digest,
+            layers,
+            signatures,
+            None,
+            &verification_key,
+        );
         assert!(outcome.is_err());
     }
 
@@ -248,7 +285,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         let layers = vec![];
 
-        let outcome = verify_layers(image_manifest_digest, layers, signatures, &verification_key);
+        let outcome = verify_layers(
+            image_manifest_digest,
+            layers,
+            signatures,
+            None,
+            &verification_key,
+        );
         assert!(outcome.is_err());
     }
 }
