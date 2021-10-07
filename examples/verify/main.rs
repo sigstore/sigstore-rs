@@ -105,7 +105,7 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
         auth,
         source_image_digest,
         cosign_signature_image,
-        pub_key,
+        &pub_key,
         annotations,
     )
     .await

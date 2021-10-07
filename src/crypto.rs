@@ -14,8 +14,8 @@ pub(crate) type CosignVerificationKey = VerifyingKey<p256::NistP256>;
 
 /// Create a new Cosign Verification Key starting from the contents of
 /// a cosign public key.
-pub(crate) fn new_verification_key(contents: String) -> Result<CosignVerificationKey> {
-    VerifyingKey::<p256::NistP256>::from_public_key_pem(&contents)
+pub(crate) fn new_verification_key(contents: &str) -> Result<CosignVerificationKey> {
+    VerifyingKey::<p256::NistP256>::from_public_key_pem(contents)
         .map_err(|e| anyhow!("Cannot load key: {:?}", e))
 }
 
@@ -92,18 +92,15 @@ fn verify_signature(
 mod tests {
     use super::*;
 
+    const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
+OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
+-----END PUBLIC KEY-----"#;
+
     #[test]
     fn verify_signature_success() {
         let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
-
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
-
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
         let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
@@ -113,15 +110,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     #[test]
     fn verify_signature_failure_because_wrong_msg() {
         let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
-
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
-
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
         let msg = "hello world";
 
         let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
@@ -131,15 +120,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     #[test]
     fn verify_signature_failure_because_wrong_signature() {
         let signature = String::from("this is a signature");
-
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
-
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
         let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
@@ -150,14 +131,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     fn verify_signature_failure_because_wrong_verification_key() {
         let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
 
-        let verification_key = new_verification_key(String::from(
+        let verification_key = new_verification_key(
             r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
 JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 -----END PUBLIC KEY-----"#,
-        ))
+        )
         .unwrap();
-
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
         let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
@@ -174,13 +154,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             String::from("sha256:3af4414d20c9e1cb76ccc72aae8b242166dabe6af531a4a790db8e2f0e5ee7c9"),
             String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8="));
 
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
 
         let layer = ImageLayer{
             data: r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#.into(),
@@ -207,13 +181,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             String::from("sha256:3af4414d20c9e1cb76ccc72aae8b242166dabe6af531a4a790db8e2f0e5ee7c9"),
             String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8="));
 
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
 
         let layer = ImageLayer{
             data: r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#.into(),
@@ -241,13 +209,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             String::from("sha256:3af4414d20c9e1cb76ccc72aae8b242166dabe6af531a4a790db8e2f0e5ee7c9"),
             String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8="));
 
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
 
         let layer = ImageLayer{
             data: r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#.into(),
@@ -275,13 +237,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             String::from("sha256:3af4414d20c9e1cb76ccc72aae8b242166dabe6af531a4a790db8e2f0e5ee7c9"),
             String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8="));
 
-        let verification_key = new_verification_key(String::from(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
-OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
------END PUBLIC KEY-----"#,
-        ))
-        .unwrap();
+        let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
 
         let layers = vec![];
 

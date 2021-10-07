@@ -53,7 +53,7 @@ pub async fn verify(
     auth: &RegistryAuth,
     source_image_digest: String,
     cosign_image: Reference,
-    public_key: String,
+    public_key: &str,
     annotations: Option<HashMap<String, String>>,
 ) -> Result<Vec<SimpleSigning>> {
     let verification_key = new_verification_key(public_key)?;
