@@ -1,11 +1,9 @@
 extern crate sigstore;
+use sigstore::cosign::CosignCapabilities;
 use sigstore::simple_signing::SimpleSigning;
 
 extern crate anyhow;
 use anyhow::Result;
-
-extern crate oci_distribution;
-use oci_distribution::{secrets::RegistryAuth, Reference};
 
 use std::io::prelude::*;
 use std::{collections::HashMap, fs::File};
@@ -57,13 +55,12 @@ fn cli() -> App<'static, 'static> {
 async fn run_app() -> Result<Vec<SimpleSigning>> {
     let matches = cli().get_matches();
 
-    let auth = &RegistryAuth::Anonymous;
-    let mut client = oci_distribution::Client::default();
+    let auth = &sigstore::registry::Auth::Anonymous;
+    let mut client = sigstore::cosign::Client::default();
 
-    let image: Reference = String::from(matches.value_of("IMAGE").unwrap()).parse()?;
+    let image: &str = matches.value_of("IMAGE").unwrap();
 
-    let (cosign_signature_image, source_image_digest) =
-        sigstore::triangulate(&mut client, image, auth).await?;
+    let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
 
     let mut pub_key_file = File::open(matches.value_of("key").unwrap())?;
     let mut pub_key = String::new();
@@ -100,15 +97,15 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    sigstore::verify(
-        &mut client,
-        auth,
-        source_image_digest,
-        cosign_signature_image,
-        &pub_key,
-        annotations,
-    )
-    .await
+    client
+        .verify(
+            auth,
+            &source_image_digest,
+            &cosign_signature_image,
+            &pub_key,
+            annotations,
+        )
+        .await
 }
 
 #[tokio::main]

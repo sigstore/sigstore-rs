@@ -7,7 +7,7 @@ use oci_distribution::client::ImageLayer;
 use p256::pkcs8::FromPublicKey;
 use tracing::{debug, error, info};
 
-use crate::distribution::SIGSTORE_OCI_MEDIA_TYPE;
+use crate::cosign::SIGSTORE_OCI_MEDIA_TYPE;
 use crate::simple_signing::SimpleSigning;
 
 pub(crate) type CosignVerificationKey = VerifyingKey<p256::NistP256>;

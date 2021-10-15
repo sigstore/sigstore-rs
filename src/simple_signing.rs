@@ -20,6 +20,7 @@ impl fmt::Display for SimpleSigning {
 }
 
 impl SimpleSigning {
+    /// Checks whether all the provided `annotations` are satisfied
     pub fn satisfies_annotations(&self, annotations: &HashMap<String, String>) -> bool {
         if annotations.is_empty() {
             debug!("no annotations have been provided -> returning true");
@@ -75,6 +76,7 @@ pub struct Optional {
 }
 
 impl Optional {
+    /// Checks whether all the provided `annotations` are satisfied
     pub fn satisfies_annotations(&self, annotations: &HashMap<String, String>) -> bool {
         if self.extra.is_empty() {
             info!(?annotations, "Annotations are not satisfied, no annotations are part of the Simple Signing object");

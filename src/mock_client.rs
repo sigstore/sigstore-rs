@@ -1,6 +1,7 @@
 #[cfg(test)]
-pub mod test {
+pub(crate) mod test {
     use anyhow::{anyhow, Result};
+    use async_trait::async_trait;
     use oci_distribution::{
         client::ImageData, manifest::OciManifest, secrets::RegistryAuth, Reference,
     };
@@ -11,8 +12,9 @@ pub mod test {
         pub pull_manifest_response: Option<Result<(OciManifest, String)>>,
     }
 
-    impl MockOciClient {
-        pub async fn fetch_manifest_digest(
+    #[async_trait]
+    impl crate::registry::ClientCapabilities for MockOciClient {
+        async fn fetch_manifest_digest(
             &mut self,
             _image: &Reference,
             _auth: &RegistryAuth,
@@ -28,7 +30,7 @@ pub mod test {
             }
         }
 
-        pub async fn pull(
+        async fn pull(
             &mut self,
             _image: &Reference,
             _auth: &RegistryAuth,
@@ -45,7 +47,7 @@ pub mod test {
             }
         }
 
-        pub async fn pull_manifest(
+        async fn pull_manifest(
             &mut self,
             _image: &Reference,
             _auth: &RegistryAuth,
