@@ -32,3 +32,8 @@ Verify the image signature using the example program defined under
 ```console
 cargo run --example verify -- -k cosign.pub registry-testing.svc.lan/busybox
 ```
+
+## Security
+
+Should you discover any security issues, please refer to sigstores [security
+process](https://github.com/sigstore/community/blob/main/SECURITY.md)
