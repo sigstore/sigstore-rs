@@ -114,11 +114,16 @@ pub async fn main() {
 
     std::process::exit(match satistied_simple_signatures {
         Ok(signatures) => {
-            println!("Image successfully verified");
-            for signature in signatures {
-                println!("{}", signature);
+            if signatures.is_empty() {
+                eprintln!("Image verification failed: no matching signature found.");
+                1
+            } else {
+                println!("Image successfully verified");
+                for signature in signatures {
+                    println!("{}", signature);
+                }
+                0
             }
-            0
         }
         Err(err) => {
             eprintln!("Image verification failed: {:?}", err);
