@@ -6,6 +6,7 @@ pub(crate) mod test {
         client::ImageData, manifest::OciManifest, secrets::RegistryAuth, Reference,
     };
 
+    #[derive(Default)]
     pub struct MockOciClient {
         pub fetch_manifest_digest_response: Option<Result<String>>,
         pub pull_response: Option<Result<ImageData>>,

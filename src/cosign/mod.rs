@@ -2,10 +2,14 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::crypto::CosignVerificationKey;
 use crate::registry::{Auth, ClientConfig};
 use crate::simple_signing::SimpleSigning;
+
+mod signature_layers;
+use self::signature_layers::{build_signature_layers, SignatureLayer};
 
 pub(crate) static SIGSTORE_OCI_MEDIA_TYPE: &str =
     "application/vnd.dev.cosign.simplesigning.v1+json";
@@ -156,12 +160,35 @@ impl CosignCapabilities for Client {
         public_key: &str,
         annotations: Option<HashMap<String, String>>,
     ) -> Result<Vec<SimpleSigning>> {
+        let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
+        let signature_layers = build_signature_layers(&manifest, &layers);
+
+        let verification_key = crate::crypto::new_verification_key(public_key)?;
+        let annotations = annotations.unwrap_or_default();
+        let verified_signatures = self.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        Ok(verified_signatures)
+    }
+}
+
+impl Client {
+    /// Internal helper method used to fetch data from an OCI registry
+    async fn fetch_manifest_and_layers(
+        &mut self,
+        auth: &Auth,
+        cosign_image: &str,
+    ) -> Result<(
+        oci_distribution::manifest::OciManifest,
+        Vec<oci_distribution::client::ImageLayer>,
+    )> {
         let cosign_image_reference: oci_distribution::Reference = cosign_image
             .parse()
             .map_err(|e| anyhow!("Cannot parse image reference '{}': {:?}", cosign_image, e))?;
         let oci_auth: oci_distribution::secrets::RegistryAuth = auth.into();
-
-        let verification_key = crate::crypto::new_verification_key(public_key)?;
 
         let (manifest, _) = self
             .registry_client
@@ -174,9 +201,7 @@ impl CosignCapabilities for Client {
                     e
                 )
             })?;
-
-        let signatures = image_signatures(manifest);
-        let layers = self
+        let image_data = self
             .registry_client
             .pull(
                 &cosign_image_reference,
@@ -190,40 +215,48 @@ impl CosignCapabilities for Client {
                     cosign_image_reference,
                     e
                 )
-            })?
-            .layers;
+            })?;
 
-        crate::crypto::verify_layers(
-            String::from(source_image_digest),
-            layers,
-            signatures,
-            annotations,
-            &verification_key,
-        )
+        Ok((manifest, image_data.layers))
     }
-}
 
-// Return all the signatures stored inside of the given image manifest
-fn image_signatures(manifest: oci_distribution::manifest::OciManifest) -> HashMap<String, String> {
-    let mut signatures: HashMap<String, String> = HashMap::new();
-
-    for layer in &manifest.layers {
-        if layer.media_type != SIGSTORE_OCI_MEDIA_TYPE {
-            continue;
-        }
-        if let Some(signature) = layer
-            .annotations
-            .as_ref()
-            .and_then(|a| a.get(&String::from(SIGSTORE_SIGNATURE_ANNOTATION)).cloned())
-        {
-            signatures.insert(layer.digest.clone(), signature);
-        }
+    /// The heart of the verification code. This is where all the checks are done
+    /// against the SignatureLayer objects found inside of the OCI registry.
+    ///
+    /// The method returns a list of SimpleSigning object satisfying the requirements.
+    /// The list is empty if no SimpleSigning object satisfied the requirements.
+    fn find_simple_signing_objects_satisfying_constraints(
+        &mut self,
+        signature_layers: &HashSet<SignatureLayer>,
+        source_image_digest: &str,
+        verification_key: &CosignVerificationKey,
+        annotations: &HashMap<String, String>,
+    ) -> Vec<SimpleSigning> {
+        let verified_signatures: Vec<SimpleSigning> = signature_layers
+            .iter()
+            .filter_map(|sl| match sl.is_signed_by_key(verification_key) {
+                // filter by the layers that have been signed with the given key,
+                // then convert them into SimpleSigning objects
+                Ok(true) => Some(sl.simple_signing.clone()),
+                _ => None,
+            })
+            .filter(|ss| {
+                // ensure given annotations are respected
+                ss.satisfies_annotations(annotations)
+            })
+            .filter(|ss| {
+                // ensure the manifest digest mentioned by the signed SimpleSigning
+                // object matches the value of the OCI object we're verifying
+                ss.satisfies_manifest_digest(source_image_digest)
+            })
+            .collect();
+        verified_signatures
     }
-    signatures
 }
 
 #[cfg(test)]
 mod tests {
+    use self::signature_layers::tests::build_correct_signature_layer;
     use super::*;
     use crate::mock_client::test::MockOciClient;
 
@@ -249,5 +282,151 @@ mod tests {
 
         assert!(reference.is_ok());
         assert_eq!(reference.unwrap(), (expected_image, image_digest));
+    }
+
+    #[test]
+    fn find_simple_signing_object_when_verification_key_and_no_annotations_are_provided() {
+        let (signature_layer, verification_key) = build_correct_signature_layer();
+        let source_image_digest = signature_layer
+            .simple_signing
+            .critical
+            .image
+            .docker_manifest_digest
+            .clone();
+        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
+        signature_layers.insert(signature_layer);
+
+        let annotations: HashMap<String, String> = HashMap::new();
+
+        let mock_client = MockOciClient::default();
+        let mut cosign_client = crate::cosign::Client {
+            registry_client: Box::new(mock_client),
+        };
+
+        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            &source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        assert!(!actual.is_empty());
+    }
+
+    #[test]
+    fn find_simple_signing_object_no_matches_when_no_signature_matches_the_given_key() {
+        let (signature_layer, _) = build_correct_signature_layer();
+        let source_image_digest = signature_layer
+            .simple_signing
+            .critical
+            .image
+            .docker_manifest_digest
+            .clone();
+        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
+        signature_layers.insert(signature_layer);
+
+        let verification_key = crate::crypto::new_verification_key(
+            r#"-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELKhD7F5OKy77Z582Y6h0u1J3GNA+
+kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
+-----END PUBLIC KEY-----"#,
+        )
+        .unwrap();
+
+        let annotations: HashMap<String, String> = HashMap::new();
+
+        let mock_client = MockOciClient::default();
+        let mut cosign_client = crate::cosign::Client {
+            registry_client: Box::new(mock_client),
+        };
+
+        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            &source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        assert!(actual.is_empty());
+    }
+
+    #[test]
+    fn find_simple_signing_object_no_matches_when_annotations_are_not_satisfied() {
+        let (signature_layer, verification_key) = build_correct_signature_layer();
+        let source_image_digest = signature_layer
+            .simple_signing
+            .critical
+            .image
+            .docker_manifest_digest
+            .clone();
+        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
+        signature_layers.insert(signature_layer);
+
+        let mut annotations: HashMap<String, String> = HashMap::new();
+        annotations.insert("env".into(), "prod".into());
+
+        let mock_client = MockOciClient::default();
+        let mut cosign_client = crate::cosign::Client {
+            registry_client: Box::new(mock_client),
+        };
+
+        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            &source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        assert!(actual.is_empty());
+    }
+
+    #[test]
+    fn find_simple_signing_object_no_matches_when_simple_signing_digest_does_not_match_the_expected_one(
+    ) {
+        let (signature_layer, verification_key) = build_correct_signature_layer();
+        let source_image_digest = "this is a different value";
+        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
+        signature_layers.insert(signature_layer);
+
+        let annotations: HashMap<String, String> = HashMap::new();
+
+        let mock_client = MockOciClient::default();
+        let mut cosign_client = crate::cosign::Client {
+            registry_client: Box::new(mock_client),
+        };
+
+        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            &source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        assert!(actual.is_empty());
+    }
+
+    #[test]
+    fn find_simple_signing_object_no_matches_when_no_signature_layer_exists() {
+        let source_image_digest = "something";
+        let signature_layers: HashSet<SignatureLayer> = HashSet::new();
+
+        let verification_key = crate::crypto::new_verification_key(
+            r#"-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELKhD7F5OKy77Z582Y6h0u1J3GNA+
+kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
+-----END PUBLIC KEY-----"#,
+        )
+        .unwrap();
+
+        let annotations: HashMap<String, String> = HashMap::new();
+
+        let mock_client = MockOciClient::default();
+        let mut cosign_client = crate::cosign::Client {
+            registry_client: Box::new(mock_client),
+        };
+
+        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
+            &signature_layers,
+            &source_image_digest,
+            &verification_key,
+            &annotations,
+        );
+        assert!(actual.is_empty());
     }
 }

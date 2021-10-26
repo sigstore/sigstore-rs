@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error, info};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SimpleSigning {
     pub critical: Critical,
     pub optional: Option<Optional>,
@@ -43,9 +43,23 @@ impl SimpleSigning {
             }
         }
     }
+
+    /// Compares the digest given by the user with the Docker manifest digest
+    /// stored inside of the Critical object
+    pub fn satisfies_manifest_digest(&self, expected_digest: &str) -> bool {
+        let matches = self.critical.image.docker_manifest_digest == expected_digest;
+        if !matches {
+            info!(
+                simple_signing=?self,
+                expected_digest,
+                "expected digest not found"
+            );
+        }
+        matches
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Critical {
     #[serde(rename = "type")]
     //TODO: should we validate the contents of this attribute to ensure it's "cosign container image signature"?
@@ -54,13 +68,13 @@ pub struct Critical {
     pub identity: Identity,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Image {
     pub docker_manifest_digest: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Identity {
     pub docker_reference: String,
@@ -250,5 +264,25 @@ mod tests {
         let optional: Optional = serde_json::from_value(optional_json).unwrap();
 
         assert!(optional.satisfies_annotations(&annotations));
+    }
+
+    #[test]
+    fn simple_signing_satisfy_manifest_digest_works_as_expected() {
+        let expected_digest = "sha256:something";
+        let ss_json = json!({
+            "critical": {
+                "type": "type_foo",
+                "image": {
+                    "docker-manifest-digest": expected_digest
+                },
+                "identity": {
+                    "docker-reference": "registry.foo.bar/busybox"
+                }
+            }
+        });
+        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
+
+        assert!(ss.satisfies_manifest_digest(expected_digest));
+        assert!(!ss.satisfies_manifest_digest("something different"));
     }
 }
