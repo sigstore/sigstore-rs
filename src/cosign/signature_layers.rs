@@ -14,6 +14,8 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
+use olpc_cjson::CanonicalFormatter;
+use serde::Serialize;
 use std::{
     cmp::Eq,
     collections::{HashMap, HashSet},
@@ -23,6 +25,7 @@ use std::{
 };
 use tracing::{info, warn};
 
+use super::{bundle::Bundle, SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_SIGNATURE_ANNOTATION};
 use crate::cosign::SIGSTORE_OCI_MEDIA_TYPE;
 use crate::{crypto::CosignVerificationKey, simple_signing::SimpleSigning};
 
@@ -45,6 +48,7 @@ pub(crate) struct SignatureLayer {
     pub simple_signing: SimpleSigning,
     pub oci_digest: String,
     cosign_signatures: Vec<String>,
+    bundles: Vec<Bundle>,
     raw_data: Vec<u8>,
 }
 
@@ -96,7 +100,8 @@ impl TryFrom<&oci_distribution::client::ImageLayer> for SignatureLayer {
 
         Ok(SignatureLayer {
             oci_digest: layer.clone().sha256_digest(),
-            cosign_signatures: Vec::<String>::new(),
+            cosign_signatures: Vec::new(),
+            bundles: Vec::new(),
             simple_signing,
             raw_data: layer.data.clone(),
         })
@@ -104,32 +109,68 @@ impl TryFrom<&oci_distribution::client::ImageLayer> for SignatureLayer {
 }
 
 impl SignatureLayer {
-    /// Given a map containing all the oci annotations defined inside of an OCI Layer,
-    /// add all the cosign signatures found
-    pub fn add_signatures(&mut self, oci_annotations: Option<HashMap<String, String>>) {
+    /// Given a map containing all the oci annotations defined inside of an OCI Layer, add:
+    ///  * cosign signatures
+    ///  * cosign bundles
+    pub fn parse_annotations(
+        &mut self,
+        oci_annotations: Option<HashMap<String, String>>,
+    ) -> Result<()> {
         if oci_annotations.is_none() {
-            return;
+            return Ok(());
         }
         for (annotation_type, value) in oci_annotations.unwrap() {
-            if annotation_type == super::SIGSTORE_SIGNATURE_ANNOTATION {
-                self.cosign_signatures.push(value);
+            match annotation_type.as_str() {
+                SIGSTORE_SIGNATURE_ANNOTATION => self.cosign_signatures.push(value),
+                SIGSTORE_BUNDLE_ANNOTATION => {
+                    let bundle: Bundle = serde_json::from_str(&value)
+                        .map_err(|e| anyhow!("Cannot parse bundle |{}|: {:?}", value, e))?;
+                    self.bundles.push(bundle);
+                }
+                _ => {}
             }
         }
+        Ok(())
     }
 
     /// Given a Cosign public key, check whether the signature embedded into
     /// the SignatureLayer has been produced by the given key
-    pub fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> Result<bool> {
+    pub fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> bool {
         for signature in &self.cosign_signatures {
             match crate::crypto::verify_signature(verification_key, signature, &self.raw_data) {
-                Ok(_) => return Ok(true),
+                Ok(_) => return true,
                 Err(e) => {
                     info!(signature=signature.as_str(), reason=?e, "Cannot verify signature with the given key");
                 }
             }
         }
 
-        Ok(false)
+        false
+    }
+
+    pub fn are_bundles_signed_by_rekor(
+        &self,
+        rekor_pub_key: &CosignVerificationKey,
+    ) -> Result<bool> {
+        for bundle in &self.bundles {
+            let mut buf = Vec::new();
+            let mut ser =
+                serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
+            bundle.payload.serialize(&mut ser).map_err(|e| {
+                anyhow!(
+                    "Cannot create canonical JSON representation of bundle: {:?}",
+                    e
+                )
+            })?;
+            if let Err(e) =
+                crate::crypto::verify_signature(rekor_pub_key, &bundle.signed_entry_timestamp, &buf)
+            {
+                info!(bundle= ?bundle, reason=?e, "Cannot verify bundle with the given rekor public key");
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -175,7 +216,10 @@ pub(crate) fn build_signature_layers(
                 Ok(mut sl) => match signature_layers_manifest_metadata.get(&sl.oci_digest) {
                     Some(oci_descriptions) => {
                         for description in oci_descriptions {
-                            sl.add_signatures(description.annotations.clone());
+                            if let Err(e) = sl.parse_annotations(description.annotations.clone()) {
+                                warn!(error =?e, "Ignoring layer");
+                                return None;
+                            }
                         }
                         Some(sl)
                     }
@@ -194,10 +238,14 @@ pub(crate) fn build_signature_layers(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::cosign::tests::REKOR_PUB_KEY;
+    use crate::crypto;
+
     use super::*;
     use serde_json::json;
 
-    pub(crate) fn build_correct_signature_layer() -> (SignatureLayer, CosignVerificationKey) {
+    pub(crate) fn build_correct_signature_layer_without_bundles(
+    ) -> (SignatureLayer, CosignVerificationKey) {
         let public_key = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
@@ -223,45 +271,102 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
                 oci_digest: String::from("digest"),
                 cosign_signatures: vec![signature],
+                bundles: Vec::new(),
                 raw_data: serde_json::to_vec(&ss_value).unwrap(),
             },
             verification_key,
         )
     }
 
+    fn build_correct_bundle() -> Bundle {
+        let bundle_json = json!({
+          "SignedEntryTimestamp": "MEUCIDx9M+yRpD0O47/Mzm8NAPCbtqy4uiTkLWWexW0bo4jZAiEA1wwueIW8XzJWNkut5y9snYj7UOfbMmUXp7fH3CzJmWg=",
+          "Payload": {
+            "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoicmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiIzYWY0NDE0ZDIwYzllMWNiNzZjY2M3MmFhZThiMjQyMTY2ZGFiZTZhZjUzMWE0YTc5MGRiOGUyZjBlNWVlN2M5In19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUURXV3hQUWEzWEZVc1BieVRZK24rYlp1LzZQd2hnNVd3eVlEUXRFZlFobzl3SWhBUGtLVzdldWI4YjdCWCtZYmJSYWM4VHd3SXJLNUt4dmR0UTZOdW9EK2l2VyIsImZvcm1hdCI6Ing1MDkiLCJwdWJsaWNLZXkiOnsiY29udGVudCI6IkxTMHRMUzFDUlVkSlRpQlFWVUpNU1VNZ1MwVlpMUzB0TFMwS1RVWnJkMFYzV1VoTGIxcEplbW93UTBGUldVbExiMXBKZW1vd1JFRlJZMFJSWjBGRlRFdG9SRGRHTlU5TGVUYzNXalU0TWxrMmFEQjFNVW96UjA1Qkt3cHJkbFZ6YURSbFMzQmtNV3gzYTBSQmVtWkdSSE0zZVZoRlJYaHpSV3RRVUhWcFVVcENaV3hFVkRZNGJqZFFSRWxYUWk5UlJWazNiWEpCUFQwS0xTMHRMUzFGVGtRZ1VGVkNURWxESUV0RldTMHRMUzB0Q2c9PSJ9fX19",
+            "integratedTime": 1634714179,
+            "logIndex": 783606,
+            "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+          }
+        });
+        let bundle: Bundle = serde_json::from_value(bundle_json.clone()).unwrap();
+        bundle
+    }
+
+    pub(crate) fn build_correct_signature_layer_with_bundles(
+    ) -> (SignatureLayer, CosignVerificationKey) {
+        let (mut signature_layer, verification_key) =
+            build_correct_signature_layer_without_bundles();
+        signature_layer.bundles.push(build_correct_bundle());
+
+        (signature_layer, verification_key)
+    }
+
     #[test]
     fn is_signed_by_key_success() {
-        let (signature_layer, verification_key) = build_correct_signature_layer();
+        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundles();
 
         let actual = signature_layer.is_signed_by_key(&verification_key);
-        assert!(actual.is_ok(), "unexpected error: {:?}", actual);
-        assert!(actual.unwrap(), "expected true, got false");
+        assert!(actual, "expected true, got false");
     }
 
     #[test]
     fn is_signed_by_key_success_even_when_multiple_signatures_are_available() {
-        let (mut signature_layer, verification_key) = build_correct_signature_layer();
+        let (mut signature_layer, verification_key) =
+            build_correct_signature_layer_without_bundles();
         signature_layer.cosign_signatures.push(
             String::from("MEUCIQDcb5mP/PmZhB5ywI01N/R1T5hqyIjgwebdIA4DA6Gp7QIgIVEq/Wr7aajgwP9c7MJFIlScfW035TrdnNAwoOQsEcw="));
 
         let actual = signature_layer.is_signed_by_key(&verification_key);
-        assert!(actual.is_ok(), "unexpected error: {:?}", actual);
+        assert!(actual, "expected true, got false");
+    }
+
+    #[test]
+    fn are_bundles_signed_by_rekor_success() {
+        let (signature_layer, _) = build_correct_signature_layer_with_bundles();
+        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+
+        let actual = signature_layer.are_bundles_signed_by_rekor(&rekor_pub_key);
+        assert!(actual.is_ok());
         assert!(actual.unwrap(), "expected true, got false");
     }
 
     #[test]
-    fn is_signed_by_key_fails_when_no_signatures_are_available() {
-        let (mut signature_layer, verification_key) = build_correct_signature_layer();
-        signature_layer.cosign_signatures = vec![];
+    fn are_bundles_signed_by_rekor_fails_because_wrong_verification_key() {
+        let (signature_layer, a_signature_key) = build_correct_signature_layer_with_bundles();
+        let rekor_pub_key = a_signature_key;
 
-        let actual = signature_layer.is_signed_by_key(&verification_key);
-        assert!(actual.is_ok(), "unexpected error: {:?}", actual);
+        let actual = signature_layer.are_bundles_signed_by_rekor(&rekor_pub_key);
+        assert!(actual.is_ok());
         assert!(!actual.unwrap(), "expected false, got true");
     }
 
     #[test]
+    fn are_bundles_signed_by_rekor_fails_because_one_of_bundles_fails_verification() {
+        let (mut signature_layer, _) = build_correct_signature_layer_with_bundles();
+        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+
+        let mut a_wrong_bundle = signature_layer.bundles.first().unwrap().clone();
+        a_wrong_bundle.payload.body = "This is not the body that was signed".to_string();
+        signature_layer.bundles.push(a_wrong_bundle);
+
+        let actual = signature_layer.are_bundles_signed_by_rekor(&rekor_pub_key);
+        assert!(actual.is_ok());
+        assert!(!actual.unwrap(), "expected false, got true");
+    }
+
+    #[test]
+    fn is_signed_by_key_fails_when_no_signatures_are_available() {
+        let (mut signature_layer, verification_key) =
+            build_correct_signature_layer_without_bundles();
+        signature_layer.cosign_signatures = vec![];
+
+        let actual = signature_layer.is_signed_by_key(&verification_key);
+        assert!(!actual, "expected false, got true");
+    }
+
+    #[test]
     fn is_signed_by_key_fails_when_no_signatures_is_valid() {
-        let (signature_layer, _) = build_correct_signature_layer();
+        let (signature_layer, _) = build_correct_signature_layer_without_bundles();
         let verification_key = crate::crypto::new_verification_key(
             r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
@@ -271,13 +376,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         .unwrap();
 
         let actual = signature_layer.is_signed_by_key(&verification_key);
-        assert!(actual.is_ok(), "unexpected error: {:?}", actual);
-        assert!(!actual.unwrap(), "expected false, got true");
+        assert!(!actual, "expected false, got true");
     }
 
     #[test]
-    fn add_signatures_considers_only_sigstore_annotations() {
-        let (mut signature_layer, _) = build_correct_signature_layer();
+    fn parse_annotations_considers_only_sigstore_annotations() {
+        let (mut signature_layer, _) = build_correct_signature_layer_without_bundles();
         signature_layer.cosign_signatures = vec![];
 
         let expected_signature = String::from("this is the exepected signature");
@@ -287,7 +391,9 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             expected_signature.clone(),
         );
         oci_annotations.insert("something-else".into(), "not a signature".into());
-        signature_layer.add_signatures(Some(oci_annotations));
+        assert!(signature_layer
+            .parse_annotations(Some(oci_annotations))
+            .is_ok());
 
         assert_eq!(signature_layer.cosign_signatures.len(), 1);
         assert_eq!(
@@ -297,12 +403,35 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     }
 
     #[test]
-    fn add_signatures_handles_oci_manifests_without_annotations() {
-        let (mut signature_layer, _) = build_correct_signature_layer();
+    fn parse_annotations_handles_oci_manifests_without_annotations() {
+        let (mut signature_layer, _) = build_correct_signature_layer_without_bundles();
         signature_layer.cosign_signatures = vec![];
-        signature_layer.add_signatures(None);
+        assert!(signature_layer.parse_annotations(None).is_ok());
 
         assert!(signature_layer.cosign_signatures.is_empty());
+    }
+
+    #[test]
+    fn parse_annotations_handles_cosign_bundles() {
+        let (mut signature_layer, _) = build_correct_signature_layer_without_bundles();
+        signature_layer.cosign_signatures = vec![];
+
+        let expected_bundle = build_correct_bundle();
+
+        let mut oci_annotations: HashMap<String, String> = HashMap::new();
+        oci_annotations.insert(
+            crate::cosign::SIGSTORE_BUNDLE_ANNOTATION.into(),
+            serde_json::to_string(&expected_bundle.clone()).unwrap(),
+        );
+        assert!(signature_layer
+            .parse_annotations(Some(oci_annotations))
+            .is_ok());
+
+        assert_eq!(signature_layer.bundles.len(), 1);
+        assert_eq!(
+            signature_layer.bundles.iter().next(),
+            Some(&expected_bundle)
+        );
     }
 
     #[test]

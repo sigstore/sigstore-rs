@@ -43,6 +43,14 @@ fn cli() -> App<'static, 'static> {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("rekor-pub-key")
+                .long("rekor-pub-key")
+                .value_name("KEY")
+                .help("File containing Rekor public key (e.g.: ~/.sigstore/root/targets/rekor.pub)")
+                .required(true)
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("annotations")
                 .short("a")
                 .long("annotation")
@@ -71,7 +79,15 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
     let matches = cli().get_matches();
 
     let auth = &sigstore::registry::Auth::Anonymous;
-    let mut client = sigstore::cosign::Client::default();
+
+    let mut rekor_pub_key_file = File::open(matches.value_of("rekor-pub-key").unwrap())?;
+    let mut rekor_pub_key = String::new();
+    rekor_pub_key_file.read_to_string(&mut rekor_pub_key)?;
+
+    let mut client = sigstore::cosign::ClientBuilder::default()
+        .with_rekor_pub_key(&rekor_pub_key)
+        .build()
+        .unwrap();
 
     let image: &str = matches.value_of("IMAGE").unwrap();
 

@@ -105,7 +105,7 @@ impl From<&Certificate> for oci_distribution::client::Certificate {
 }
 
 /// A client configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ClientConfig {
     /// Which protocol the client should use
     pub protocol: ClientProtocol,
@@ -119,6 +119,17 @@ pub struct ClientConfig {
     /// A list of extra root certificate to trust. This can be used to connect
     /// to servers using self-signed certificates
     pub extra_root_certificates: Vec<Certificate>,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        ClientConfig {
+            protocol: ClientProtocol::Https,
+            accept_invalid_hostnames: false,
+            accept_invalid_certificates: false,
+            extra_root_certificates: Vec::new(),
+        }
+    }
 }
 
 impl From<ClientConfig> for oci_distribution::client::ClientConfig {
