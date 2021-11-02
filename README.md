@@ -30,7 +30,7 @@ Verify the image signature using the example program defined under
 [`examples/verify`](https://github.com/flavio/sigstore-rs/tree/main/examples/verify):
 
 ```console
-cargo run --example verify -- -k cosign.pub registry-testing.svc.lan/busybox
+cargo run --example verify -- -k cosign.pub --rekor-pub-key ~/.sigstore/root/targets/rekor.pub registry-testing.svc.lan/busybox
 ```
 
 ## Security
