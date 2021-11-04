@@ -1,10 +1,10 @@
 [package]
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2018"
 authors = [
-  "Flavio Castelli <fcastelli@suse.com>",
+  "sigstore-rs developers",
 ]
 
 
