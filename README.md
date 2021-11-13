@@ -7,31 +7,28 @@ This is an experimental crate to interact with [sigstore](https://sigstore.dev/)
 
 This is under high development, many features and checks are still missing.
 
-Right now I've been focusing on implementing the verification bits required
-to verify something that has been previously signed with `cosign`.
-
-## Examples
+## Features
 
 ### Verification
 
-Create a keypair using the official cosign client:
+The crate implements the following verification mechanisms:
 
-```console
-cosign generate-key-pair
-```
+  * Verify using a given key
+  * Verify bundle produced by transparency log (Rekor)
+  * Verify signature produced in keyless mode, using Fulcio Web-PKI
 
-Sign a container image:
+Signature annotations and certificate email can be provided at verification time.
 
-```console
-cosign sign -key cosign.key registry-testing.svc.lan/busybox
-```
+#### Known limitations
 
-Verify the image signature using the example program defined under
-[`examples/verify`](https://github.com/flavio/sigstore-rs/tree/main/examples/verify):
+* Users must provide the public key of the transparency log (Rekor) and the
+  certificate of the PKI (Fulcio). The removal of this limitation is tracked
+  by [this issue](https://github.com/sigstore/sigstore-rs/issues/9).
+* The crate does not handle verification of attestations yet.
 
-```console
-cargo run --example verify -- -k cosign.pub --rekor-pub-key ~/.sigstore/root/targets/rekor.pub registry-testing.svc.lan/busybox
-```
+## Examples
+
+The `examples` directory contains demo programs using the library.
 
 ## Security
 
