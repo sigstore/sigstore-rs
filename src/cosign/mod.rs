@@ -17,9 +17,10 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
 
-use crate::crypto::CosignVerificationKey;
+use crate::crypto::{self, CosignVerificationKey};
 use crate::registry::{Auth, ClientConfig};
 use crate::simple_signing::SimpleSigning;
 
@@ -31,6 +32,7 @@ mod bundle;
 pub(crate) const SIGSTORE_OCI_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
 pub(crate) const SIGSTORE_SIGNATURE_ANNOTATION: &str = "dev.cosignproject.cosign/signature";
 pub(crate) const SIGSTORE_BUNDLE_ANNOTATION: &str = "dev.sigstore.cosign/bundle";
+pub(crate) const SIGSTORE_CERT_ANNOTATION: &str = "dev.sigstore.cosign/certificate";
 
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
@@ -50,7 +52,7 @@ pub trait CosignCapabilities {
         auth: &Auth,
         source_image_digest: &str,
         cosign_image: &str,
-        public_key: &str,
+        public_key: &Option<String>,
         annotations: Option<HashMap<String, String>>,
     ) -> Result<Vec<SimpleSigning>>;
 }
@@ -120,12 +122,12 @@ pub trait CosignCapabilities {
 ///   let mut annotations: HashMap<String, String> = HashMap::new();
 ///   annotations.insert("env".to_string(), "prod".to_string());
 ///
-///   let verification_key = "contents of a `cosign.pub` key read from the disk";
+///   let verification_key = String::from("contents of a `cosign.pub` key read from the disk");
 ///   let signatures_matching_requirements = client.verify(
 ///     auth,
 ///     cosign_image,
 ///     source_image_digest,
-///     verification_key,
+///     &Some(verification_key),
 ///     Some(annotations)
 ///   ).await.expect("unexpected verification error");
 ///
@@ -139,7 +141,9 @@ pub trait CosignCapabilities {
 /// ```
 pub struct Client {
     registry_client: Box<dyn crate::registry::ClientCapabilities>,
-    rekor_pub_key: String,
+    rekor_pub_key: CosignVerificationKey,
+    fulcio_pub_key_raw: Vec<u8>,
+    cert_email: Option<String>,
 }
 
 /// A builder that generates Client objects.
@@ -157,6 +161,8 @@ pub struct Client {
 pub struct ClientBuilder {
     client_config: ClientConfig,
     rekor_pub_key: Option<String>,
+    fulcio_cert: Option<Vec<u8>>,
+    cert_email: Option<String>,
 }
 
 impl Default for ClientBuilder {
@@ -164,6 +170,8 @@ impl Default for ClientBuilder {
         ClientBuilder {
             client_config: ClientConfig::default(),
             rekor_pub_key: None,
+            fulcio_cert: None,
+            cert_email: None,
         }
     }
 }
@@ -174,23 +182,46 @@ impl ClientBuilder {
         self
     }
 
+    pub fn with_fulcio_cert(mut self, cert: &[u8]) -> Self {
+        self.fulcio_cert = Some(cert.to_owned());
+        self
+    }
+
     pub fn with_client_config(mut self, config: ClientConfig) -> Self {
         self.client_config = config;
         self
     }
 
+    pub fn with_cert_email(mut self, cert_email: Option<&str>) -> Self {
+        self.cert_email = cert_email.map(String::from);
+        self
+    }
+
     pub fn build(self) -> Result<Client> {
         if self.rekor_pub_key.is_none() {
-            return Err(anyhow!("The rekor public key has not been specified"));
+            return Err(anyhow!("The rekor public key has not been provided"));
         }
+        let rekor_pub_key_raw = self.rekor_pub_key.clone().unwrap();
+        let rekor_pub_key = crypto::new_verification_key(&rekor_pub_key_raw)?;
 
-        let oci_client = oci_distribution::client::Client::new(self.client_config.into());
+        let cert_email = self.cert_email.clone();
+
+        let oci_client = oci_distribution::client::Client::new(self.client_config.clone().into());
         Ok(Client {
             registry_client: Box::new(crate::registry::OciClient {
                 registry_client: oci_client,
             }),
-            rekor_pub_key: self.rekor_pub_key.unwrap(),
+            rekor_pub_key,
+            fulcio_pub_key_raw: self.extract_fulcio_public_key()?,
+            cert_email,
         })
+    }
+
+    fn extract_fulcio_public_key(self) -> Result<Vec<u8>> {
+        match self.fulcio_cert {
+            Some(cert) => crypto::extract_public_key_from_pem_cert(&cert),
+            None => Err(anyhow!("The fulcio cert has not been provided")),
+        }
     }
 }
 
@@ -231,22 +262,32 @@ impl CosignCapabilities for Client {
         auth: &Auth,
         source_image_digest: &str,
         cosign_image: &str,
-        public_key: &str,
+        public_key: &Option<String>,
         annotations: Option<HashMap<String, String>>,
     ) -> Result<Vec<SimpleSigning>> {
         let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
-        let signature_layers = build_signature_layers(&manifest, &layers);
 
-        let verification_key = crate::crypto::new_verification_key(public_key)?;
-        let rekor_pub_key = crate::crypto::new_verification_key(&self.rekor_pub_key)?;
+        let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&self.fulcio_pub_key_raw)
+            .map_err(|e| anyhow!("Cannot parse fulcio public key: {:?}", e))?;
 
-        let annotations = annotations.unwrap_or_default();
+        let verification_key: Option<CosignVerificationKey> = match public_key {
+            Some(key) => Some(crate::crypto::new_verification_key(key)?),
+            None => None,
+        };
+
+        let signature_layers = build_signature_layers(
+            &manifest,
+            &layers,
+            &self.rekor_pub_key,
+            fulcio_pub_key,
+            self.cert_email.as_ref(),
+        );
+
         let verified_signatures = self.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
-            &annotations,
+            verification_key.as_ref(),
+            &annotations.unwrap_or_default(),
         );
         Ok(verified_signatures)
     }
@@ -303,25 +344,24 @@ impl Client {
     /// The method returns a list of SimpleSigning object satisfying the requirements.
     /// The list is empty if no SimpleSigning object satisfied the requirements.
     fn find_simple_signing_objects_satisfying_constraints(
-        &mut self,
-        signature_layers: &HashSet<SignatureLayer>,
+        &self,
+        signature_layers: &[SignatureLayer],
         source_image_digest: &str,
-        verification_key: &CosignVerificationKey,
-        rekor_pub_key: &CosignVerificationKey,
+        verification_key: Option<&CosignVerificationKey>,
         annotations: &HashMap<String, String>,
     ) -> Vec<SimpleSigning> {
         let verified_signatures: Vec<SimpleSigning> = signature_layers
             .iter()
-            .filter(|sl| {
-                // filter by the layers that have been signed with the given key
-                sl.is_signed_by_key(verification_key)
-            })
-            .filter_map(|sl| match sl.are_bundles_signed_by_rekor(rekor_pub_key) {
-                // filter by the layers that have a cosign bundle that has
-                // been signed by Rekor,
-                // then convert them into SimpleSigning objects
-                Ok(true) => Some(sl.simple_signing.clone()),
-                _ => None,
+            .filter_map(|sl| {
+                // find all the layers that have a signature that
+                // can be either verified with the supplied verification_key
+                // or with of the trusted bundled certificates.
+                // Then convert them into SimpleSigning objects
+                if sl.verified(verification_key) {
+                    Some(sl.simple_signing.clone())
+                } else {
+                    None
+                }
             })
             .filter(|ss| {
                 // ensure given annotations are respected
@@ -339,14 +379,51 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
-    use self::signature_layers::tests::build_correct_signature_layer_without_bundles;
+    use self::signature_layers::tests::build_correct_signature_layer_without_bundle;
     use super::*;
-    use crate::{crypto, mock_client::test::MockOciClient};
+    use crate::{
+        crypto::{self, extract_public_key_from_pem_cert},
+        mock_client::test::MockOciClient,
+    };
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
 kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
 -----END PUBLIC KEY-----"#;
+
+    pub(crate) const FULCIO_CRT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIIB+DCCAX6gAwIBAgITNVkDZoCiofPDsy7dfm6geLbuhzAKBggqhkjOPQQDAzAq
+MRUwEwYDVQQKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIx
+MDMwNzAzMjAyOVoXDTMxMDIyMzAzMjAyOVowKjEVMBMGA1UEChMMc2lnc3RvcmUu
+ZGV2MREwDwYDVQQDEwhzaWdzdG9yZTB2MBAGByqGSM49AgEGBSuBBAAiA2IABLSy
+A7Ii5k+pNO8ZEWY0ylemWDowOkNa3kL+GZE5Z5GWehL9/A9bRNA3RbrsZ5i0Jcas
+taRL7Sp5fp/jD5dxqc/UdTVnlvS16an+2Yfswe/QuLolRUCrcOE2+2iA5+tzd6Nm
+MGQwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0OBBYE
+FMjFHQBBmiQpMlEk6w2uSu1KBtPsMB8GA1UdIwQYMBaAFMjFHQBBmiQpMlEk6w2u
+Su1KBtPsMAoGCCqGSM49BAMDA2gAMGUCMH8liWJfMui6vXXBhjDgY4MwslmN/TJx
+Ve/83WrFomwmNf056y1X48F9c4m3a3ozXAIxAKjRay5/aj/jsKKGIkmQatjI8uup
+Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
+-----END CERTIFICATE-----"#;
+
+    pub(crate) fn get_fulcio_public_key() -> Vec<u8> {
+        extract_public_key_from_pem_cert(FULCIO_CRT_PEM.as_bytes())
+            .expect("Cannot extract public key from Fulcio hard-coded cert")
+    }
+
+    pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
+        crypto::new_verification_key(REKOR_PUB_KEY).expect("Cannot create test REKOR_PUB_KEY")
+    }
+
+    fn build_test_client(mock_client: MockOciClient) -> Client {
+        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+
+        Client {
+            registry_client: Box::new(mock_client),
+            rekor_pub_key,
+            fulcio_pub_key_raw: FULCIO_CRT_PEM.as_bytes().to_vec(),
+            cert_email: None,
+        }
+    }
 
     #[test]
     fn client_builder_fails_when_rekor_key_is_missing() {
@@ -365,11 +442,7 @@ kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
             pull_response: None,
             pull_manifest_response: None,
         };
-
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
+        let mut cosign_client = build_test_client(mock_client);
 
         let reference = cosign_client
             .triangulate(image, &crate::registry::Auth::Anonymous)
@@ -381,31 +454,24 @@ kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
 
     #[test]
     fn find_simple_signing_object_when_verification_key_and_no_annotations_are_provided() {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundles();
+        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
         let source_image_digest = signature_layer
             .simple_signing
             .critical
             .image
             .docker_manifest_digest
             .clone();
-        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
-        signature_layers.insert(signature_layer);
+        let signature_layers = vec![signature_layer];
 
         let annotations: HashMap<String, String> = HashMap::new();
 
         let mock_client = MockOciClient::default();
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
-
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let cosign_client = build_test_client(mock_client);
 
         let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             &source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
+            Some(&verification_key),
             &annotations,
         );
         assert!(!actual.is_empty());
@@ -413,15 +479,14 @@ kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
 
     #[test]
     fn find_simple_signing_object_no_matches_when_no_signature_matches_the_given_key() {
-        let (signature_layer, _) = build_correct_signature_layer_without_bundles();
+        let (signature_layer, _) = build_correct_signature_layer_without_bundle();
         let source_image_digest = signature_layer
             .simple_signing
             .critical
             .image
             .docker_manifest_digest
             .clone();
-        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
-        signature_layers.insert(signature_layer);
+        let signature_layers = vec![signature_layer];
 
         let verification_key = crate::crypto::new_verification_key(
             r#"-----BEGIN PUBLIC KEY-----
@@ -434,18 +499,12 @@ kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
         let annotations: HashMap<String, String> = HashMap::new();
 
         let mock_client = MockOciClient::default();
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
-
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let cosign_client = build_test_client(mock_client);
 
         let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             &source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
+            Some(&verification_key),
             &annotations,
         );
         assert!(actual.is_empty());
@@ -453,32 +512,25 @@ kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
 
     #[test]
     fn find_simple_signing_object_no_matches_when_annotations_are_not_satisfied() {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundles();
+        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
         let source_image_digest = signature_layer
             .simple_signing
             .critical
             .image
             .docker_manifest_digest
             .clone();
-        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
-        signature_layers.insert(signature_layer);
+        let signature_layers = vec![signature_layer];
 
         let mut annotations: HashMap<String, String> = HashMap::new();
         annotations.insert("env".into(), "prod".into());
 
         let mock_client = MockOciClient::default();
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
-
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let cosign_client = build_test_client(mock_client);
 
         let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             &source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
+            Some(&verification_key),
             &annotations,
         );
         assert!(actual.is_empty());
@@ -487,26 +539,19 @@ kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
     #[test]
     fn find_simple_signing_object_no_matches_when_simple_signing_digest_does_not_match_the_expected_one(
     ) {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundles();
+        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
         let source_image_digest = "this is a different value";
-        let mut signature_layers: HashSet<SignatureLayer> = HashSet::new();
-        signature_layers.insert(signature_layer);
+        let signature_layers = vec![signature_layer];
 
         let annotations: HashMap<String, String> = HashMap::new();
 
         let mock_client = MockOciClient::default();
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
-
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let cosign_client = build_test_client(mock_client);
 
         let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             &source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
+            Some(&verification_key),
             &annotations,
         );
         assert!(actual.is_empty());
@@ -515,7 +560,7 @@ kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
     #[test]
     fn find_simple_signing_object_no_matches_when_no_signature_layer_exists() {
         let source_image_digest = "something";
-        let signature_layers: HashSet<SignatureLayer> = HashSet::new();
+        let signature_layers: Vec<SignatureLayer> = Vec::new();
 
         let verification_key = crate::crypto::new_verification_key(
             r#"-----BEGIN PUBLIC KEY-----
@@ -528,18 +573,12 @@ kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
         let annotations: HashMap<String, String> = HashMap::new();
 
         let mock_client = MockOciClient::default();
-        let mut cosign_client = crate::cosign::Client {
-            registry_client: Box::new(mock_client),
-            rekor_pub_key: REKOR_PUB_KEY.to_string(),
-        };
-
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let cosign_client = build_test_client(mock_client);
 
         let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
             &signature_layers,
             &source_image_digest,
-            &verification_key,
-            &rekor_pub_key,
+            Some(&verification_key),
             &annotations,
         );
         assert!(actual.is_empty());

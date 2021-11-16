@@ -18,10 +18,9 @@ use sigstore::cosign::CosignCapabilities;
 use sigstore::simple_signing::SimpleSigning;
 
 extern crate anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
-use std::io::prelude::*;
-use std::{collections::HashMap, fs::File};
+use std::{collections::HashMap, fs};
 
 extern crate clap;
 use clap::{App, Arg};
@@ -39,14 +38,34 @@ fn cli() -> App<'static, 'static> {
                 .long("key")
                 .value_name("KEY")
                 .help("Verification Key")
-                .required(true)
+                .required(false)
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("rekor-pub-key")
                 .long("rekor-pub-key")
                 .value_name("KEY")
-                .help("File containing Rekor public key (e.g.: ~/.sigstore/root/targets/rekor.pub)")
+                .help("File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)")
+                .required(true)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("fulcio-crt")
+                .long("fulcio-crt")
+                .value_name("CERT")
+                .help(
+                    "File containing Fulcio's certificate (e.g.: ~/.sigstore/root/targets/fulcio.crt.pem)",
+                )
+                .required(true)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("cert-email")
+                .long("cert-email")
+                .value_name("EMAIL")
+                .help(
+                    "The email expected in a valid fulcio cert",
+                )
                 .required(true)
                 .takes_value(true),
         )
@@ -80,12 +99,16 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
 
     let auth = &sigstore::registry::Auth::Anonymous;
 
-    let mut rekor_pub_key_file = File::open(matches.value_of("rekor-pub-key").unwrap())?;
-    let mut rekor_pub_key = String::new();
-    rekor_pub_key_file.read_to_string(&mut rekor_pub_key)?;
+    let rekor_pub_key = fs::read_to_string(matches.value_of("rekor-pub-key").unwrap())
+        .map_err(|e| anyhow!("Error reading rekor public key: {:?}", e))?;
+
+    let fulcio_cert = fs::read(matches.value_of("fulcio-crt").unwrap())
+        .map_err(|e| anyhow!("Error reading fulcio certificate: {:?}", e))?;
 
     let mut client = sigstore::cosign::ClientBuilder::default()
         .with_rekor_pub_key(&rekor_pub_key)
+        .with_fulcio_cert(&fulcio_cert)
+        .with_cert_email(matches.value_of("cert-email"))
         .build()
         .unwrap();
 
@@ -93,9 +116,12 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
 
     let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
 
-    let mut pub_key_file = File::open(matches.value_of("key").unwrap())?;
-    let mut pub_key = String::new();
-    pub_key_file.read_to_string(&mut pub_key)?;
+    let pub_key = match matches.value_of("key") {
+        Some(path) => {
+            Some(fs::read_to_string(path).map_err(|e| anyhow!("Cannot read key: {:?}", e))?)
+        }
+        None => None,
+    };
 
     let annotations: Option<HashMap<String, String>>;
     annotations = match matches.values_of("annotations") {
