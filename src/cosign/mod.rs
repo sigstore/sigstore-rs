@@ -158,22 +158,12 @@ pub struct Client {
 /// In the meantime, end users of the library can fetch the key in a secure
 /// way by using `cosign init`.
 /// This will place the key under `~/.sigstore/root/targets/rekor.pub`.
+#[derive(Default)]
 pub struct ClientBuilder {
     client_config: ClientConfig,
     rekor_pub_key: Option<String>,
     fulcio_cert: Option<Vec<u8>>,
     cert_email: Option<String>,
-}
-
-impl Default for ClientBuilder {
-    fn default() -> Self {
-        ClientBuilder {
-            client_config: ClientConfig::default(),
-            rekor_pub_key: None,
-            fulcio_cert: None,
-            cert_email: None,
-        }
-    }
 }
 
 impl ClientBuilder {
