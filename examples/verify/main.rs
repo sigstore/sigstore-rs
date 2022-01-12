@@ -46,7 +46,7 @@ fn cli() -> App<'static, 'static> {
                 .long("rekor-pub-key")
                 .value_name("KEY")
                 .help("File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)")
-                .required(true)
+                .required(false)
                 .takes_value(true),
         )
         .arg(
@@ -56,7 +56,7 @@ fn cli() -> App<'static, 'static> {
                 .help(
                     "File containing Fulcio's certificate (e.g.: ~/.sigstore/root/targets/fulcio.crt.pem)",
                 )
-                .required(true)
+                .required(false)
                 .takes_value(true),
         )
         .arg(
@@ -66,7 +66,7 @@ fn cli() -> App<'static, 'static> {
                 .help(
                     "The email expected in a valid fulcio cert",
                 )
-                .required(true)
+                .required(false)
                 .takes_value(true),
         )
         .arg(
@@ -99,15 +99,26 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
 
     let auth = &sigstore::registry::Auth::Anonymous;
 
-    let rekor_pub_key = fs::read_to_string(matches.value_of("rekor-pub-key").unwrap())
-        .map_err(|e| anyhow!("Error reading rekor public key: {:?}", e))?;
+    let rekor_pub_key: Option<String> = matches.value_of("rekor-pub-key").map(|path| {
+        fs::read_to_string(path)
+            .map_err(|e| anyhow!("Error reading rekor public key: {:?}", e))
+            .unwrap()
+    });
 
-    let fulcio_cert = fs::read(matches.value_of("fulcio-crt").unwrap())
-        .map_err(|e| anyhow!("Error reading fulcio certificate: {:?}", e))?;
+    let fulcio_cert: Option<Vec<u8>> = matches.value_of("fulcio-crt").map(|path| {
+        fs::read(path)
+            .map_err(|e| anyhow!("Error reading fulcio certificate: {:?}", e))
+            .unwrap()
+    });
 
-    let mut client = sigstore::cosign::ClientBuilder::default()
-        .with_rekor_pub_key(&rekor_pub_key)
-        .with_fulcio_cert(&fulcio_cert)
+    let mut client_builder = sigstore::cosign::ClientBuilder::default();
+    if let Some(key) = rekor_pub_key {
+        client_builder = client_builder.with_rekor_pub_key(&key);
+    }
+    if let Some(cert) = fulcio_cert {
+        client_builder = client_builder.with_fulcio_cert(&cert);
+    }
+    let mut client = client_builder
         .with_cert_email(matches.value_of("cert-email"))
         .build()
         .unwrap();
