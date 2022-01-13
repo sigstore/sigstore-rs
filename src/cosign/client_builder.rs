@@ -39,7 +39,7 @@ use crate::registry::ClientConfig;
 /// > TUF repository like `cosign` does. This will be done in the near future.
 #[derive(Default)]
 pub struct ClientBuilder {
-    client_config: ClientConfig,
+    oci_client_config: ClientConfig,
     rekor_pub_key: Option<String>,
     fulcio_cert: Option<Vec<u8>>,
     cert_email: Option<String>,
@@ -72,8 +72,12 @@ impl ClientBuilder {
         self
     }
 
-    pub fn with_client_config(mut self, config: ClientConfig) -> Self {
-        self.client_config = config;
+    /// Optional - the configuration to be used by the OCI client.
+    ///
+    /// This can be used when dealing with registries that are not using
+    /// TLS termination, or are using self-signed certificates.
+    pub fn with_oci_client_config(mut self, config: ClientConfig) -> Self {
+        self.oci_client_config = config;
         self
     }
 
@@ -102,7 +106,8 @@ impl ClientBuilder {
 
         let cert_email = self.cert_email.clone();
 
-        let oci_client = oci_distribution::client::Client::new(self.client_config.clone().into());
+        let oci_client =
+            oci_distribution::client::Client::new(self.oci_client_config.clone().into());
         Ok(Client {
             registry_client: Box::new(crate::registry::OciClient {
                 registry_client: oci_client,
