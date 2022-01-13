@@ -99,17 +99,13 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
 
     let auth = &sigstore::registry::Auth::Anonymous;
 
-    let rekor_pub_key: Option<String> = matches.value_of("rekor-pub-key").map(|path| {
-        fs::read_to_string(path)
-            .map_err(|e| anyhow!("Error reading rekor public key: {:?}", e))
-            .unwrap()
-    });
+    let rekor_pub_key: Option<String> = matches
+        .value_of("rekor-pub-key")
+        .map(|path| fs::read_to_string(path).expect("Error reading rekor public key from disk"));
 
-    let fulcio_cert: Option<Vec<u8>> = matches.value_of("fulcio-crt").map(|path| {
-        fs::read(path)
-            .map_err(|e| anyhow!("Error reading fulcio certificate: {:?}", e))
-            .unwrap()
-    });
+    let fulcio_cert: Option<Vec<u8>> = matches
+        .value_of("fulcio-crt")
+        .map(|path| fs::read(path).expect("Error reading fulcio certificate from disk"));
 
     let mut client_builder = sigstore::cosign::ClientBuilder::default();
     if let Some(key) = rekor_pub_key {
@@ -121,7 +117,7 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
     let mut client = client_builder
         .with_cert_email(matches.value_of("cert-email"))
         .build()
-        .unwrap();
+        .expect("Error while building cosign client");
 
     let image: &str = matches.value_of("IMAGE").unwrap();
 

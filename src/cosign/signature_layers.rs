@@ -19,8 +19,9 @@ use std::{collections::HashMap, fmt};
 use tracing::{debug, info, warn};
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem, x509::SubjectPublicKeyInfo};
 
-use super::{
-    bundle::Bundle, SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_OCI_MEDIA_TYPE,
+use super::bundle::Bundle;
+use super::constants::{
+    SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_OCI_MEDIA_TYPE,
     SIGSTORE_SIGNATURE_ANNOTATION,
 };
 use crate::{
