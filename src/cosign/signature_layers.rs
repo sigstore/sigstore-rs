@@ -86,8 +86,8 @@ impl SignatureLayer {
     pub(crate) fn new(
         descriptor: &oci_distribution::manifest::OciDescriptor,
         layer: &oci_distribution::client::ImageLayer,
-        rekor_pub_key: &CosignVerificationKey,
-        fulcio_pub_key: &SubjectPublicKeyInfo,
+        rekor_pub_key: Option<&CosignVerificationKey>,
+        fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
         cert_email: Option<&String>,
     ) -> Result<SignatureLayer> {
         if descriptor.media_type != SIGSTORE_OCI_MEDIA_TYPE {
@@ -141,10 +141,16 @@ impl SignatureLayer {
 
     fn get_bundle_from_annotations(
         annotations: &HashMap<String, String>,
-        rekor_pub_key: &CosignVerificationKey,
+        rekor_pub_key: Option<&CosignVerificationKey>,
     ) -> Result<Option<Bundle>> {
         let bundle = match annotations.get(SIGSTORE_BUNDLE_ANNOTATION) {
-            Some(value) => Some(Bundle::new_verified(value, rekor_pub_key)?),
+            Some(value) => match rekor_pub_key {
+                Some(key) => Some(Bundle::new_verified(value, key)?),
+                None => {
+                    info!(bundle = ?value, "Ignoring bundle, rekor public key not provided to verification client");
+                    None
+                }
+            },
             None => None,
         };
         Ok(bundle)
@@ -152,17 +158,23 @@ impl SignatureLayer {
 
     fn get_certificate_from_annotations(
         annotations: &HashMap<String, String>,
-        fulcio_pub_key: &SubjectPublicKeyInfo,
+        fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
         bundle: Option<&Bundle>,
         cert_email: Option<&String>,
     ) -> Result<Option<CosignVerificationKey>> {
         let certificate_key = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
-            Some(value) => Some(verify_certificate_and_extract_public_key(
-                value.as_bytes(),
-                fulcio_pub_key,
-                cert_email,
-                bundle,
-            )?),
+            Some(value) => match fulcio_pub_key {
+                Some(key) => Some(verify_certificate_and_extract_public_key(
+                    value.as_bytes(),
+                    key,
+                    cert_email,
+                    bundle,
+                )?),
+                None => {
+                    info!(bundle = ?value, "Ignoring certificate signature, fulcio certificate not provided to verification client");
+                    None
+                }
+            },
             None => None,
         };
         Ok(certificate_key)
@@ -206,19 +218,20 @@ impl SignatureLayer {
     }
 }
 
-/// Creates a list of SignatureLayer objects by inspecting
+/// Creates a list of [`SignatureLayer`] objects by inspecting
 /// the given OCI manifest and its associated layers.
 ///
-/// **Note well:** the returned SignatureLayer have been
-/// verified using the given rekor and fulcio keys.
+/// **Note well:** when Rekor and Fulcio data has been provided, the
+/// returned `SignatureLayer` is guaranteed to be
+/// verified using the given Rekor and Fulcio keys.
 /// When a certificate email is given, this is used to ensure
-/// the bundled certificate issued by Fulcio have this identity
+/// the bundled certificate issued by Fulcio has this identity
 /// associated.
 pub(crate) fn build_signature_layers(
     manifest: &oci_distribution::manifest::OciManifest,
     layers: &[oci_distribution::client::ImageLayer],
-    rekor_pub_key: &CosignVerificationKey,
-    fulcio_pub_key: SubjectPublicKeyInfo,
+    rekor_pub_key: Option<&CosignVerificationKey>,
+    fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
     cert_email: Option<&String>,
 ) -> Vec<SignatureLayer> {
     let mut signature_layers: Vec<SignatureLayer> = Vec::new();
@@ -234,7 +247,7 @@ pub(crate) fn build_signature_layers(
                 manifest_layer,
                 layer,
                 rekor_pub_key,
-                &fulcio_pub_key,
+                fulcio_pub_key,
                 cert_email,
             ) {
                 Ok(sl) => signature_layers.push(sl),
@@ -408,8 +421,13 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual =
-            SignatureLayer::new(&descriptor, &layer, &rekor_pub_key, &fulcio_pub_key, None);
+        let actual = SignatureLayer::new(
+            &descriptor,
+            &layer,
+            Some(&rekor_pub_key),
+            Some(&fulcio_pub_key),
+            None,
+        );
         assert!(actual.is_err());
     }
 
@@ -430,8 +448,13 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual =
-            SignatureLayer::new(&descriptor, &layer, &rekor_pub_key, &fulcio_pub_key, None);
+        let actual = SignatureLayer::new(
+            &descriptor,
+            &layer,
+            Some(&rekor_pub_key),
+            Some(&fulcio_pub_key),
+            None,
+        );
         assert!(actual.is_err());
     }
 
@@ -453,8 +476,13 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual =
-            SignatureLayer::new(&descriptor, &layer, &rekor_pub_key, &fulcio_pub_key, None);
+        let actual = SignatureLayer::new(
+            &descriptor,
+            &layer,
+            Some(&rekor_pub_key),
+            Some(&fulcio_pub_key),
+            None,
+        );
         assert!(actual.is_err());
     }
 
@@ -486,7 +514,8 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let annotations: HashMap<String, String> = HashMap::new();
         let rekor_pub_key = get_rekor_public_key();
 
-        let actual = SignatureLayer::get_bundle_from_annotations(&annotations, &rekor_pub_key);
+        let actual =
+            SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_key));
         assert!(actual.is_ok());
         assert!(actual.unwrap().is_none());
     }
@@ -500,7 +529,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let actual = SignatureLayer::get_certificate_from_annotations(
             &annotations,
-            &fulcio_pub_key,
+            Some(&fulcio_pub_key),
             None,
             None,
         );
