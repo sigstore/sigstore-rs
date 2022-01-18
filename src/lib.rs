@@ -108,6 +108,15 @@
 //! }
 //! ```
 //!
+//! ## Fulcio and Rekor integration
+//!
+//! [`cosign::Client`](crate::cosign::Client) integration with Fulcio and Rekor
+//! requires the following data to work: Fulcio's certificate and Rekor's public key.
+//!
+//! These files are safely distributed by the Sigstore project via a TUF repository.
+//! The [`sigstore::tuf`](crate::tuf) module provides the helper structures to deal
+//! with it.
+//!
 //! # Examples
 //!
 //! Additional examples can be found inside of the [`examples`](https://github.com/sigstore/sigstore-rs/tree/main/examples/)
@@ -119,3 +128,4 @@ mod mock_client;
 pub mod cosign;
 pub mod registry;
 pub mod simple_signing;
+pub mod tuf;

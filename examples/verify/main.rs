@@ -16,16 +16,19 @@
 extern crate sigstore;
 use sigstore::cosign::CosignCapabilities;
 use sigstore::simple_signing::SimpleSigning;
+use sigstore::tuf::SigstoreRepository;
 
 extern crate anyhow;
 use anyhow::{anyhow, Result};
 
-use std::{collections::HashMap, fs};
-
 extern crate clap;
 use clap::{App, Arg};
 
+use std::{collections::HashMap, fs};
+use tokio::task::spawn_blocking;
+
 extern crate tracing_subscriber;
+use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -40,6 +43,13 @@ fn cli() -> App<'static, 'static> {
                 .help("Verification Key")
                 .required(false)
                 .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("use-sigstore-tuf-data")
+                .long("use-sigstore-tuf-data")
+                .help("Fetch Rekor and Fulcio data from Sigstore's TUF repository")
+                .required(false)
+                .takes_value(false),
         )
         .arg(
             Arg::with_name("rekor-pub-key")
@@ -97,27 +107,69 @@ fn cli() -> App<'static, 'static> {
 async fn run_app() -> Result<Vec<SimpleSigning>> {
     let matches = cli().get_matches();
 
+    // setup logging
+    let level_filter = if matches.is_present("verbose") {
+        "debug"
+    } else {
+        "info"
+    };
+    let filter_layer = EnvFilter::new(level_filter);
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .init();
+
     let auth = &sigstore::registry::Auth::Anonymous;
 
     let rekor_pub_key: Option<String> = matches
         .value_of("rekor-pub-key")
-        .map(|path| fs::read_to_string(path).expect("Error reading rekor public key from disk"));
+        .map(|path| {
+            fs::read_to_string(path)
+                .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))
+        })
+        .transpose()?;
 
     let fulcio_cert: Option<Vec<u8>> = matches
         .value_of("fulcio-crt")
-        .map(|path| fs::read(path).expect("Error reading fulcio certificate from disk"));
+        .map(|path| {
+            fs::read(path).map_err(|e| anyhow!("Error reading fulcio certificate from disk: {}", e))
+        })
+        .transpose()?;
+
+    let sigstore_repo: Option<SigstoreRepository> = if matches.is_present("use-sigstore-tuf-data") {
+        let repo: Result<SigstoreRepository> = spawn_blocking(|| {
+            info!("Downloading data from Sigstore TUF repository");
+            sigstore::tuf::SigstoreRepository::fetch(None)
+        })
+        .await
+        .map_err(|e| anyhow!("Error spawining blocking task inside of tokio: {}", e))?;
+
+        Some(repo?)
+    } else {
+        None
+    };
 
     let mut client_builder = sigstore::cosign::ClientBuilder::default();
+
+    if let Some(repo) = sigstore_repo {
+        client_builder = client_builder.with_rekor_pub_key(repo.rekor_pub_key());
+        client_builder = client_builder.with_fulcio_cert(repo.fulcio_cert());
+    }
+
+    // Set Rekor public key. Give higher precendece to the key specified by the user over the
+    // one that can be obtained from Sigstore's TUF repository
     if let Some(key) = rekor_pub_key {
         client_builder = client_builder.with_rekor_pub_key(&key);
     }
+    // Set Fulcio certificate. Give higher precendece to the certificate specified by the user over the
+    // one that can be obtained from Sigstore's TUF repository
     if let Some(cert) = fulcio_cert {
         client_builder = client_builder.with_fulcio_cert(&cert);
     }
+
     let mut client = client_builder
         .with_cert_email(matches.value_of("cert-email"))
-        .build()
-        .expect("Error while building cosign client");
+        .build()?;
 
     let image: &str = matches.value_of("IMAGE").unwrap();
 
@@ -148,18 +200,6 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
             }
         }
     };
-
-    // setup logging
-    let level_filter = if matches.is_present("verbose") {
-        "debug"
-    } else {
-        "info"
-    };
-    let filter_layer = EnvFilter::new(level_filter);
-    tracing_subscriber::registry()
-        .with(filter_layer)
-        .with(fmt::layer().with_writer(std::io::stderr))
-        .init();
 
     client
         .verify(
