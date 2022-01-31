@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 
 use crate::crypto::{verify_signature, CosignVerificationKey};
+use crate::errors::{Result, SigstoreError};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
@@ -33,25 +33,21 @@ impl Bundle {
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
     pub(crate) fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
-        let bundle: Bundle = serde_json::from_str(raw)
-            .map_err(|e| anyhow!("Cannot parse bundle |{}|: {:?}", raw, e))?;
+        let bundle: Bundle = serde_json::from_str(raw).map_err(|e| {
+            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
+        })?;
 
         let mut buf = Vec::new();
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
         bundle.payload.serialize(&mut ser).map_err(|e| {
-            anyhow!(
+            SigstoreError::UnexpectedError(format!(
                 "Cannot create canonical JSON representation of bundle: {:?}",
                 e
-            )
+            ))
         })?;
 
-        match verify_signature(rekor_pub_key, &bundle.signed_entry_timestamp, &buf) {
-            Ok(_) => Ok(bundle),
-            Err(e) => Err(anyhow!(
-                "Cannot verify bundle with the given rekor public key: {:?}",
-                e
-            )),
-        }
+        verify_signature(rekor_pub_key, &bundle.signed_entry_timestamp, &buf)?;
+        Ok(bundle)
     }
 }
 

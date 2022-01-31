@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
@@ -24,6 +23,7 @@ use super::{
     CosignCapabilities,
 };
 use crate::crypto::CosignVerificationKey;
+use crate::errors::{Result, SigstoreError};
 use crate::registry::Auth;
 use crate::simple_signing::SimpleSigning;
 
@@ -40,21 +40,17 @@ pub struct Client {
 #[async_trait]
 impl CosignCapabilities for Client {
     async fn triangulate(&mut self, image: &str, auth: &Auth) -> Result<(String, String)> {
-        let image_reference: oci_distribution::Reference = image
-            .parse()
-            .map_err(|e| anyhow!("Cannot parse image reference '{}': {:?}", image, e))?;
+        let image_reference: oci_distribution::Reference =
+            image
+                .parse()
+                .map_err(|_| SigstoreError::OciReferenceNotValidError {
+                    reference: image.to_string(),
+                })?;
 
         let manifest_digest = self
             .registry_client
             .fetch_manifest_digest(&image_reference, &auth.into())
-            .await
-            .map_err(|e| {
-                anyhow!(
-                    "Cannot fetch manifest digest for {:?}: {:?}",
-                    image_reference,
-                    e
-                )
-            })?;
+            .await?;
 
         let sign = format!(
             "{}/{}:{}.sig",
@@ -64,7 +60,9 @@ impl CosignCapabilities for Client {
         );
         let reference = sign
             .parse()
-            .map_err(|e| anyhow!("Cannot calculate signature object reference {:?}", e))?;
+            .map_err(|_| SigstoreError::OciReferenceNotValidError {
+                reference: image.to_string(),
+            })?;
 
         Ok((reference, manifest_digest))
     }
@@ -82,8 +80,7 @@ impl CosignCapabilities for Client {
         let fulcio_pub_key = match &self.fulcio_pub_key_der {
             None => None,
             Some(der) => {
-                let (_, key) = SubjectPublicKeyInfo::from_der(der)
-                    .map_err(|e| anyhow!("Cannot parse fulcio public key: {:?}", e))?;
+                let (_, key) = SubjectPublicKeyInfo::from_der(der)?;
                 Some(key)
             }
         };
@@ -121,22 +118,19 @@ impl Client {
         oci_distribution::manifest::OciManifest,
         Vec<oci_distribution::client::ImageLayer>,
     )> {
-        let cosign_image_reference: oci_distribution::Reference = cosign_image
-            .parse()
-            .map_err(|e| anyhow!("Cannot parse image reference '{}': {:?}", cosign_image, e))?;
+        let cosign_image_reference: oci_distribution::Reference =
+            cosign_image
+                .parse()
+                .map_err(|_| SigstoreError::OciReferenceNotValidError {
+                    reference: cosign_image.to_string(),
+                })?;
+
         let oci_auth: oci_distribution::secrets::RegistryAuth = auth.into();
 
         let (manifest, _) = self
             .registry_client
             .pull_manifest(&cosign_image_reference, &oci_auth)
-            .await
-            .map_err(|e| {
-                anyhow!(
-                    "Cannot pull manifest for image {:?}: {:?}",
-                    cosign_image_reference,
-                    e
-                )
-            })?;
+            .await?;
         let image_data = self
             .registry_client
             .pull(
@@ -144,14 +138,7 @@ impl Client {
                 &oci_auth,
                 vec![SIGSTORE_OCI_MEDIA_TYPE],
             )
-            .await
-            .map_err(|e| {
-                anyhow!(
-                    "Cannot pull data for image {:?}: {:?}",
-                    cosign_image_reference,
-                    e
-                )
-            })?;
+            .await?;
 
         Ok((manifest, image_data.layers))
     }

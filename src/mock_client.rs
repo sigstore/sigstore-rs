@@ -15,7 +15,8 @@
 
 #[cfg(test)]
 pub(crate) mod test {
-    use anyhow::{anyhow, Result};
+    use crate::errors::{Result, SigstoreError};
+
     use async_trait::async_trait;
     use oci_distribution::{
         client::ImageData, manifest::OciManifest, secrets::RegistryAuth, Reference,
@@ -23,59 +24,76 @@ pub(crate) mod test {
 
     #[derive(Default)]
     pub struct MockOciClient {
-        pub fetch_manifest_digest_response: Option<Result<String>>,
-        pub pull_response: Option<Result<ImageData>>,
-        pub pull_manifest_response: Option<Result<(OciManifest, String)>>,
+        pub fetch_manifest_digest_response: Option<anyhow::Result<String>>,
+        pub pull_response: Option<anyhow::Result<ImageData>>,
+        pub pull_manifest_response: Option<anyhow::Result<(OciManifest, String)>>,
     }
 
     #[async_trait]
     impl crate::registry::ClientCapabilities for MockOciClient {
         async fn fetch_manifest_digest(
             &mut self,
-            _image: &Reference,
+            image: &Reference,
             _auth: &RegistryAuth,
         ) -> Result<String> {
             let mock_response = self
                 .fetch_manifest_digest_response
                 .as_ref()
-                .ok_or_else(|| anyhow!("No fetch_manifest_digest_response provided!"))?;
+                .ok_or_else(|| SigstoreError::RegistryFetchManifestError {
+                    image: image.whole(),
+                    error: String::from("No fetch_manifest_digest_response provided!"),
+                })?;
 
             match mock_response {
                 Ok(r) => Ok(r.clone()),
-                Err(e) => Err(anyhow!("{:?}", e)),
+                Err(e) => Err(SigstoreError::RegistryFetchManifestError {
+                    image: image.whole(),
+                    error: e.to_string(),
+                }),
             }
         }
 
         async fn pull(
             &mut self,
-            _image: &Reference,
+            image: &Reference,
             _auth: &RegistryAuth,
             _accepted_media_types: Vec<&str>,
         ) -> Result<ImageData> {
-            let mock_response = self
-                .pull_response
-                .as_ref()
-                .ok_or_else(|| anyhow!("No pull_response provided!"))?;
+            let mock_response =
+                self.pull_response
+                    .as_ref()
+                    .ok_or_else(|| SigstoreError::RegistryPullError {
+                        image: image.whole(),
+                        error: String::from("No pull_response provided!"),
+                    })?;
 
             match mock_response {
                 Ok(r) => Ok(r.clone()),
-                Err(e) => Err(anyhow!("{:?}", e)),
+                Err(e) => Err(SigstoreError::RegistryPullError {
+                    image: image.whole(),
+                    error: e.to_string(),
+                }),
             }
         }
 
         async fn pull_manifest(
             &mut self,
-            _image: &Reference,
+            image: &Reference,
             _auth: &RegistryAuth,
         ) -> Result<(OciManifest, String)> {
-            let mock_response = self
-                .pull_manifest_response
-                .as_ref()
-                .ok_or_else(|| anyhow!("No pull_manifest_response provided!"))?;
+            let mock_response = self.pull_manifest_response.as_ref().ok_or_else(|| {
+                SigstoreError::RegistryPullError {
+                    image: image.whole(),
+                    error: String::from("No pull_manifest_response provided!"),
+                }
+            })?;
 
             match mock_response {
                 Ok(r) => Ok(r.clone()),
-                Err(e) => Err(anyhow!("{:?}", e)),
+                Err(e) => Err(SigstoreError::RegistryPullError {
+                    image: image.whole(),
+                    error: e.to_string(),
+                }),
             }
         }
     }

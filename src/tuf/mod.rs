@@ -47,7 +47,6 @@
 //! special handling when invoked inside of an async context. Please refer to the
 //! [method docs](SigstoreRepository::fetch) for more details.
 //!
-use anyhow::{anyhow, Result};
 use std::path::Path;
 
 mod constants;
@@ -55,6 +54,8 @@ use constants::*;
 
 mod repository_helper;
 use repository_helper::RepositoryHelper;
+
+use super::errors::{Result, SigstoreError};
 
 /// Securely fetches Rekor public key and Fulcio certificate from Sigstore's TUF repository
 pub struct SigstoreRepository {
@@ -107,7 +108,7 @@ impl SigstoreRepository {
     /// async fn my_async_function() {
     ///    // ... your code
     ///
-    ///    let repo: anyhow::Result<SigstoreRepository> = spawn_blocking(||
+    ///    let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(||
     ///      sigstore::tuf::SigstoreRepository::fetch(None)
     ///    )
     ///    .await
@@ -120,8 +121,12 @@ impl SigstoreRepository {
     ///
     /// This of course has a performance hit when used inside of an async function.
     pub fn fetch(checkout_dir: Option<&Path>) -> Result<Self> {
-        let metadata_base = url::Url::parse(SIGSTORE_METADATA_BASE)?;
-        let target_base = url::Url::parse(SIGSTORE_TARGET_BASE)?;
+        let metadata_base = url::Url::parse(SIGSTORE_METADATA_BASE).map_err(|_| {
+            SigstoreError::UnexpectedError(String::from("Cannot convert metadata_base to URL"))
+        })?;
+        let target_base = url::Url::parse(SIGSTORE_TARGET_BASE).map_err(|_| {
+            SigstoreError::UnexpectedError(String::from("Cannot convert target_base to URL"))
+        })?;
 
         let repository_helper = RepositoryHelper::new(
             SIGSTORE_ROOT.as_bytes(),
@@ -134,10 +139,10 @@ impl SigstoreRepository {
 
         let rekor_pub_key = repository_helper.rekor_pub_key().map(|data| {
             String::from_utf8(data).map_err(|e| {
-                anyhow!(
+                SigstoreError::UnexpectedError(format!(
                     "Cannot parse Rekor's public key obtained from TUF repository: {}",
                     e
-                )
+                ))
             })
         })??;
 

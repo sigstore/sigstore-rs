@@ -15,7 +15,8 @@
 
 //! Set of structs and enums used to define how to interact with OCI registries
 
-use anyhow::Result;
+use crate::errors::{Result, SigstoreError};
+
 use async_trait::async_trait;
 use std::convert::From;
 
@@ -192,6 +193,10 @@ impl ClientCapabilities for OciClient {
         self.registry_client
             .fetch_manifest_digest(image, auth)
             .await
+            .map_err(|e| SigstoreError::RegistryFetchManifestError {
+                image: image.whole(),
+                error: e.to_string(),
+            })
     }
 
     async fn pull(
@@ -203,6 +208,10 @@ impl ClientCapabilities for OciClient {
         self.registry_client
             .pull(image, auth, accepted_media_types)
             .await
+            .map_err(|e| SigstoreError::RegistryPullError {
+                image: image.whole(),
+                error: e.to_string(),
+            })
     }
 
     async fn pull_manifest(
@@ -210,6 +219,12 @@ impl ClientCapabilities for OciClient {
         image: &oci_distribution::Reference,
         auth: &oci_distribution::secrets::RegistryAuth,
     ) -> Result<(oci_distribution::manifest::OciManifest, String)> {
-        self.registry_client.pull_manifest(image, auth).await
+        self.registry_client
+            .pull_manifest(image, auth)
+            .await
+            .map_err(|e| SigstoreError::RegistryPullManifestError {
+                image: image.whole(),
+                error: e.to_string(),
+            })
     }
 }
