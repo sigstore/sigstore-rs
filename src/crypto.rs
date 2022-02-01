@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use ecdsa::signature::Verifier;
 use ecdsa::{Signature, VerifyingKey};
 use p256::pkcs8::FromPublicKey;
@@ -23,13 +22,18 @@ use x509_parser::{
     x509::SubjectPublicKeyInfo,
 };
 
+use crate::errors::{Result, SigstoreError};
+
 pub(crate) type CosignVerificationKey = VerifyingKey<p256::NistP256>;
 
 /// Create a new Cosign Verification Key starting from the contents of
 /// a cosign public key.
 pub(crate) fn new_verification_key(contents: &str) -> Result<CosignVerificationKey> {
-    VerifyingKey::<p256::NistP256>::from_public_key_pem(contents)
-        .map_err(|e| anyhow!("Cannot load key: {:?}", e))
+    VerifyingKey::<p256::NistP256>::from_public_key_pem(contents).map_err(|e| {
+        SigstoreError::InvalidKeyFormat {
+            error: e.to_string(),
+        }
+    })
 }
 
 /// Create a new Cosign Verification Key starting from ASN.1 DER-encoded
@@ -37,18 +41,19 @@ pub(crate) fn new_verification_key(contents: &str) -> Result<CosignVerificationK
 pub(crate) fn new_verification_key_from_public_key_der(
     bytes: &[u8],
 ) -> Result<CosignVerificationKey> {
-    VerifyingKey::<p256::NistP256>::from_public_key_der(bytes)
-        .map_err(|e| anyhow!("Cannot load key: {:?}", e))
+    VerifyingKey::<p256::NistP256>::from_public_key_der(bytes).map_err(|e| {
+        SigstoreError::InvalidKeyFormat {
+            error: e.to_string(),
+        }
+    })
 }
 
 /// Extract the public key stored inside of the given PEM-encoded certificate
 ///
 /// Returns the DER key as a list of bytes
 pub(crate) fn extract_public_key_from_pem_cert(cert: &[u8]) -> Result<Vec<u8>> {
-    let (_, pem) = parse_x509_pem(cert)
-        .map_err(|e| anyhow!("Error parsing fulcio PEM certificate: {:?}", e))?;
-    let (_, res_x509) = parse_x509_certificate(&pem.contents)
-        .map_err(|e| anyhow!("Error parsing fulcio certificate: {:?}", e))?;
+    let (_, pem) = parse_x509_pem(cert)?;
+    let (_, res_x509) = parse_x509_certificate(&pem.contents)?;
 
     Ok(res_x509.public_key().raw.to_owned())
 }
@@ -62,9 +67,8 @@ pub(crate) fn verify_signature(
 ) -> Result<()> {
     let signature_raw = base64::decode(signature_str)?;
     let signature = Signature::<p256::NistP256>::from_der(&signature_raw)?;
-    verification_key
-        .verify(msg, &signature)
-        .map_err(|e| anyhow!("Verification failed: {:?}", e))
+    verification_key.verify(msg, &signature)?;
+    Ok(())
 }
 
 /// Ensure the given certificate can be trusted for verifying cosign
@@ -93,35 +97,25 @@ fn verify_issuer(
     certificate: &X509Certificate,
     ca_issuer_public_key: &SubjectPublicKeyInfo,
 ) -> Result<()> {
-    certificate
-        .verify_signature(Some(ca_issuer_public_key))
-        .map_err(|e| {
-            anyhow!(
-                "Cannot verify bundled certificate using Fulcio's CA: {:?}",
-                e
-            )
-        })
+    certificate.verify_signature(Some(ca_issuer_public_key))?;
+    Ok(())
 }
 
 fn verify_certificate_key_usages(certificate: &X509Certificate) -> Result<()> {
-    let no_digital_signature_key_usage_error_msg =
-        "Bundled certificate does not have digital signature key usage";
     let (_critical, key_usage) = certificate
         .tbs_certificate
         .key_usage()
-        .ok_or_else(|| anyhow!(no_digital_signature_key_usage_error_msg))?;
+        .ok_or(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?;
     if !key_usage.digital_signature() {
-        return Err(anyhow!(no_digital_signature_key_usage_error_msg));
+        return Err(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage);
     }
 
-    let no_code_signing_extended_key_usage_error_msg =
-        "Bundled certificate does not have code signing extended key usage";
     let (_critical, ext_key_usage) = certificate
         .tbs_certificate
         .extended_key_usage()
-        .ok_or_else(|| anyhow!(no_code_signing_extended_key_usage_error_msg))?;
+        .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
     if !ext_key_usage.code_signing {
-        return Err(anyhow!(no_code_signing_extended_key_usage_error_msg));
+        return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
 
     Ok(())
@@ -139,11 +133,7 @@ fn verify_certificate_subject_email(
     let (_critical, subject_alternative_name) = certificate
         .tbs_certificate
         .subject_alternative_name()
-        .ok_or_else(|| {
-            anyhow!(
-                "Certificate doesn't have Subject Alternative Name, cannot verify email constraint"
-            )
-        })?;
+        .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
 
     let mut mail_found = false;
     for general_name in &subject_alternative_name.general_names {
@@ -158,10 +148,7 @@ fn verify_certificate_subject_email(
     if mail_found {
         Ok(())
     } else {
-        Err(anyhow!(
-            "Certificate has not been issued for the {} email",
-            email
-        ))
+        Err(SigstoreError::CertificateInvalidEmail(email.to_string()))
     }
 }
 
@@ -173,9 +160,8 @@ fn verify_certificate_validity(certificate: &X509Certificate) -> Result<()> {
     let validity = certificate.validity();
     let now = ASN1Time::now();
     if now < validity.not_before {
-        Err(anyhow!(
-            "Certificate is invalid, validity check failed: cannot be used before {:?}",
-            validity.not_before.to_rfc2822()
+        Err(SigstoreError::CertificateValidityError(
+            validity.not_before.to_rfc2822(),
         ))
     } else {
         Ok(())
@@ -190,19 +176,21 @@ fn verify_certificate_expiration(
     let validity = certificate.validity();
 
     if it < validity.not_before {
-        return Err(anyhow!(
-            "Certificate expired before signatures were entered in log: {} is before {}",
-            it.to_rfc2822(),
-            validity.not_before.to_rfc2822()
-        ));
+        return Err(
+            SigstoreError::CertificateExpiredBeforeSignaturesSubmittedToRekor {
+                integrated_time: it.to_rfc2822(),
+                not_before: validity.not_before.to_rfc2822(),
+            },
+        );
     }
 
     if it > validity.not_after {
-        return Err(anyhow!(
-            "Certificate was issued after signatures were entered in log: {} is after {}",
-            it.to_rfc2822(),
-            validity.not_after.to_rfc2822()
-        ));
+        return Err(
+            SigstoreError::CertificateIssuedAfterSignaturesSubmittedToRekor {
+                integrated_time: it.to_rfc2822(),
+                not_after: validity.not_after.to_rfc2822(),
+            },
+        );
     }
 
     Ok(())
@@ -262,21 +250,18 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     fn generate_certificate(
         issuer: Option<&CertData>,
         settings: CertGenerationOptions,
-    ) -> Result<CertData> {
+    ) -> anyhow::Result<CertData> {
         // Sigstore relies on NIST P-256
         // NIST P-256 is a Weierstrass curve specified in FIPS 186-4: Digital Signature Standard (DSS):
         // https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf
         // Also known as prime256v1 (ANSI X9.62) and secp256r1 (SECG)
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
-            .map_err(|e| anyhow!("Cannot create EcGroup: {:?}", e))?;
-        let private_key =
-            EcKey::generate(&group).map_err(|e| anyhow!("Cannot create private key: {:?}", e))?;
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("Cannot create EcGroup");
+        let private_key = EcKey::generate(&group).expect("Cannot create private key");
         let public_key = private_key.public_key();
 
-        let ec_pub_key = EcKey::from_public_key(&group, &public_key)
-            .map_err(|e| anyhow!("Cannot create ec pub key: {:?}", e))?;
-        let pkey = pkey::PKey::from_ec_key(ec_pub_key)
-            .map_err(|e| anyhow!("Cannot create pkey: {:?}", e))?;
+        let ec_pub_key =
+            EcKey::from_public_key(&group, &public_key).expect("Cannot create ec pub key");
+        let pkey = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
 
         let mut x509_name_builder = X509NameBuilder::new()?;
         x509_name_builder.append_entry_by_text("O", "tests")?;
@@ -287,10 +272,10 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         x509_builder.set_subject_name(&x509_name)?;
         x509_builder
             .set_pubkey(&pkey)
-            .map_err(|e| anyhow!("Cannot set public key: {:?}", e))?;
+            .expect("Cannot set public key");
 
         // set serial number
-        let mut big = BigNum::new()?;
+        let mut big = BigNum::new().expect("Cannot create BigNum");
         big.rand(152, MsbOption::MAYBE_ZERO, true)?;
         let serial_number = Asn1Integer::from_bn(&big)?;
         x509_builder.set_serial_number(&serial_number)?;
@@ -383,11 +368,10 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             Some(issuer_data) => issuer_data.private_key.clone(),
             None => private_key.clone(),
         };
-        let issuer_pkey = pkey::PKey::from_ec_key(issuer_key)
-            .map_err(|e| anyhow!("Cannot create signer pkey: {:?}", e))?;
+        let issuer_pkey = pkey::PKey::from_ec_key(issuer_key).expect("Cannot create signer pkey");
         x509_builder
             .sign(&issuer_pkey, MessageDigest::sha256())
-            .map_err(|e| anyhow!("Cannot sign certificate: {:?}", e))?;
+            .expect("Cannot sign certificate");
 
         let x509 = x509_builder.build();
 
@@ -398,18 +382,15 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_issuer_success() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_issuer_success() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let ca_public_key_der = ca_data.private_key.public_key_to_der()?;
         let (_, spki) = SubjectPublicKeyInfo::from_der(&ca_public_key_der)?;
 
-        let issued_cert =
-            generate_certificate(Some(&ca_data), CertGenerationOptions::default()).unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
         assert!(verify_issuer(&cert, &spki).is_ok());
 
@@ -417,37 +398,36 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_issuer_failure() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_issuer_failure() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let issued_cert =
-            generate_certificate(Some(&ca_data), CertGenerationOptions::default()).unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        let another_ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+        let another_ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let wrong_ca_public_key_der = another_ca_data.private_key.public_key_to_der()?;
         let (_, spki) = SubjectPublicKeyInfo::from_der(&wrong_ca_public_key_der)?;
 
-        assert!(verify_issuer(&cert, &spki).is_err());
+        let err = verify_issuer(&cert, &spki).expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::X509Error(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
 
     #[test]
-    fn verify_cert_key_usages_success() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_key_usages_success() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let issued_cert =
-            generate_certificate(Some(&ca_data), CertGenerationOptions::default()).unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
         assert!(verify_certificate_key_usages(&cert).is_ok());
 
@@ -455,8 +435,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_key_usages_failure_because_no_digital_signature() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_key_usages_failure_because_no_digital_signature() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let issued_cert = generate_certificate(
             Some(&ca_data),
@@ -464,22 +444,25 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 digital_signature_key_usage: false,
                 ..Default::default()
             },
-        )
-        .unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        )?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        assert!(verify_certificate_key_usages(&cert).is_err());
+        let err =
+            verify_certificate_key_usages(&cert).expect_err("Was supposed to return an error");
+        let found = match err {
+            SigstoreError::CertificateWithoutDigitalSignatureKeyUsage => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
 
     #[test]
-    fn verify_cert_key_usages_failure_because_no_code_signing() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_key_usages_failure_because_no_code_signing() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let issued_cert = generate_certificate(
             Some(&ca_data),
@@ -487,22 +470,25 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 code_signing_extended_key_usage: false,
                 ..Default::default()
             },
-        )
-        .unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        )?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        assert!(verify_certificate_key_usages(&cert).is_err());
+        let err =
+            verify_certificate_key_usages(&cert).expect_err("Was supposed to return an error");
+        let found = match err {
+            SigstoreError::CertificateWithoutCodeSigningKeyUsage => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
 
     #[test]
-    fn verify_cert_key_subject_email() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_key_subject_email() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let expected_mail = String::from("test@sigstore.test");
         let issued_cert = generate_certificate(
@@ -511,35 +497,33 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 subject_email: expected_mail.clone(),
                 ..Default::default()
             },
-        )
-        .unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        )?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
         assert!(verify_certificate_subject_email(&cert, None).is_ok());
         assert!(verify_certificate_subject_email(&cert, Some(&expected_mail)).is_ok());
-        assert!(
-            verify_certificate_subject_email(&cert, Some(&String::from("not@exected.com")))
-                .is_err()
-        );
+
+        let err = verify_certificate_subject_email(&cert, Some(&String::from("not@exected.com")))
+            .expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::CertificateInvalidEmail(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
 
     #[test]
-    fn verify_cert_validity_success() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_validity_success() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let issued_cert =
-            generate_certificate(Some(&ca_data), CertGenerationOptions::default()).unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
         assert!(verify_certificate_validity(&cert).is_ok());
 
@@ -547,8 +531,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_validity_failure() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_validity_failure() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let issued_cert = generate_certificate(
             Some(&ca_data),
@@ -557,22 +541,24 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 not_after: Utc::now().checked_add_signed(Duration::days(6)).unwrap(),
                 ..Default::default()
             },
-        )
-        .unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        )?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        assert!(verify_certificate_validity(&cert).is_err());
+        let err = verify_certificate_validity(&cert).expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::CertificateValidityError(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
 
     #[test]
-    fn verify_cert_expiration_success() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_expiration_success() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let integrated_time = Utc::now();
 
@@ -583,13 +569,10 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
                 ..Default::default()
             },
-        )
-        .unwrap();
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        )?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
         assert!(verify_certificate_expiration(&cert, integrated_time.timestamp(),).is_ok());
 
@@ -597,8 +580,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_expiration_failure() -> Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default()).unwrap();
+    fn verify_cert_expiration_failure() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let integrated_time = Utc::now().checked_add_signed(Duration::days(5)).unwrap();
 
@@ -609,15 +592,21 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)
-            .map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
-            .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        assert!(verify_certificate_expiration(&cert, integrated_time.timestamp(),).is_err());
+        let err = verify_certificate_expiration(&cert, integrated_time.timestamp())
+            .expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::CertificateIssuedAfterSignaturesSubmittedToRekor {
+                integrated_time: _,
+                not_after: _,
+            } => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
     }
@@ -638,8 +627,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
         let msg = "hello world";
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
-        assert!(outcome.is_err());
+        let err = verify_signature(&verification_key, &signature, &msg.as_bytes())
+            .expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::EcdsaError(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
     #[test]
@@ -648,8 +642,13 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         let verification_key = new_verification_key(PUBLIC_KEY).unwrap();
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
-        assert!(outcome.is_err());
+        let err = verify_signature(&verification_key, &signature, &msg.as_bytes())
+            .expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::Base64DecodeError(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
     #[test]
@@ -665,7 +664,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         .unwrap();
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verify_signature(&verification_key, &signature, &msg.as_bytes());
-        assert!(outcome.is_err());
+        let err = verify_signature(&verification_key, &signature, &msg.as_bytes())
+            .expect_err("Was expecting an error");
+        let found = match err {
+            SigstoreError::EcdsaError(_) => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 }

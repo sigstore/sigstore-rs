@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -21,7 +20,10 @@ use std::path::{Path, PathBuf};
 use tough::{RepositoryLoader, TargetName};
 use url::Url;
 
-use super::constants::{SIGSTORE_FULCIO_CERT_TARGET, SIGSTORE_REKOR_PUB_KEY_TARGET};
+use super::{
+    super::errors::{Result, SigstoreError},
+    constants::{SIGSTORE_FULCIO_CERT_TARGET, SIGSTORE_REKOR_PUB_KEY_TARGET},
+};
 
 pub(crate) struct RepositoryHelper {
     repository: tough::Repository,
@@ -40,8 +42,7 @@ impl RepositoryHelper {
     {
         let repository = RepositoryLoader::new(root, metadata_base, target_base)
             .expiration_enforcement(tough::ExpirationEnforcement::Safe)
-            .load()
-            .map_err(|e| anyhow!("Cannot load Sigstore TUF repository: {}", e))?;
+            .load()?;
 
         Ok(Self {
             repository,
@@ -117,9 +118,7 @@ fn fetch_target_or_reuse_local_cache(
         let data = fetch_target(repository, target_name)?;
         if let Some(path) = local_file {
             // update the local file to have latest data from the TUF repo
-            fs::write(path, data.clone()).map_err(|e| {
-                anyhow!("Error updating local copy of {}: {}", target_name.raw(), e)
-            })?;
+            fs::write(path, data.clone())?;
         }
         data
     } else {
@@ -135,20 +134,15 @@ fn fetch_target_or_reuse_local_cache(
 /// Download a file from a TUF repository
 fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
     let data: Vec<u8>;
-    match repository.read_target(target_name) {
-        Err(e) => return Err(anyhow!("Cannot fetch target {}: {}", target_name.raw(), e)),
-        Ok(None) => {
-            return Err(anyhow!(
-                "target {} cannot be found inside of Sigstore TUF repository",
-                target_name.raw()
-            ))
-        }
-        Ok(Some(reader)) => {
+    match repository.read_target(target_name)? {
+        None => Err(SigstoreError::TufTargetNotFoundError(
+            target_name.raw().to_string(),
+        )),
+        Some(reader) => {
             data = read_to_end(reader)?;
+            Ok(data)
         }
-    };
-
-    Ok(data)
+    }
 }
 
 /// Compares the checksum of a local file, with the digest reported inside of
@@ -163,12 +157,7 @@ fn is_local_file_outdated(
         .signed
         .targets
         .get(target_name)
-        .ok_or_else(|| {
-            anyhow!(
-                "Cannot find {} target inside of TUF repository",
-                target_name.raw()
-            )
-        })?;
+        .ok_or_else(|| SigstoreError::TufTargetNotFoundError(target_name.raw().to_string()))?;
 
     if local_file.exists() {
         let data = fs::read_to_string(local_file)?;
@@ -215,23 +204,35 @@ mod tests {
             "file://{}",
             metadata_base_path
                 .to_str()
-                .ok_or_else(|| anyhow!("Cannot convert metadata_base_path into a str"))?
+                .ok_or_else(|| SigstoreError::UnexpectedError(String::from(
+                    "Cannot convert metadata_base_path into a str"
+                )))?
         );
-        let metadata_base_url = url::Url::parse(&metadata_base_url)?;
+        let metadata_base_url = url::Url::parse(&metadata_base_url).map_err(|_| {
+            SigstoreError::UnexpectedError(String::from(
+                "Cannot convert metadata_base_url into a URL",
+            ))
+        })?;
 
         let target_base_url = format!(
             "file://{}",
             targets_base_path
                 .to_str()
-                .ok_or_else(|| anyhow!("Cannot convert targets_base_path into a str"))?
+                .ok_or_else(|| SigstoreError::UnexpectedError(String::from(
+                    "Cannot convert targets_base_path into a str"
+                )))?
         );
-        let target_base_url = url::Url::parse(&target_base_url)?;
-
+        let target_base_url = url::Url::parse(&target_base_url).map_err(|_| {
+            SigstoreError::UnexpectedError(String::from(
+                "Cannot convert targets_base_url into a URL",
+            ))
+        })?;
         // It's fine to ignore timestamp.json expiration inside of test env
-        RepositoryLoader::new(SIGSTORE_ROOT.as_bytes(), metadata_base_url, target_base_url)
-            .expiration_enforcement(tough::ExpirationEnforcement::Unsafe)
-            .load()
-            .map_err(|e| anyhow!("Cannot create repository: {}", e))
+        let repo =
+            RepositoryLoader::new(SIGSTORE_ROOT.as_bytes(), metadata_base_url, target_base_url)
+                .expiration_enforcement(tough::ExpirationEnforcement::Unsafe)
+                .load()?;
+        Ok(repo)
     }
 
     #[test]

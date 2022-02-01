@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use oci_distribution::client::ImageLayer;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, info, warn};
@@ -26,6 +25,7 @@ use super::constants::{
 };
 use crate::{
     crypto::{verify_certificate_can_be_trusted, CosignVerificationKey},
+    errors::{Result, SigstoreError},
     simple_signing::SimpleSigning,
 };
 
@@ -92,23 +92,23 @@ impl SignatureLayer {
         cert_email: Option<&String>,
     ) -> Result<SignatureLayer> {
         if descriptor.media_type != SIGSTORE_OCI_MEDIA_TYPE {
-            return Err(anyhow!("layer doesn't have Sigstore media type"));
+            return Err(SigstoreError::SigstoreMediaTypeNotFoundError);
         }
 
         if layer.media_type != SIGSTORE_OCI_MEDIA_TYPE {
-            return Err(anyhow!("layer data doesn't have Sigstore media type"));
+            return Err(SigstoreError::SigstoreMediaTypeNotFoundError);
         }
 
         let layer_digest = layer.clone().sha256_digest();
         if descriptor.digest != layer_digest {
-            return Err(anyhow!("layer digest is different from the layer data one"));
+            return Err(SigstoreError::SigstoreLayerDigestMismatchError);
         }
 
         let simple_signing: SimpleSigning = serde_json::from_slice(&layer.data).map_err(|e| {
-            anyhow!(
+            SigstoreError::UnexpectedError(format!(
                 "Cannot convert layer data into SimpleSigning object: {:?}",
                 e
-            )
+            ))
         })?;
 
         let annotations = descriptor.annotations.clone().unwrap_or_default();
@@ -136,7 +136,7 @@ impl SignatureLayer {
         let signature: String = annotations
             .get(SIGSTORE_SIGNATURE_ANNOTATION)
             .cloned()
-            .ok_or_else(|| anyhow!("Missing signature annotation"))?;
+            .ok_or(SigstoreError::SigstoreAnnotationNotFoundError)?;
         Ok(signature)
     }
 
@@ -271,19 +271,14 @@ fn verify_certificate_and_extract_public_key(
     trusted_bundle: Option<&Bundle>,
 ) -> Result<CosignVerificationKey> {
     if trusted_bundle.is_none() {
-        return Err(anyhow!(
-            "Cannot verify attached certificate because rekor bundle is missing"
-        ));
+        return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
     }
-    let (_, pem) =
-        parse_x509_pem(cert_raw).map_err(|e| anyhow!("Error parsing PEM certificate: {:?}", e))?;
-    let (_, cert) = parse_x509_certificate(&pem.contents)
-        .map_err(|e| anyhow!("Error parsing bundled certificate: {:?}", e))?;
+    let (_, pem) = parse_x509_pem(cert_raw)?;
+    let (_, cert) = parse_x509_certificate(&pem.contents)?;
     let integrated_time = trusted_bundle.unwrap().payload.integrated_time;
     verify_certificate_can_be_trusted(&cert, fulcio_pub_key, integrated_time, cert_email)?;
 
-    let key = crate::crypto::new_verification_key_from_public_key_der(cert.public_key().raw)
-        .map_err(|e| anyhow!("Cannot parse key from bundled certificate: {:?}", e))?;
+    let key = crate::crypto::new_verification_key_from_public_key_der(cert.public_key().raw)?;
     Ok(key)
 }
 
@@ -550,14 +545,14 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let actual = verify_certificate_and_extract_public_key(&cert, &fulcio_pub_key, None, None);
 
-        if let Err(e) = actual {
-            assert_eq!(
-                e.to_string(),
-                "Cannot verify attached certificate because rekor bundle is missing".to_string()
-            );
-        } else {
-            panic!("Didn't get an error as expected");
-        }
+        let found = match actual.expect_err("It was supposed to fail") {
+            SigstoreError::SigstoreRekorBundleNotFoundError => true,
+            _ => false,
+        };
+        assert!(
+            found,
+            "Was supposed to get SigstoreRekorBundleNotFoundError"
+        );
     }
 
     #[test]

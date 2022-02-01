@@ -19,7 +19,7 @@ use sigstore::simple_signing::SimpleSigning;
 use sigstore::tuf::SigstoreRepository;
 
 extern crate anyhow;
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 
 extern crate clap;
 use clap::{App, Arg};
@@ -104,7 +104,7 @@ fn cli() -> App<'static, 'static> {
         )
 }
 
-async fn run_app() -> Result<Vec<SimpleSigning>> {
+async fn run_app() -> anyhow::Result<Vec<SimpleSigning>> {
     let matches = cli().get_matches();
 
     // setup logging
@@ -137,7 +137,7 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
         .transpose()?;
 
     let sigstore_repo: Option<SigstoreRepository> = if matches.is_present("use-sigstore-tuf-data") {
-        let repo: Result<SigstoreRepository> = spawn_blocking(|| {
+        let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
             info!("Downloading data from Sigstore TUF repository");
             sigstore::tuf::SigstoreRepository::fetch(None)
         })
@@ -201,7 +201,7 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
         }
     };
 
-    client
+    let matches = client
         .verify(
             auth,
             &source_image_digest,
@@ -209,12 +209,14 @@ async fn run_app() -> Result<Vec<SimpleSigning>> {
             &pub_key,
             annotations,
         )
-        .await
+        .await?;
+
+    Ok(matches)
 }
 
 #[tokio::main]
 pub async fn main() {
-    let satistied_simple_signatures: Result<Vec<SimpleSigning>> = run_app().await;
+    let satistied_simple_signatures: anyhow::Result<Vec<SimpleSigning>> = run_app().await;
 
     std::process::exit(match satistied_simple_signatures {
         Ok(signatures) => {

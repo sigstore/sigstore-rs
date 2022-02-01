@@ -48,10 +48,10 @@
 //! In case you want to mock sigstore interactions inside of your own code, you
 //! can implement the [`CosignCapabilities`] trait inside of your test suite.
 
-use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
+use crate::errors::Result;
 use crate::registry::Auth;
 use crate::simple_signing::SimpleSigning;
 
