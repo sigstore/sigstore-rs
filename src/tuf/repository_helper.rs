@@ -187,7 +187,7 @@ mod tests {
     use super::super::constants::*;
     use super::*;
     use std::path::PathBuf;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
 
     /// Returns the path to our test data directory
     fn test_data() -> PathBuf {
@@ -274,8 +274,7 @@ mod tests {
 
     #[test]
     fn download_files_to_local_cache() {
-        let cache_dir =
-            TempDir::new("sigstore-test-tuf-cache").expect("Cannot create temp cache dir");
+        let cache_dir = TempDir::new().expect("Cannot create temp cache dir");
 
         let repository = local_tuf_repo().expect("Local TUF repo should not fail");
         let helper = RepositoryHelper {
@@ -304,8 +303,7 @@ mod tests {
 
     #[test]
     fn update_local_cache() {
-        let cache_dir =
-            TempDir::new("sigstore-test-tuf-cache").expect("Cannot create temp cache dir");
+        let cache_dir = TempDir::new().expect("Cannot create temp cache dir");
 
         // put some outdated files inside of the cache
         fs::write(
