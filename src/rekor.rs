@@ -35,7 +35,7 @@ pub struct PublicKey {
 #[serde(rename_all = "camelCase")]
 pub struct Data {
     pub hash: Hash,
-    pub url: String
+    pub url: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,13 +53,13 @@ pub struct Post {
     integrated_time: i64,
     log_i_d: String,
     log_index: i64,
-    verification: Verification
+    verification: Verification,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Verification {
-    signed_entry_timestamp: String
+    signed_entry_timestamp: String,
 }
 
 /*
@@ -84,21 +84,30 @@ fn get_github_token() -> String {
     }
 }
 
-async fn rekor_upload(api_version_val: String, object_type: String, key_format: String, signature_val: String, pub_key_val: String, file_url: String, algorithm_name: String, hash_val: String) -> Result<Post, serde_json::Error> {
-    let new_post = Root{
+async fn rekor_upload(
+    api_version_val: String,
+    object_type: String,
+    key_format: String,
+    signature_val: String,
+    pub_key_val: String,
+    file_url: String,
+    algorithm_name: String,
+    hash_val: String,
+) -> Result<Post, serde_json::Error> {
+    let new_post = Root {
         api_version: api_version_val,
         kind: object_type,
-        spec: Spec{
-            signature: Signature{
+        spec: Spec {
+            signature: Signature {
                 format: key_format,
                 content: signature_val,
-                public_key: PublicKey{
+                public_key: PublicKey {
                     content: pub_key_val,
                 },
             },
-            data: Data{
+            data: Data {
                 url: file_url,
-                hash: Hash{
+                hash: Hash {
                     algorithm: algorithm_name,
                     value: hash_val,
                 },
@@ -116,15 +125,14 @@ async fn rekor_upload(api_version_val: String, object_type: String, key_format: 
         .text()
         .await
         .unwrap();
-    
+
     println!();
     println!("{:#?}", new_post);
     println!();
 
     if &new_post[..7] != "{\"code\"" {
         println!("Lets parse the response, there is no error :) ");
-    }
-    else{
+    } else {
         println!("There is an error! Cannot parse the response :( ");
     }
     println!();
