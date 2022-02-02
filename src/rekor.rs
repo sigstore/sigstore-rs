@@ -84,23 +84,23 @@ fn get_github_token() -> String {
     }
 }
 
-async fn rekor_upload(api_version: String, kind: String, format: String, signature: String, public_key: String, url: String, algorithm: String, hash: String) -> Result<Post, serde_json::Error> {
+async fn rekor_upload(api_version_val: String, object_type: String, key_format: String, signature_val: String, pub_key_val: String, file_url: String, algorithm_name: String, hash_val: String) -> Result<Post, serde_json::Error> {
     let new_post = Root{
-        api_version: api_version,
-        kind: kind,
+        api_version: api_version_val,
+        kind: object_type,
         spec: Spec{
             signature: Signature{
-                format: format,
-                content: signature,
+                format: key_format,
+                content: signature_val,
                 public_key: PublicKey{
-                    content: public_key,
+                    content: pub_key_val,
                 },
             },
             data: Data{
-                url: url,
+                url: file_url,
                 hash: Hash{
-                    algorithm: algorithm,
-                    value: hash,
+                    algorithm: algorithm_name,
+                    value: hash_val,
                 },
             },
         },
