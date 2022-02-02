@@ -13,7 +13,6 @@ native-tls = ["oci-distribution/native-tls"]
 rustls-tls = ["oci-distribution/rustls-tls"]
 
 [dependencies]
-anyhow = "1.0.44"
 async-trait = "0.1.51"
 base64 = "0.13.0"
 ecdsa = { version = "0.12.4", features = ["verify", "pem", "der", "pkcs8"] }
@@ -24,6 +23,7 @@ sha2 = "0.10.1"
 serde_json = "1.0.78"
 serde = {version = "1.0.136", features = ["derive"]}
 tokio = { version = "1.16.1", features = ["full"]}
+thiserror = "1.0.30"
 tough = { version = "0.12.1", features = [ "http" ] }
 tracing = "0.1.29"
 url = "2.2.2"
@@ -34,8 +34,9 @@ reqwest = { version = "0.11.9", features = ["json"] }
 openssl-probe = "0.1.5"
 
 [dev-dependencies]
+anyhow = "1.0.44"
 chrono = "0.4.19"
 clap = "2.33.3"
 openssl = "0.10.38"
-tempdir = "0.3.7"
+tempfile = "3.3.0"
 tracing-subscriber = "0.2.25"

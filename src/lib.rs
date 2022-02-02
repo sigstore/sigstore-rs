@@ -126,6 +126,7 @@ mod crypto;
 mod mock_client;
 
 pub mod cosign;
+pub mod errors;
 pub mod registry;
 pub mod simple_signing;
 pub mod tuf;

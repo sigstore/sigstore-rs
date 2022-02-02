@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
 use tracing::info;
 
 use super::client::Client;
 use crate::crypto;
+use crate::errors::Result;
 use crate::registry::ClientConfig;
 
 /// A builder that generates Client objects.
