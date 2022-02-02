@@ -129,3 +129,4 @@ pub mod cosign;
 pub mod registry;
 pub mod simple_signing;
 pub mod tuf;
+pub mod rekor;
