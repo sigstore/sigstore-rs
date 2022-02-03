@@ -31,39 +31,30 @@
 //!
 //! Signature annotations and certificate email can be provided at verification time.
 //!
-//! ## Current limitations
-//!
-//! Fulcio integration requires the developer to provide Fulcio's certificate to
-//! work.
-//! The same applies to Rekor integratiom, which relies on the developer to provide
-//! Rekor's public key.
-//!
-//! Currently the library is not capable of downloading this data from Sigstore's TUF
-//! repository, like the `cosign` client does.
-//!
-//! This limitation is going to be addressed in the near future.
-//!
 //! ## Unit testing inside of our own libraries
 //!
 //! In case you want to mock sigstore interactions inside of your own code, you
 //! can implement the [`CosignCapabilities`] trait inside of your test suite.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
+use tracing::warn;
 
-use crate::errors::Result;
+use crate::errors::{Result, SigstoreError};
 use crate::registry::Auth;
-use crate::simple_signing::SimpleSigning;
 
 mod bundle;
-mod constants;
-mod signature_layers;
+pub(crate) mod constants;
+pub mod signature_layers;
+pub use signature_layers::SignatureLayer;
 
 pub mod client;
 pub use self::client::Client;
 
 pub mod client_builder;
 pub use self::client_builder::ClientBuilder;
+
+pub mod verification_constraint;
+use verification_constraint::VerificationConstraintVec;
 
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
@@ -73,33 +64,77 @@ pub trait CosignCapabilities {
     /// This is the location cosign stores signatures.
     async fn triangulate(&mut self, image: &str, auth: &Auth) -> Result<(String, String)>;
 
-    /// Verifies the layers of signature image produced by cosign and returns a list
-    /// of [`SimpleSigning`] objects that are satisfying the constrains.
+    /// Returns the list of [`SignatureLayer`](crate::cosign::signature_layers::SignatureLayer)
+    /// objects that are associated with the given signature object.
     ///
-    /// When Fulcio's integration has been enabled, the returned [`SimpleSigning`]
+    /// When Fulcio's integration has been enabled, the returned `SignatureLayer`
     /// objects have been verified using the certificates bundled inside of the
     /// signature image. All these certificates have been issues by Fulcio's CA.
     ///
-    /// When `public_key` is not `None`, the returned [`SimpleSigning`]
-    /// objects have been signed using the specified key.
-    ///
-    /// When Rekor's integration is enabled, the [`SimpleSigning`] objects have
+    /// When Rekor's integration is enabled, the [`SignatureLayer`] objects have
     /// been successfully verified using the Bundle object found inside of the
     /// signature image. All the Bundled objects have been verified using Rekor's
     /// signature.
-    async fn verify(
+    ///
+    /// These returned objects can then be filtered using the [`filter_signature_layers`]
+    /// function.
+    async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
         source_image_digest: &str,
         cosign_image: &str,
-        public_key: &Option<String>,
-        annotations: Option<HashMap<String, String>>,
-    ) -> Result<Vec<SimpleSigning>>;
+    ) -> Result<Vec<SignatureLayer>>;
+}
+
+/// Given a list of trusted `SignatureLayer`, find all the layers that satisfy
+/// the given constraints.
+///
+/// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
+/// details about how to define verification constraints.
+pub fn filter_signature_layers(
+    signature_layers: &[SignatureLayer],
+    constraints: VerificationConstraintVec,
+) -> Result<Vec<SignatureLayer>> {
+    let layers: Vec<SignatureLayer> = signature_layers
+            .iter()
+            .filter(|sl| {
+                let is_a_match = if constraints.is_empty() {
+                    true
+                } else {
+                    !constraints.iter().any(|c| {
+                        match c.verify(sl) {
+                            Ok(verification_passed) => !verification_passed,
+                            Err(e) => {
+                                warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
+                                // handle errors as verification failures
+                                false
+                            }
+                        }
+                    })
+                };
+                is_a_match
+            })
+            .cloned()
+            .collect();
+
+    if layers.is_empty() {
+        Err(SigstoreError::SigstoreNoVerifiedLayer)
+    } else {
+        Ok(layers)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
+    use crate::cosign::signature_layers::CertificateSubject;
+    use crate::cosign::verification_constraint::{AnnotationVerifier, CertSubjectEmailVerifier};
     use crate::crypto::{self, extract_public_key_from_pem_cert, CosignVerificationKey};
+    use crate::simple_signing::Optional;
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -127,5 +162,122 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
         crypto::new_verification_key(REKOR_PUB_KEY).expect("Cannot create test REKOR_PUB_KEY")
+    }
+
+    #[test]
+    fn filter_signature_layers_matches() {
+        let email = "alice@example.com".to_string();
+        let issuer = "an issuer".to_string();
+
+        let mut annotations: HashMap<String, String> = HashMap::new();
+        annotations.insert("key1".into(), "value1".into());
+        annotations.insert("key2".into(), "value2".into());
+
+        let mut layers: Vec<SignatureLayer> = Vec::new();
+        let expected_matches = 5;
+        for _ in 0..expected_matches {
+            let mut sl = build_correct_signature_layer_with_certificate();
+            let mut cert_signature = sl.certificate_signature.unwrap();
+            let cert_subj = CertificateSubject::Email(email.clone());
+            cert_signature.issuer = Some(issuer.clone());
+            cert_signature.subject = cert_subj;
+            sl.certificate_signature = Some(cert_signature);
+
+            let mut extra: HashMap<String, serde_json::Value> = annotations
+                .iter()
+                .map(|(k, v)| (k.clone(), json!(v)))
+                .collect();
+            extra.insert("something extra".into(), json!("value extra"));
+
+            let mut simple_signing = sl.simple_signing;
+            let optional = Optional {
+                creator: Some("test".into()),
+                timestamp: None,
+                extra,
+            };
+            simple_signing.optional = Some(optional);
+            sl.simple_signing = simple_signing;
+
+            layers.push(sl);
+        }
+
+        let mut constraints: VerificationConstraintVec = Vec::new();
+        let vc = CertSubjectEmailVerifier {
+            email: email.clone(),
+            issuer: Some(issuer.clone()),
+        };
+        constraints.push(Box::new(vc));
+
+        let vc = CertSubjectEmailVerifier {
+            email: email.clone(),
+            issuer: None,
+        };
+        constraints.push(Box::new(vc));
+
+        let vc = AnnotationVerifier { annotations };
+        constraints.push(Box::new(vc));
+
+        let matches = filter_signature_layers(&layers, constraints)
+            .expect("Should not have returned an error");
+        assert_eq!(matches.len(), expected_matches);
+    }
+
+    #[test]
+    fn filter_signature_layers_no_matches() {
+        let email = "alice@example.com".to_string();
+        let issuer = "an issuer".to_string();
+
+        let mut annotations: HashMap<String, String> = HashMap::new();
+        annotations.insert("key1".into(), "value1".into());
+        annotations.insert("key2".into(), "value2".into());
+
+        let mut layers: Vec<SignatureLayer> = Vec::new();
+        let expected_matches = 5;
+        for _ in 0..expected_matches {
+            let mut sl = build_correct_signature_layer_with_certificate();
+            let mut cert_signature = sl.certificate_signature.unwrap();
+            let cert_subj = CertificateSubject::Email(email.clone());
+            cert_signature.issuer = Some(issuer.clone());
+            cert_signature.subject = cert_subj;
+            sl.certificate_signature = Some(cert_signature);
+
+            let mut extra: HashMap<String, serde_json::Value> = HashMap::new();
+            extra.insert("something extra".into(), json!("value extra"));
+
+            let mut simple_signing = sl.simple_signing;
+            let optional = Optional {
+                creator: Some("test".into()),
+                timestamp: None,
+                extra,
+            };
+            simple_signing.optional = Some(optional);
+            sl.simple_signing = simple_signing;
+
+            layers.push(sl);
+        }
+
+        let mut constraints: VerificationConstraintVec = Vec::new();
+        let vc = CertSubjectEmailVerifier {
+            email: email.clone(),
+            issuer: Some(issuer.clone()),
+        };
+        constraints.push(Box::new(vc));
+
+        let vc = CertSubjectEmailVerifier {
+            email: email.clone(),
+            issuer: None,
+        };
+        constraints.push(Box::new(vc));
+
+        let vc = AnnotationVerifier { annotations };
+        constraints.push(Box::new(vc));
+
+        let error =
+            filter_signature_layers(&layers, constraints).expect_err("Should have god an error");
+        let found = match error {
+            SigstoreError::SigstoreNoVerifiedLayer => true,
+            _ => false,
+        };
+        assert!(found, "Didn't get the expected error, got {}", error);
     }
 }

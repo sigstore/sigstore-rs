@@ -16,7 +16,6 @@
 use ecdsa::signature::Verifier;
 use ecdsa::{Signature, VerifyingKey};
 use p256::pkcs8::FromPublicKey;
-use x509_parser::extensions::GeneralName;
 use x509_parser::{
     certificate::X509Certificate, parse_x509_certificate, pem::parse_x509_pem, prelude::ASN1Time,
     x509::SubjectPublicKeyInfo,
@@ -82,11 +81,10 @@ pub(crate) fn verify_certificate_can_be_trusted(
     certificate: &X509Certificate,
     ca_issuer_public_key: &SubjectPublicKeyInfo,
     integrated_time: i64,
-    cert_email: Option<&String>,
 ) -> Result<()> {
     verify_issuer(certificate, ca_issuer_public_key)?;
     verify_certificate_key_usages(certificate)?;
-    verify_certificate_subject_email(certificate, cert_email)?;
+    verify_certificate_has_san(certificate)?;
     verify_certificate_validity(certificate)?;
     verify_certificate_expiration(certificate, integrated_time)?;
 
@@ -121,35 +119,12 @@ fn verify_certificate_key_usages(certificate: &X509Certificate) -> Result<()> {
     Ok(())
 }
 
-fn verify_certificate_subject_email(
-    certificate: &X509Certificate,
-    cert_email: Option<&String>,
-) -> Result<()> {
-    if cert_email.is_none() {
-        return Ok(());
-    }
-
-    let email = cert_email.unwrap();
-    let (_critical, subject_alternative_name) = certificate
+fn verify_certificate_has_san(certificate: &X509Certificate) -> Result<()> {
+    let (_critical, _subject_alternative_name) = certificate
         .tbs_certificate
         .subject_alternative_name()
         .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
-
-    let mut mail_found = false;
-    for general_name in &subject_alternative_name.general_names {
-        if let GeneralName::RFC822Name(name) = general_name {
-            if name == email {
-                mail_found = true;
-                break;
-            }
-        }
-    }
-
-    if mail_found {
-        Ok(())
-    } else {
-        Err(SigstoreError::CertificateInvalidEmail(email.to_string()))
-    }
+    Ok(())
 }
 
 fn verify_certificate_validity(certificate: &X509Certificate) -> Result<()> {
@@ -197,7 +172,7 @@ fn verify_certificate_expiration(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use chrono::{DateTime, Duration, Utc};
     use openssl::asn1::{Asn1Integer, Asn1Time};
@@ -219,15 +194,20 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
-    struct CertData {
+    pub(crate) struct CertData {
         pub cert: X509,
         pub private_key: EcKey<pkey::Private>,
     }
 
-    struct CertGenerationOptions {
+    pub(crate) struct CertGenerationOptions {
         pub digital_signature_key_usage: bool,
         pub code_signing_extended_key_usage: bool,
-        pub subject_email: String,
+        pub subject_email: Option<String>,
+        pub subject_url: Option<String>,
+        //TODO: remove macro once https://github.com/sfackler/rust-openssl/issues/1411
+        //is fixed
+        #[allow(dead_code)]
+        pub subject_issuer: Option<String>,
         pub not_before: DateTime<chrono::Utc>,
         pub not_after: DateTime<chrono::Utc>,
     }
@@ -240,14 +220,16 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             CertGenerationOptions {
                 digital_signature_key_usage: true,
                 code_signing_extended_key_usage: true,
-                subject_email: String::from("tests@sigstore-rs.dev"),
+                subject_email: Some(String::from("tests@sigstore-rs.dev")),
+                subject_issuer: Some(String::from("https://sigstore.dev/oauth")),
+                subject_url: None,
                 not_before,
                 not_after,
             }
         }
     }
 
-    fn generate_certificate(
+    pub(crate) fn generate_certificate(
         issuer: Option<&CertData>,
         settings: CertGenerationOptions,
     ) -> anyhow::Result<CertData> {
@@ -336,12 +318,45 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 .build(&x509v3_context)?;
             extensions.push(x509_extension_authority_key_identifier);
 
-            // subject alternative name
-            let x509_extension_san = SubjectAlternativeName::new()
-                .critical()
-                .email(&settings.subject_email)
-                .build(&x509v3_context)?;
-            extensions.push(x509_extension_san);
+            if settings.subject_email.is_some() && settings.subject_url.is_some() {
+                panic!(
+                    "cosign doesn't generate certificates with a SAN that has both email and url"
+                );
+            }
+            if let Some(email) = settings.subject_email {
+                let x509_extension_san = SubjectAlternativeName::new()
+                    .critical()
+                    .email(&email)
+                    .build(&x509v3_context)?;
+
+                extensions.push(x509_extension_san);
+            };
+            if let Some(url) = settings.subject_url {
+                let x509_extension_san = SubjectAlternativeName::new()
+                    .critical()
+                    .uri(&url)
+                    .build(&x509v3_context)?;
+
+                extensions.push(x509_extension_san);
+            }
+            //
+            //TODO: uncomment once https://github.com/sfackler/rust-openssl/issues/1411
+            //is fixed
+            //if let Some(subject_issuer) = settings.subject_issuer {
+            //    let sigstore_issuer_asn1_obj = Asn1Object::from_str("1.3.6.1.4.1.57264.1.1")?; //&SIGSTORE_ISSUER_OID.to_string())?;
+
+            //    let value = format!("ASN1:UTF8String:{}", subject_issuer);
+
+            //    let sigstore_subject_issuer_extension = X509Extension::new_nid(
+            //        None,
+            //        Some(&x509v3_context),
+            //        sigstore_issuer_asn1_obj.nid(),
+            //        //&subject_issuer,
+            //        &value,
+            //    )?;
+
+            //    extensions.push(sigstore_subject_issuer_extension);
+            //}
         }
 
         for ext in extensions {
@@ -487,14 +502,14 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
     }
 
     #[test]
-    fn verify_cert_key_subject_email() -> anyhow::Result<()> {
+    fn verify_cert_failure_because_no_san() -> anyhow::Result<()> {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let expected_mail = String::from("test@sigstore.test");
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                subject_email: expected_mail.clone(),
+                subject_email: None,
+                subject_url: None,
                 ..Default::default()
             },
         )?;
@@ -502,16 +517,12 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
         let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 
-        assert!(verify_certificate_subject_email(&cert, None).is_ok());
-        assert!(verify_certificate_subject_email(&cert, Some(&expected_mail)).is_ok());
-
-        let err = verify_certificate_subject_email(&cert, Some(&String::from("not@exected.com")))
-            .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::CertificateInvalidEmail(_) => true,
+        let error = verify_certificate_has_san(&cert).expect_err("Didn'g get an error");
+        let found = match error {
+            SigstoreError::CertificateWithoutSubjectAlternativeName => true,
             _ => false,
         };
-        assert!(found, "Didn't get expected error, got {:?} instead", err);
+        assert!(found, "Didn't get the expected error: {}", error);
 
         Ok(())
     }

@@ -15,8 +15,11 @@ rustls-tls = ["oci-distribution/rustls-tls"]
 [dependencies]
 async-trait = "0.1.51"
 base64 = "0.13.0"
+der-parser = "6.0.1"
 ecdsa = { version = "0.12.4", features = ["verify", "pem", "der", "pkcs8"] }
-oci-distribution = { version = "0.8.1", default-features = false }
+# TODO: go back to the officially release oci-distribution once these patches are released
+#oci-distribution = { version = "0.8.1", default-features = false }
+oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "3e98fd5270016ffd01661f948769645ddf2bc026", default-features = false }
 olpc-cjson = "0.1.1"
 p256 = {version = "0.9.0", features = ["ecdsa-core"]}
 sha2 = "0.10.1"
