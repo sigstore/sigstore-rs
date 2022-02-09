@@ -17,3 +17,7 @@ test: fmt lint
 .PHONY: clean
 clean:
 	cargo clean
+
+.PHONY: coverage
+coverage:
+	cargo tarpaulin -o Html

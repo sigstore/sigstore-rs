@@ -22,7 +22,7 @@ use crate::errors::{Result, SigstoreError};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct Bundle {
+pub struct Bundle {
     pub signed_entry_timestamp: String,
     pub payload: Payload,
 }
@@ -53,7 +53,7 @@ impl Bundle {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Payload {
+pub struct Payload {
     pub body: String,
     pub integrated_time: i64,
     pub log_index: i64,

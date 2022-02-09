@@ -14,14 +14,18 @@
 // limitations under the License.
 
 use oci_distribution::client::ImageLayer;
+use serde::Serialize;
 use std::{collections::HashMap, fmt};
-use tracing::{debug, info, warn};
-use x509_parser::{parse_x509_certificate, pem::parse_x509_pem, x509::SubjectPublicKeyInfo};
+use tracing::{debug, info};
+use x509_parser::{
+    certificate::X509Certificate, extensions::GeneralName, parse_x509_certificate,
+    pem::parse_x509_pem, x509::SubjectPublicKeyInfo,
+};
 
 use super::bundle::Bundle;
 use super::constants::{
-    SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_OCI_MEDIA_TYPE,
-    SIGSTORE_SIGNATURE_ANNOTATION,
+    SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_ISSUER_OID,
+    SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION,
 };
 use crate::{
     crypto::{verify_certificate_can_be_trusted, CosignVerificationKey},
@@ -29,8 +33,45 @@ use crate::{
     simple_signing::SimpleSigning,
 };
 
-/// This is an internal object that contains all the data about a
-/// SimpleSigning object.
+/// Describe the details of a a certificate produced when signing artifacts
+/// using the keyless mode.
+#[derive(Clone, Debug, Serialize)]
+pub struct CertificateSignature {
+    /// The verification key embedded into the Certificate
+    #[serde(skip_serializing)]
+    pub verification_key: CosignVerificationKey,
+    /// The issuer used by the signer to authenticate. (e.g. GitHub, GitHub Action, Microsoft, Google,...)
+    pub issuer: Option<String>,
+    /// The unique ID associated to the identity
+    pub subject: CertificateSubject,
+}
+
+impl fmt::Display for CertificateSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let msg = format!(
+            r#"CertificateSignature
+- issuer: {:?}
+- subject: {:?}
+---"#,
+            self.issuer, self.subject,
+        );
+
+        write!(f, "{}", msg)
+    }
+}
+
+/// Types of identities associated with the signer.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub enum CertificateSubject {
+    /// An email address. This is what is used when the signer authenticated himself using something like his GitHub/Google account
+    Email(String),
+    /// A URL. This is used for example by the OIDC token issued by GitHub Actions
+    Uri(String),
+}
+
+/// Object that contains all the data about a
+/// [`SimpleSigning`](crate::simple_signing::SimpleSigning) object.
 ///
 /// The struct provides some helper methods that can be used at verification
 /// time.
@@ -39,28 +80,56 @@ use crate::{
 /// two places:
 ///   * The manifest of the signature object created by cosign
 ///   * One or more SIGSTORE_OCI_MEDIA_TYPE layers
-#[derive(Clone)]
-pub(crate) struct SignatureLayer {
+///
+/// End users of this library are not supposed to create this object directly.
+/// `SignatureLayer` objects are instead obtained by using the
+/// [`sigstore::cosign::Client::trusted_signature_layers`](crate::cosign::client::Client)
+/// method.
+#[derive(Clone, Debug, Serialize)]
+pub struct SignatureLayer {
+    /// The Simple Signing object associated with this layer
     pub simple_signing: SimpleSigning,
+    /// The digest of the layer
     pub oci_digest: String,
-    certificate_key: Option<CosignVerificationKey>,
+    /// The certificate holding the identity of the signer, plus his
+    /// verification key. This exists for signature done with keyless mode.
+    pub certificate_signature: Option<CertificateSignature>,
+    /// The bundle produced by Rekor.
+    pub bundle: Option<Bundle>,
+    #[serde(skip_serializing)]
     signature: String,
-    bundle: Option<Bundle>,
+    #[serde(skip_serializing)]
     raw_data: Vec<u8>,
 }
 
 impl fmt::Display for SignatureLayer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = format!(
-            r#"SignatureLayer
-- digest: {}
-- signature: {:?}
-- bundle: {:?},
-- certificate key: {:?}
-- Simple Signing:
-  {}
+            r#"---
+# SignatureLayer
+## digest
+{}
+
+## signature
+{:?}
+
+## bundle:
+{:?}
+
+## certificate signature
+{}
+
+## Simple Signing
+{}
 ---"#,
-            self.oci_digest, self.signature, self.bundle, self.certificate_key, self.simple_signing,
+            self.oci_digest,
+            self.signature,
+            self.bundle,
+            self.certificate_signature
+                .clone()
+                .map(|cs| cs.to_string())
+                .unwrap_or_else(|| "None".to_string()),
+            self.simple_signing,
         );
 
         write!(f, "{}", msg)
@@ -74,6 +143,8 @@ impl SignatureLayer {
     ///   * `descriptor`: the metatada of the layer, taken from the OCI manifest associated
     ///     with the Sigstore object
     ///   * `layer`: the data referenced by the descriptor
+    ///   * `source_image_digest`: the digest of the object that we're trying
+    ///      to verify. This is **not** the digest of the signature itself.
     ///   * `rekor_pub_key`: the public key of Rekor, used to verify `bundle`
     ///     entries
     ///   * `fulcio_pub_key`: the public key provided by Fulcio's certificate.
@@ -87,9 +158,9 @@ impl SignatureLayer {
     pub(crate) fn new(
         descriptor: &oci_distribution::manifest::OciDescriptor,
         layer: &oci_distribution::client::ImageLayer,
+        source_image_digest: &str,
         rekor_pub_key: Option<&CosignVerificationKey>,
         fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
-        cert_email: Option<&String>,
     ) -> Result<SignatureLayer> {
         if descriptor.media_type != SIGSTORE_OCI_MEDIA_TYPE {
             return Err(SigstoreError::SigstoreMediaTypeNotFoundError);
@@ -111,15 +182,20 @@ impl SignatureLayer {
             ))
         })?;
 
+        if !simple_signing.satisfies_manifest_digest(source_image_digest) {
+            return Err(SigstoreError::UnexpectedError(
+                "Simple signing image digest mismatch".to_string(),
+            ));
+        }
+
         let annotations = descriptor.annotations.clone().unwrap_or_default();
 
         let signature = Self::get_signature_from_annotations(&annotations)?;
         let bundle = Self::get_bundle_from_annotations(&annotations, rekor_pub_key)?;
-        let certificate_key = Self::get_certificate_from_annotations(
+        let certificate_signature = Self::get_certificate_signature_from_annotations(
             &annotations,
             fulcio_pub_key,
             bundle.as_ref(),
-            cert_email,
         )?;
 
         Ok(SignatureLayer {
@@ -128,7 +204,7 @@ impl SignatureLayer {
             simple_signing,
             signature,
             bundle,
-            certificate_key,
+            certificate_signature,
         })
     }
 
@@ -157,58 +233,35 @@ impl SignatureLayer {
         Ok(bundle)
     }
 
-    fn get_certificate_from_annotations(
+    fn get_certificate_signature_from_annotations(
         annotations: &HashMap<String, String>,
         fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
         bundle: Option<&Bundle>,
-        cert_email: Option<&String>,
-    ) -> Result<Option<CosignVerificationKey>> {
-        let certificate_key = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
-            Some(value) => match fulcio_pub_key {
-                Some(key) => Some(verify_certificate_and_extract_public_key(
-                    value.as_bytes(),
-                    key,
-                    cert_email,
-                    bundle,
-                )?),
-                None => {
-                    info!(bundle = ?value, "Ignoring certificate signature, fulcio certificate not provided to verification client");
-                    None
-                }
-            },
-            None => None,
+    ) -> Result<Option<CertificateSignature>> {
+        let cert_raw = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
+            Some(value) => value,
+            None => return Ok(None),
         };
-        Ok(certificate_key)
+
+        if fulcio_pub_key.is_none() {
+            return Err(SigstoreError::SigstoreFulcioPublicNotProvidedError);
+        }
+
+        if bundle.is_none() {
+            return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
+        }
+
+        let certificate_signature = CertificateSignature::from_certificate(
+            cert_raw.as_bytes(),
+            fulcio_pub_key.unwrap(),
+            bundle.unwrap(),
+        )?;
+        Ok(Some(certificate_signature))
     }
 
-    /// Checks whether the SignatureLayer's can be verified using the given `verification_key`.
-    ///
-    /// When no `verification_key` is given, the verification will be done using the Certificate
-    /// and the Bundle that are eventually part of the SignatureLayer. If none of them is available,
-    /// the verification will fail.
-    ///
-    /// The given `verification_key` has precedence over the eventually available Certificate and
-    /// Bundle.
-    pub fn verified(&self, verification_key: Option<&CosignVerificationKey>) -> bool {
-        if verification_key.is_none() && self.certificate_key.is_none() {
-            warn!(digest=self.oci_digest.as_str(), "Layer cannot be verified: no verification key provided and no trusted certificate key associated found");
-            return false;
-        }
-
-        if let Some(vk) = verification_key {
-            return self.is_signed_by_key(vk);
-        }
-
-        if let Some(vk) = self.certificate_key {
-            return self.is_signed_by_key(&vk);
-        }
-
-        false
-    }
-
-    /// Given a Cosign public key, check whether one of the signatures embedded into
-    /// the SignatureLayer has been produced by the given key
-    fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> bool {
+    /// Given a Cosign public key, check whether this Signature Layer has been
+    /// signed by it
+    pub(crate) fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> bool {
         match crate::crypto::verify_signature(verification_key, &self.signature, &self.raw_data) {
             Ok(_) => true,
             Err(e) => {
@@ -225,16 +278,13 @@ impl SignatureLayer {
 /// **Note well:** when Rekor and Fulcio data has been provided, the
 /// returned `SignatureLayer` is guaranteed to be
 /// verified using the given Rekor and Fulcio keys.
-/// When a certificate email is given, this is used to ensure
-/// the bundled certificate issued by Fulcio has this identity
-/// associated.
 pub(crate) fn build_signature_layers(
-    manifest: &oci_distribution::manifest::OciManifest,
+    manifest: &oci_distribution::manifest::OciImageManifest,
+    source_image_digest: &str,
     layers: &[oci_distribution::client::ImageLayer],
     rekor_pub_key: Option<&CosignVerificationKey>,
     fulcio_pub_key: Option<&SubjectPublicKeyInfo>,
-    cert_email: Option<&String>,
-) -> Vec<SignatureLayer> {
+) -> Result<Vec<SignatureLayer>> {
     let mut signature_layers: Vec<SignatureLayer> = Vec::new();
 
     for manifest_layer in &manifest.layers {
@@ -247,9 +297,9 @@ pub(crate) fn build_signature_layers(
             match SignatureLayer::new(
                 manifest_layer,
                 layer,
+                source_image_digest,
                 rekor_pub_key,
                 fulcio_pub_key,
-                cert_email,
             ) {
                 Ok(sl) => signature_layers.push(sl),
                 Err(e) => {
@@ -259,27 +309,69 @@ pub(crate) fn build_signature_layers(
         }
     }
 
-    signature_layers
+    if signature_layers.is_empty() {
+        Err(SigstoreError::SigstoreNoVerifiedLayer)
+    } else {
+        Ok(signature_layers)
+    }
 }
 
-/// Ensure the given certificate can be trusted, then extracts
-/// its public key
-fn verify_certificate_and_extract_public_key(
-    cert_raw: &[u8],
-    fulcio_pub_key: &SubjectPublicKeyInfo,
-    cert_email: Option<&String>,
-    trusted_bundle: Option<&Bundle>,
-) -> Result<CosignVerificationKey> {
-    if trusted_bundle.is_none() {
-        return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
-    }
-    let (_, pem) = parse_x509_pem(cert_raw)?;
-    let (_, cert) = parse_x509_certificate(&pem.contents)?;
-    let integrated_time = trusted_bundle.unwrap().payload.integrated_time;
-    verify_certificate_can_be_trusted(&cert, fulcio_pub_key, integrated_time, cert_email)?;
+impl CertificateSignature {
+    /// Ensure the given certificate can be trusted, then extracts
+    /// its details and return them as a `CertificateSignature` object
+    pub(crate) fn from_certificate(
+        cert_raw: &[u8],
+        fulcio_pub_key: &SubjectPublicKeyInfo,
+        trusted_bundle: &Bundle,
+    ) -> Result<Self> {
+        let (_, pem) = parse_x509_pem(cert_raw)?;
+        let (_, cert) = parse_x509_certificate(&pem.contents)?;
+        let integrated_time = trusted_bundle.payload.integrated_time;
 
-    let key = crate::crypto::new_verification_key_from_public_key_der(cert.public_key().raw)?;
-    Ok(key)
+        verify_certificate_can_be_trusted(&cert, fulcio_pub_key, integrated_time)?;
+
+        let subject = CertificateSubject::from_certificate(&cert)?;
+        let verification_key =
+            crate::crypto::new_verification_key_from_public_key_der(cert.public_key().raw)?;
+
+        let issuer_extension = cert.tbs_certificate.find_extension(&SIGSTORE_ISSUER_OID);
+        let issuer: Option<String> = issuer_extension
+            .map(|ext| {
+                String::from_utf8(ext.value.to_vec()).map_err(|_| {
+                    SigstoreError::UnexpectedError(String::from(
+                        "Certificate's extension Sigstore Issuer is not UTF8 compatible",
+                    ))
+                })
+            })
+            .transpose()?;
+
+        Ok(CertificateSignature {
+            verification_key,
+            issuer,
+            subject,
+        })
+    }
+}
+
+impl CertificateSubject {
+    pub fn from_certificate(certificate: &X509Certificate) -> Result<CertificateSubject> {
+        let (_critical, subject_alternative_name) = certificate
+            .tbs_certificate
+            .subject_alternative_name()
+            .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
+
+        for general_name in &subject_alternative_name.general_names {
+            if let GeneralName::RFC822Name(name) = general_name {
+                return Ok(CertificateSubject::Email(name.to_string()));
+            }
+
+            if let GeneralName::URI(uri) = general_name {
+                return Ok(CertificateSubject::Uri(uri.to_string()));
+            }
+        }
+
+        Err(SigstoreError::CertificateWithIncompleteSubjectAlternativeName)
+    }
 }
 
 #[cfg(test)]
@@ -289,10 +381,7 @@ pub(crate) mod tests {
     use std::collections::HashMap;
     use x509_parser::traits::FromDer;
 
-    use crate::{
-        cosign::tests::{get_fulcio_public_key, get_rekor_public_key},
-        crypto::{extract_public_key_from_pem_cert, new_verification_key_from_public_key_der},
-    };
+    use crate::cosign::tests::{get_fulcio_public_key, get_rekor_public_key};
 
     pub(crate) fn build_correct_signature_layer_without_bundle(
     ) -> (SignatureLayer, CosignVerificationKey) {
@@ -322,11 +411,25 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 oci_digest: String::from("digest"),
                 signature,
                 bundle: None,
-                certificate_key: None,
+                certificate_signature: None,
                 raw_data: serde_json::to_vec(&ss_value).unwrap(),
             },
             verification_key,
         )
+    }
+
+    pub(crate) fn build_bundle() -> Bundle {
+        let bundle_value = json!({
+          "SignedEntryTimestamp": "MEUCIDBGJijj2FqU25yRWzlEWHqE64XKwUvychBs1bSM1PaKAiEAwcR2u81c42TLBk3lWJqhtB7SnM7Lh0OYEl6Bfa7ZA4s=",
+          "Payload": {
+            "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoicmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiJlNzgwMWRlOTM1NTEyZTIyYjIzN2M3YjU3ZTQyY2E0ZDIwZTIxMzRiZGYxYjk4Zjk3NmM4ZjU1ZDljZmU0MDY3In19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FVUNJR3FXU2N6N3M5YVAyc0dYTkZLZXFpdnczQjZrUFJzNTZBSVRJSG52ZDVpZ0FpRUExa3piYVYyWTV5UEU4MUVOOTJOVUZPbDMxTExKU3Z3c2pGUTA3bTJYcWFBPSIsImZvcm1hdCI6Ing1MDkiLCJwdWJsaWNLZXkiOnsiY29udGVudCI6IkxTMHRMUzFDUlVkSlRpQkRSVkpVU1VaSlEwRlVSUzB0TFMwdENrMUpTVU5rZWtORFFXWjVaMEYzU1VKQlowbFVRU3RRYzJGTGFtRkZXbkZ1TjBsWk9UUmlNV1V2YWtwdWFYcEJTMEpuWjNGb2EycFBVRkZSUkVGNlFYRUtUVkpWZDBWM1dVUldVVkZMUlhkNGVtRlhaSHBrUnpsNVdsTTFhMXBZV1hoRlZFRlFRbWRPVmtKQlRWUkRTRTV3V2pOT01HSXpTbXhOUWpSWVJGUkplQXBOVkVGNVRVUkJNMDFxVlhoT2JHOVlSRlJKZUUxVVFYbE5SRUV6VGtSVmVFNVdiM2RCUkVKYVRVSk5SMEo1Y1VkVFRUUTVRV2RGUjBORGNVZFRUVFE1Q2tGM1JVaEJNRWxCUWtsT1pYZFJRbE14WmpSQmJVNUpSVTVrVEN0VkwwaEtiM1JOVTAwM1drNXVhMVJ1V1dWbWVIZFdPVlJGY25CMmJrRmFNQ3RFZWt3S2VXWkJRVlpoWlVwMFMycEdkbUpQVkdJNFJqRjVhRXBHVlRCWVdTdFNhV3BuWjBWd1RVbEpRa3BVUVU5Q1owNVdTRkU0UWtGbU9FVkNRVTFEUWpSQmR3cEZkMWxFVmxJd2JFSkJkM2REWjFsSlMzZFpRa0pSVlVoQmQwMTNSRUZaUkZaU01GUkJVVWd2UWtGSmQwRkVRV1JDWjA1V1NGRTBSVVpuVVZWTlpqRlNDazFOYzNGT1JrSnlWMko0T0cxU1RtUjRUMnRGUlZsemQwaDNXVVJXVWpCcVFrSm5kMFp2UVZWNVRWVmtRVVZIWVVwRGEzbFZVMVJ5UkdFMVN6ZFZiMGNLTUN0M2QyZFpNRWREUTNOSFFWRlZSa0ozUlVKQ1NVZEJUVWcwZDJaQldVbExkMWxDUWxGVlNFMUJTMGRqUjJnd1pFaEJOa3g1T1hkamJXd3lXVmhTYkFwWk1rVjBXVEk1ZFdSSFZuVmtRekF5VFVST2JWcFVaR3hPZVRCM1RVUkJkMHhVU1hsTmFtTjBXVzFaTTA1VE1XMU9SMWt4V2xSbmQxcEVTVFZPVkZGMUNtTXpVblpqYlVadVdsTTFibUl5T1c1aVIxWm9ZMGRzZWt4dFRuWmlVemxxV1ZSTk1sbFVSbXhQVkZsNVRrUkthVTlYV21wWmFrVXdUbWs1YWxsVE5Xb0tZMjVSZDBsQldVUldVakJTUVZGSUwwSkNXWGRHU1VWVFdtMTRhR1J0YkhaUlIwNW9Zek5TYkdKSGVIQk1iVEZzVFVGdlIwTkRjVWRUVFRRNVFrRk5SQXBCTW10QlRVZFpRMDFSUXpOWk1uVnNVRlJ6VUcxT1V6UmplbUZMWldwbE1FSnVUMUZJZWpWbE5rNUNXREJDY1hnNVdHTmhLM1F5YTA5cE1UZHpiM0JqQ2k5MkwzaElNWGhNZFZCdlEwMVJSRXRPUkRSWGFraG1TM0ZZV0U5bFZYWmFPVUU1TmtSeGNrVjNSMkZ4UjAxMGJrbDFUalJLZWxwWllWVk1Xbko0T1djS2IxaHhjVzh2UXpsUmJrOUlWSFJ2UFFvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9fX19",
+            "integratedTime": 1634714717,
+            "logIndex": 783607,
+            "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+          }
+        });
+        let bundle: Bundle = serde_json::from_value(bundle_value).expect("Cannot parse bundle");
+        bundle
     }
 
     pub(crate) fn build_correct_signature_layer_with_certificate() -> SignatureLayer {
@@ -343,16 +446,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             "optional": null
         });
 
-        let bundle_value = json!({
-          "SignedEntryTimestamp": "MEUCIDBGJijj2FqU25yRWzlEWHqE64XKwUvychBs1bSM1PaKAiEAwcR2u81c42TLBk3lWJqhtB7SnM7Lh0OYEl6Bfa7ZA4s=",
-          "Payload": {
-            "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoicmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiJlNzgwMWRlOTM1NTEyZTIyYjIzN2M3YjU3ZTQyY2E0ZDIwZTIxMzRiZGYxYjk4Zjk3NmM4ZjU1ZDljZmU0MDY3In19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FVUNJR3FXU2N6N3M5YVAyc0dYTkZLZXFpdnczQjZrUFJzNTZBSVRJSG52ZDVpZ0FpRUExa3piYVYyWTV5UEU4MUVOOTJOVUZPbDMxTExKU3Z3c2pGUTA3bTJYcWFBPSIsImZvcm1hdCI6Ing1MDkiLCJwdWJsaWNLZXkiOnsiY29udGVudCI6IkxTMHRMUzFDUlVkSlRpQkRSVkpVU1VaSlEwRlVSUzB0TFMwdENrMUpTVU5rZWtORFFXWjVaMEYzU1VKQlowbFVRU3RRYzJGTGFtRkZXbkZ1TjBsWk9UUmlNV1V2YWtwdWFYcEJTMEpuWjNGb2EycFBVRkZSUkVGNlFYRUtUVkpWZDBWM1dVUldVVkZMUlhkNGVtRlhaSHBrUnpsNVdsTTFhMXBZV1hoRlZFRlFRbWRPVmtKQlRWUkRTRTV3V2pOT01HSXpTbXhOUWpSWVJGUkplQXBOVkVGNVRVUkJNMDFxVlhoT2JHOVlSRlJKZUUxVVFYbE5SRUV6VGtSVmVFNVdiM2RCUkVKYVRVSk5SMEo1Y1VkVFRUUTVRV2RGUjBORGNVZFRUVFE1Q2tGM1JVaEJNRWxCUWtsT1pYZFJRbE14WmpSQmJVNUpSVTVrVEN0VkwwaEtiM1JOVTAwM1drNXVhMVJ1V1dWbWVIZFdPVlJGY25CMmJrRmFNQ3RFZWt3S2VXWkJRVlpoWlVwMFMycEdkbUpQVkdJNFJqRjVhRXBHVlRCWVdTdFNhV3BuWjBWd1RVbEpRa3BVUVU5Q1owNVdTRkU0UWtGbU9FVkNRVTFEUWpSQmR3cEZkMWxFVmxJd2JFSkJkM2REWjFsSlMzZFpRa0pSVlVoQmQwMTNSRUZaUkZaU01GUkJVVWd2UWtGSmQwRkVRV1JDWjA1V1NGRTBSVVpuVVZWTlpqRlNDazFOYzNGT1JrSnlWMko0T0cxU1RtUjRUMnRGUlZsemQwaDNXVVJXVWpCcVFrSm5kMFp2UVZWNVRWVmtRVVZIWVVwRGEzbFZVMVJ5UkdFMVN6ZFZiMGNLTUN0M2QyZFpNRWREUTNOSFFWRlZSa0ozUlVKQ1NVZEJUVWcwZDJaQldVbExkMWxDUWxGVlNFMUJTMGRqUjJnd1pFaEJOa3g1T1hkamJXd3lXVmhTYkFwWk1rVjBXVEk1ZFdSSFZuVmtRekF5VFVST2JWcFVaR3hPZVRCM1RVUkJkMHhVU1hsTmFtTjBXVzFaTTA1VE1XMU9SMWt4V2xSbmQxcEVTVFZPVkZGMUNtTXpVblpqYlVadVdsTTFibUl5T1c1aVIxWm9ZMGRzZWt4dFRuWmlVemxxV1ZSTk1sbFVSbXhQVkZsNVRrUkthVTlYV21wWmFrVXdUbWs1YWxsVE5Xb0tZMjVSZDBsQldVUldVakJTUVZGSUwwSkNXWGRHU1VWVFdtMTRhR1J0YkhaUlIwNW9Zek5TYkdKSGVIQk1iVEZzVFVGdlIwTkRjVWRUVFRRNVFrRk5SQXBCTW10QlRVZFpRMDFSUXpOWk1uVnNVRlJ6VUcxT1V6UmplbUZMWldwbE1FSnVUMUZJZWpWbE5rNUNXREJDY1hnNVdHTmhLM1F5YTA5cE1UZHpiM0JqQ2k5MkwzaElNWGhNZFZCdlEwMVJSRXRPUkRSWGFraG1TM0ZZV0U5bFZYWmFPVUU1TmtSeGNrVjNSMkZ4UjAxMGJrbDFUalJLZWxwWllWVk1Xbko0T1djS2IxaHhjVzh2UXpsUmJrOUlWSFJ2UFFvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9fX19",
-            "integratedTime": 1634714717,
-            "logIndex": 783607,
-            "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
-          }
-        });
-        let bundle: Bundle = serde_json::from_value(bundle_value).expect("Cannot parse bundle");
+        let bundle = build_bundle();
 
         let cert_raw = r#"-----BEGIN CERTIFICATE-----
 MIICdzCCAfygAwIBAgITA+PsaKjaEZqn7IY94b1e/jJnizAKBggqhkjOPQQDAzAq
@@ -370,17 +464,20 @@ A2kAMGYCMQC3Y2ulPTsPmNS4czaKeje0BnOQHz5e6NBX0Bqx9Xca+t2kOi17sopc
 /v/xH1xLuPoCMQDKND4WjHfKqXXOeUvZ9A96DqrEwGaqGMtnIuN4JzZYaULZrx9g
 oXqqo/C9QnOHTto=
 -----END CERTIFICATE-----"#;
-        let cert_key = extract_public_key_from_pem_cert(cert_raw.as_bytes())
-            .expect("Cannot extract public key from cert");
-        let cert_key =
-            new_verification_key_from_public_key_der(&cert_key).expect("Cannot build public key");
+
+        let fulcio_key_raw = get_fulcio_public_key();
+        let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
+            .expect("Cannot parse fulcio public key");
+        let certificate_signature =
+            CertificateSignature::from_certificate(cert_raw.as_bytes(), &fulcio_pub_key, &bundle)
+                .expect("Cannot create certificate signature");
 
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
             oci_digest: String::from("sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e"),
             signature: String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA="),
             bundle: Some(bundle),
-            certificate_key: Some(cert_key),
+            certificate_signature: Some(certificate_signature),
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
         }
     }
@@ -417,14 +514,20 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual = SignatureLayer::new(
+        let error = SignatureLayer::new(
             &descriptor,
             &layer,
+            "source_image_digest is not relevant now",
             Some(&rekor_pub_key),
             Some(&fulcio_pub_key),
-            None,
-        );
-        assert!(actual.is_err());
+        )
+        .expect_err("Didn't get an error");
+
+        let found = match error {
+            SigstoreError::SigstoreMediaTypeNotFoundError => true,
+            _ => false,
+        };
+        assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
@@ -444,14 +547,20 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual = SignatureLayer::new(
+        let error = SignatureLayer::new(
             &descriptor,
             &layer,
+            "source_image_digest is not relevant now",
             Some(&rekor_pub_key),
             Some(&fulcio_pub_key),
-            None,
-        );
-        assert!(actual.is_err());
+        )
+        .expect_err("Didn't get an error");
+
+        let found = match error {
+            SigstoreError::SigstoreMediaTypeNotFoundError => true,
+            _ => false,
+        };
+        assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
@@ -472,14 +581,20 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual = SignatureLayer::new(
+        let error = SignatureLayer::new(
             &descriptor,
             &layer,
+            "source_image_digest is not relevant now",
             Some(&rekor_pub_key),
             Some(&fulcio_pub_key),
-            None,
-        );
-        assert!(actual.is_err());
+        )
+        .expect_err("Didn't get an error");
+
+        let found = match error {
+            SigstoreError::SigstoreLayerDigestMismatchError => true,
+            _ => false,
+        };
+        assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
@@ -517,60 +632,77 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     }
 
     #[test]
-    fn get_certificate_from_annotations_returns_none() {
+    fn get_certificate_signature_from_annotations_returns_none() {
         let annotations: HashMap<String, String> = HashMap::new();
         let fulcio_key_raw = get_fulcio_public_key();
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        let actual = SignatureLayer::get_certificate_from_annotations(
+        let actual = SignatureLayer::get_certificate_signature_from_annotations(
             &annotations,
             Some(&fulcio_pub_key),
             None,
-            None,
         );
 
-        assert!(actual.is_ok());
         assert!(actual.unwrap().is_none());
     }
 
     #[test]
-    fn verify_certificate_and_extract_public_key_fails_when_no_bundle_is_found() {
+    fn get_certificate_signature_from_annotations_fails_when_no_bundle_is_given() {
+        let mut annotations: HashMap<String, String> = HashMap::new();
+
+        // add a fake cert, contents are not relevant
+        annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());
+
         let fulcio_key_raw = get_fulcio_public_key();
         let (_, fulcio_pub_key) = SubjectPublicKeyInfo::from_der(&fulcio_key_raw)
             .expect("Cannot parse fulcio public key");
 
-        // the actual contents of the certificate do not matter
-        let cert: Vec<u8> = Vec::new();
+        let error = SignatureLayer::get_certificate_signature_from_annotations(
+            &annotations,
+            Some(&fulcio_pub_key),
+            None,
+        )
+        .expect_err("Didn't get an error");
 
-        let actual = verify_certificate_and_extract_public_key(&cert, &fulcio_pub_key, None, None);
-
-        let found = match actual.expect_err("It was supposed to fail") {
+        let found = match error {
             SigstoreError::SigstoreRekorBundleNotFoundError => true,
             _ => false,
         };
-        assert!(
-            found,
-            "Was supposed to get SigstoreRekorBundleNotFoundError"
-        );
+        assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
-    fn verify_with_key() {
+    fn get_certificate_signature_from_annotations_fails_when_no_fulcio_pub_key_is_given() {
+        let mut annotations: HashMap<String, String> = HashMap::new();
+
+        // add a fake cert, contents are not relevant
+        annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());
+
+        let bundle = build_bundle();
+
+        let error = SignatureLayer::get_certificate_signature_from_annotations(
+            &annotations,
+            None,
+            Some(&bundle),
+        )
+        .expect_err("Didn't get an error");
+
+        let found = match error {
+            SigstoreError::SigstoreFulcioPublicNotProvidedError => true,
+            _ => false,
+        };
+        assert!(found, "Got a different error type: {}", error);
+    }
+
+    #[test]
+    fn is_signed_by_key() {
+        // a SignatureLayer created with traditional signing
         let (sl, key) = build_correct_signature_layer_without_bundle();
-        assert!(sl.verified(Some(&key)));
-    }
+        assert!(sl.is_signed_by_key(&key));
 
-    #[test]
-    fn verify_without_key_and_layer_does_not_have_certificate() {
-        let (sl, _) = build_correct_signature_layer_without_bundle();
-        assert!(!sl.verified(None));
-    }
-
-    #[test]
-    fn verify_layer_signed_only_in_keyless_mode() {
+        // a SignatureLayer created with keyless signing -> there's no pub key
         let sl = build_correct_signature_layer_with_certificate();
-        assert!(sl.verified(None));
 
         // fail because the signature layer wasn't signed with the given key
         let verification_key = crate::crypto::new_verification_key(
@@ -580,6 +712,142 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 -----END PUBLIC KEY-----"#,
         )
         .unwrap();
-        assert!(!sl.verified(Some(&verification_key)));
+        assert!(!sl.is_signed_by_key(&verification_key));
+    }
+
+    // Testing CertificateSignature
+    use crate::cosign::bundle::Payload;
+    use crate::crypto::tests::{generate_certificate, CertGenerationOptions};
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn certificate_signature_from_certificate_using_email() -> anyhow::Result<()> {
+        let expected_email = "test@sigstore.dev".to_string();
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+        let ca_public_key_der = ca_data.private_key.public_key_to_der()?;
+        let (_, spki) = SubjectPublicKeyInfo::from_der(&ca_public_key_der)?;
+
+        let issued_cert = generate_certificate(
+            Some(&ca_data),
+            CertGenerationOptions {
+                subject_email: Some(expected_email.clone()),
+                ..Default::default()
+            },
+        )?;
+
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let bundle = Bundle {
+            signed_entry_timestamp: "not relevant".to_string(),
+            payload: Payload {
+                body: "not relevant".to_string(),
+                integrated_time: integrated_time.timestamp(),
+                log_index: 0,
+                log_id: "not relevant".to_string(),
+            },
+        };
+
+        let certificate_signature =
+            CertificateSignature::from_certificate(&issued_cert_pem, &spki, &bundle)
+                .expect("Didn't expect an error");
+
+        let expected_issuer = match certificate_signature.subject.clone() {
+            CertificateSubject::Email(mail) => mail == expected_email,
+            _ => false,
+        };
+        assert!(
+            expected_issuer,
+            "Didn't get the expected subject: {:?}",
+            certificate_signature.subject
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn certificate_signature_from_certificate_using_uri() -> anyhow::Result<()> {
+        let expected_url = "https://sigstore.dev/test".to_string();
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+        let ca_public_key_der = ca_data.private_key.public_key_to_der()?;
+        let (_, spki) = SubjectPublicKeyInfo::from_der(&ca_public_key_der)?;
+
+        let issued_cert = generate_certificate(
+            Some(&ca_data),
+            CertGenerationOptions {
+                subject_email: None,
+                subject_url: Some(expected_url.clone()),
+                ..Default::default()
+            },
+        )?;
+
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let bundle = Bundle {
+            signed_entry_timestamp: "not relevant".to_string(),
+            payload: Payload {
+                body: "not relevant".to_string(),
+                integrated_time: integrated_time.timestamp(),
+                log_index: 0,
+                log_id: "not relevant".to_string(),
+            },
+        };
+
+        let certificate_signature =
+            CertificateSignature::from_certificate(&issued_cert_pem, &spki, &bundle)
+                .expect("Didn't expect an error");
+
+        let expected_issuer = match certificate_signature.subject.clone() {
+            CertificateSubject::Uri(url) => url == expected_url,
+            _ => false,
+        };
+        assert!(
+            expected_issuer,
+            "Didn't get the expected subject: {:?}",
+            certificate_signature.subject
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn certificate_signature_from_certificate_without_email_and_uri() -> anyhow::Result<()> {
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+        let ca_public_key_der = ca_data.private_key.public_key_to_der()?;
+        let (_, spki) = SubjectPublicKeyInfo::from_der(&ca_public_key_der)?;
+
+        let issued_cert = generate_certificate(
+            Some(&ca_data),
+            CertGenerationOptions {
+                subject_email: None,
+                subject_url: None,
+                ..Default::default()
+            },
+        )?;
+
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let bundle = Bundle {
+            signed_entry_timestamp: "not relevant".to_string(),
+            payload: Payload {
+                body: "not relevant".to_string(),
+                integrated_time: integrated_time.timestamp(),
+                log_index: 0,
+                log_id: "not relevant".to_string(),
+            },
+        };
+
+        let error = CertificateSignature::from_certificate(&issued_cert_pem, &spki, &bundle)
+            .expect_err("Didn't get an error");
+        let found = match error {
+            SigstoreError::CertificateWithoutSubjectAlternativeName => true,
+            _ => false,
+        };
+
+        assert!(found, "Didn't get the expected error, got: {}", error);
+
+        Ok(())
     }
 }

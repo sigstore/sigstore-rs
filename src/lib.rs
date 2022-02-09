@@ -59,7 +59,18 @@
 //! Verify the signature of a container image/oci artifact:
 //!
 //! ```rust,no_run
-//! use crate::sigstore::cosign::CosignCapabilities;
+//! use crate::sigstore::cosign::{
+//!     CosignCapabilities,
+//!     filter_signature_layers,
+//! };
+//! use crate::sigstore::cosign::verification_constraint::{
+//!     AnnotationVerifier,
+//!     PublicKeyVerifier,
+//!     VerificationConstraintVec,
+//! };
+//! use crate::sigstore::errors::SigstoreError;
+//!
+//! use std::boxed::Box;
 //! use std::collections::HashMap;
 //! use std::fs;
 //!
@@ -86,24 +97,50 @@
 //!   // Obtained via `triangulate`
 //!   let source_image_digest = "sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e";
 //!
-//!   let mut annotations: HashMap<String, String> = HashMap::new();
-//!   annotations.insert("env".to_string(), "prod".to_string());
-//!
-//!   let verification_key = fs::read_to_string("~/cosign.pub")
-//!     .expect("Cannot read contents of cosign public key");
-//!   let signatures_matching_requirements = client.verify(
+//!   // Obtain the list the signatures layers associated that can be trusted
+//!   let signature_layers = client.trusted_signature_layers(
 //!     auth,
 //!     cosign_image,
 //!     source_image_digest,
-//!     &Some(verification_key),
-//!     Some(annotations)
-//!   ).await.expect("unexpected verification error");
+//!   ).await.expect("Could not obtain signature layers");
 //!
-//!   if signatures_matching_requirements.is_empty() {
-//!     panic!("no signature is matching the requirements");
-//!   } else {
-//!     println!("signatures matching the requirements: {:?}",
-//!         signatures_matching_requirements);
+//!   // Define verification constraints
+//!   let mut annotations: HashMap<String, String> = HashMap::new();
+//!   annotations.insert("env".to_string(), "prod".to_string());
+//!   let annotation_verifier = AnnotationVerifier{
+//!     annotations,
+//!   };
+//!
+//!   let verification_key = fs::read_to_string("~/cosign.pub")
+//!     .expect("Cannot read contents of cosign public key");
+//!   let pub_key_verifier = PublicKeyVerifier::new(
+//!     &verification_key).expect("Could not create verifier");
+//!
+//!   let verification_constraints: VerificationConstraintVec = vec![
+//!     Box::new(annotation_verifier),
+//!     Box::new(pub_key_verifier),
+//!   ];
+//!
+//!   // Filter all the trusted layers, find the ones satisfying the constraints
+//!   // we just defined
+//!   let signatures_matching_requirements = filter_signature_layers(
+//!     &signature_layers,
+//!     verification_constraints);
+//!
+//!   match signatures_matching_requirements {
+//!     Err(SigstoreError::SigstoreNoVerifiedLayer) => {
+//!       panic!("no signature is matching the requirements")
+//!     },
+//!     Err(e) => {
+//!       panic!("Something went wrong while verifying the image: {}", e)
+//!     },
+//!     Ok(signatures) => {
+//!       println!("signatures matching the requirements:");
+//!       serde_json::to_writer_pretty(
+//!           std::io::stdout(),
+//!           &signatures,
+//!       ).unwrap();
+//!     }
 //!   }
 //! }
 //! ```

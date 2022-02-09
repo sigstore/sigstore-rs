@@ -147,6 +147,7 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
                 .iter()
                 .map(|c| c.into())
                 .collect(),
+            ..Default::default()
         }
     }
 }

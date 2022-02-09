@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The errors that can be raised by sigstore-rs
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SigstoreError>;
@@ -64,6 +66,9 @@ pub enum SigstoreError {
     #[error("Certificate without Subject Alternative Name")]
     CertificateWithoutSubjectAlternativeName,
 
+    #[error("Certificate with incomplete Subject Alternative Name")]
+    CertificateWithIncompleteSubjectAlternativeName,
+
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
 
@@ -88,6 +93,12 @@ pub enum SigstoreError {
     #[error("Rekor bundle missing")]
     SigstoreRekorBundleNotFoundError,
 
+    #[error("Fulcio public key not provided")]
+    SigstoreFulcioPublicNotProvidedError,
+
+    #[error("No Signature Layer passed verification")]
+    SigstoreNoVerifiedLayer,
+
     #[error(transparent)]
     TufError(#[from] tough::error::Error),
 
@@ -99,4 +110,7 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     UnexpectedError(String),
+
+    #[error("{0}")]
+    VerificationConstraintError(String),
 }
