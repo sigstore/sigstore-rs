@@ -19,9 +19,16 @@ use sigstore::openidconnect;
 
 
 fn main() {
-    let _my_url = openidconnect::openidconnect::OpenID::auth_url(
+    let (authorize_url, csrf_state, client, nonce) = openidconnect::openidconnect::OpenID::auth_url(
         "sigstore".to_string(),
         "".to_string(),
         "https://oauth2.sigstore.dev/auth".to_string(),
     );
+    println!("{:?}", authorize_url);
+    println!("{:?}", csrf_state);
+    println!("{:?}", nonce);
+    if open::that(authorize_url.to_string()).is_ok() {
+        println!("Look at your browser !");
+    }
+    openidconnect::openidconnect::redirect_listener(csrf_state, client, nonce)
 }
