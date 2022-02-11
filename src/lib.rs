@@ -108,13 +108,13 @@
 //!   let mut annotations: HashMap<String, String> = HashMap::new();
 //!   annotations.insert("env".to_string(), "prod".to_string());
 //!   let annotation_verifier = AnnotationVerifier{
-//!     annotations,
+//!     annotations: annotations.clone(),
 //!   };
 //!
 //!   let verification_key = fs::read_to_string("~/cosign.pub")
 //!     .expect("Cannot read contents of cosign public key");
 //!   let pub_key_verifier = PublicKeyVerifier::new(
-//!     &verification_key).expect("Could not create verifier");
+//!     &verification_key, annotations.clone()).expect("Could not create verifier");
 //!
 //!   let verification_constraints: VerificationConstraintVec = vec![
 //!     Box::new(annotation_verifier),

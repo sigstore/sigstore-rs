@@ -70,21 +70,25 @@ pub trait VerificationConstraint: std::fmt::Debug {
 #[derive(Debug)]
 pub struct PublicKeyVerifier {
     key: CosignVerificationKey,
+    annotations: HashMap<String, String>,
 }
 
 impl PublicKeyVerifier {
     /// Create a new instance of `PublicKeyVerifier`.
-    /// The `key_raw` variable holds a PEM encoded rapresentation of the
+    /// The `key_raw` variable holds a PEM encoded representation of the
     /// public key to be used at verification time.
-    pub fn new(key_raw: &str) -> Result<Self> {
+    pub fn new(key_raw: &str, annotations: HashMap<String, String>) -> Result<Self> {
         let key = crypto::new_verification_key(key_raw)?;
-        Ok(PublicKeyVerifier { key })
+        Ok(PublicKeyVerifier { key, annotations })
     }
 }
 
 impl VerificationConstraint for PublicKeyVerifier {
     fn verify(&self, signature_layer: &SignatureLayer) -> Result<bool> {
-        Ok(signature_layer.is_signed_by_key(&self.key))
+        Ok(signature_layer.is_signed_by_key(&self.key)
+            && signature_layer
+                .simple_signing
+                .satisfies_annotations(&self.annotations))
     }
 }
 
@@ -120,6 +124,7 @@ impl VerificationConstraint for PublicKeyVerifier {
 ///
 /// ```rust
 /// use sigstore::cosign::verification_constraint::CertSubjectEmailVerifier;
+/// use std::collections::HashMap;
 ///
 /// // This looks only for the email address of the trusted user
 /// let vc_email = CertSubjectEmailVerifier{
@@ -132,6 +137,7 @@ impl VerificationConstraint for PublicKeyVerifier {
 /// let vc_email_and_issuer = CertSubjectEmailVerifier{
 ///     email: String::from("alice@example.com"),
 ///     issuer: Some(String::from("https://github.com/login/oauth")),
+///     annotations: HashMap::default(),
 /// };
 /// ```
 ///
@@ -181,6 +187,7 @@ impl VerificationConstraint for PublicKeyVerifier {
 pub struct CertSubjectEmailVerifier {
     pub email: String,
     pub issuer: Option<String>,
+    pub annotations: HashMap<String, String>,
 }
 
 impl VerificationConstraint for CertSubjectEmailVerifier {
@@ -201,7 +208,10 @@ impl VerificationConstraint for CertSubjectEmailVerifier {
             }
             _ => false,
         };
-        Ok(verified)
+        Ok(verified
+            && signature_layer
+                .simple_signing
+                .satisfies_annotations(&self.annotations))
     }
 }
 
@@ -240,16 +250,19 @@ impl VerificationConstraint for CertSubjectEmailVerifier {
 ///
 /// ```rust
 /// use sigstore::cosign::verification_constraint::CertSubjectUrlVerifier;
+/// use std::collections::HashMap;
 ///
 /// let vc = CertSubjectUrlVerifier{
 ///     url: String::from("https://github.com/flavio/policy-secure-pod-images/.github/workflows/release.yml@refs/heads/main"),
 ///     issuer: String::from("https://token.actions.githubusercontent.com"),
+///     annotations: HashMap::default(),
 /// };
 /// ```
 #[derive(Default, Debug)]
 pub struct CertSubjectUrlVerifier {
     pub url: String,
     pub issuer: String,
+    pub annotations: HashMap<String, String>,
 }
 
 impl VerificationConstraint for CertSubjectUrlVerifier {
@@ -266,19 +279,25 @@ impl VerificationConstraint for CertSubjectUrlVerifier {
             }
             _ => false,
         };
-        Ok(verified)
+        Ok(verified
+            && signature_layer
+                .simple_signing
+                .satisfies_annotations(&self.annotations))
     }
 }
 
 /// Verification Constraint for the annotations added by `cosign sign`
 ///
 /// The `SimpleSigning` object produced at signature time can be enriched by
-/// signer with so called "anntoations".
+/// signer with so called "annotations".
 ///
 /// This constraint ensures that all the annotations specified by the user are
 /// found inside of the SignatureLayer.
 ///
-/// It's perfectly find for the SignatureLayer to have additional annotations.
+/// This is normally used to check that all signatures contain the specified
+/// annotations.
+///
+/// It's perfectly fine for the SignatureLayer to have additional annotations.
 /// These will be simply be ignored by the verifier.
 #[derive(Default, Debug)]
 pub struct AnnotationVerifier {
@@ -307,7 +326,10 @@ mod tests {
     fn pub_key_verifier() {
         let (sl, key) = build_correct_signature_layer_without_bundle();
 
-        let vc = PublicKeyVerifier { key };
+        let vc = PublicKeyVerifier {
+            key,
+            annotations: HashMap::default(),
+        };
         assert!(vc.verify(&sl).unwrap());
 
         let sl = build_correct_signature_layer_with_certificate();
@@ -327,12 +349,14 @@ mod tests {
         let vc = CertSubjectEmailVerifier {
             email,
             issuer: None,
+            annotations: HashMap::default(),
         };
         assert!(vc.verify(&sl).unwrap());
 
         let vc = CertSubjectEmailVerifier {
             email: "different@email.com".to_string(),
             issuer: None,
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
@@ -353,6 +377,7 @@ mod tests {
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: Some("an issuer".to_string()),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
 
@@ -366,12 +391,14 @@ mod tests {
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: Some(issuer.clone()),
+            annotations: HashMap::default(),
         };
         assert!(vc.verify(&sl).unwrap());
 
         let vc = CertSubjectEmailVerifier {
             email,
             issuer: Some("another issuer".to_string()),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
 
@@ -379,6 +406,7 @@ mod tests {
         let vc = CertSubjectUrlVerifier {
             url: "https://sigstore.dev/test".to_string(),
             issuer,
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
@@ -390,6 +418,7 @@ mod tests {
         let vc = CertSubjectEmailVerifier {
             email: "alice@example.com".to_string(),
             issuer: None,
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
@@ -409,18 +438,21 @@ mod tests {
         let vc = CertSubjectUrlVerifier {
             url: url.clone(),
             issuer: issuer.clone(),
+            annotations: HashMap::default(),
         };
         assert!(vc.verify(&sl).unwrap());
 
         let vc = CertSubjectUrlVerifier {
             url: "a different url".to_string(),
             issuer: issuer.clone(),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
 
         let vc = CertSubjectUrlVerifier {
             url,
             issuer: "a different issuer".to_string(),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
 
@@ -428,6 +460,7 @@ mod tests {
         let vc = CertSubjectEmailVerifier {
             email: "alice@example.com".to_string(),
             issuer: Some(issuer),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
@@ -439,6 +472,7 @@ mod tests {
         let vc = CertSubjectUrlVerifier {
             url: "https://sigstore.dev/test".to_string(),
             issuer: "an issuer".to_string(),
+            annotations: HashMap::default(),
         };
         assert!(!vc.verify(&sl).unwrap());
     }

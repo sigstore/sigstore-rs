@@ -202,6 +202,19 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
     let mut client = client_builder.build()?;
 
     // Build verification constraints
+    let annotations = if let Some(annotations) = matches.values_of("annotations") {
+        let mut values: HashMap<String, String> = HashMap::new();
+        for annotation in annotations {
+            let tmp: Vec<_> = annotation.splitn(2, "=").collect();
+            if tmp.len() == 2 {
+                values.insert(String::from(tmp[0]), String::from(tmp[1]));
+            }
+        }
+        values
+    } else {
+        HashMap::default()
+    };
+
     let mut verification_constraint: VerificationConstraintVec = Vec::new();
     if let Some(cert_email) = matches.value_of("cert-email") {
         let issuer = matches.value_of("cert-issuer").map(|i| i.to_string());
@@ -209,6 +222,7 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         verification_constraint.push(Box::new(CertSubjectEmailVerifier {
             email: cert_email.to_string(),
             issuer,
+            annotations: annotations.clone(),
         }));
     }
     if let Some(cert_url) = matches.value_of("cert-url") {
@@ -222,30 +236,28 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         verification_constraint.push(Box::new(CertSubjectUrlVerifier {
             url: cert_url.to_string(),
             issuer: issuer.unwrap(),
+            annotations: annotations.clone(),
         }));
     }
     if let Some(path_to_key) = matches.value_of("key") {
         let key =
             fs::read_to_string(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
-        let verifier = PublicKeyVerifier::new(&key)
+        let verifier = PublicKeyVerifier::new(&key, annotations.clone())
             .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
         verification_constraint.push(Box::new(verifier));
     }
 
-    if let Some(annotations) = matches.values_of("annotations") {
-        let mut values: HashMap<String, String> = HashMap::new();
-        for annotation in annotations {
-            let tmp: Vec<_> = annotation.splitn(2, "=").collect();
-            if tmp.len() == 2 {
-                values.insert(String::from(tmp[0]), String::from(tmp[1]));
-            }
-        }
-        if !values.is_empty() {
-            let annotations_verifier = AnnotationVerifier {
-                annotations: values,
-            };
-            verification_constraint.push(Box::new(annotations_verifier));
-        }
+    if !matches.is_present("cert-email")
+        && !matches.is_present("cert-url")
+        && !matches.is_present("key")
+        && !annotations.is_empty()
+    {
+        // if the user only calls with `--annotations`, verify that all
+        // signatures contain the passed annotations
+        let annotations_verifier = AnnotationVerifier {
+            annotations: annotations.clone(),
+        };
+        verification_constraint.push(Box::new(annotations_verifier));
     }
 
     let image: &str = matches.value_of("IMAGE").unwrap();

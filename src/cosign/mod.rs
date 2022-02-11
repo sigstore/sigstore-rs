@@ -69,7 +69,7 @@ pub trait CosignCapabilities {
     ///
     /// When Fulcio's integration has been enabled, the returned `SignatureLayer`
     /// objects have been verified using the certificates bundled inside of the
-    /// signature image. All these certificates have been issues by Fulcio's CA.
+    /// signature image. All these certificates have been issued by Fulcio's CA.
     ///
     /// When Rekor's integration is enabled, the [`SignatureLayer`] objects have
     /// been successfully verified using the Bundle object found inside of the
@@ -205,16 +205,20 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: Some(issuer.clone()),
+            annotations: annotations.clone(),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: None,
+            annotations: annotations.clone(),
         };
         constraints.push(Box::new(vc));
 
-        let vc = AnnotationVerifier { annotations };
+        let vc = AnnotationVerifier {
+            annotations: annotations.clone(),
+        };
         constraints.push(Box::new(vc));
 
         let matches = filter_signature_layers(&layers, constraints)
@@ -260,16 +264,20 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: Some(issuer.clone()),
+            annotations: annotations.clone(),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
             issuer: None,
+            annotations: annotations.clone(),
         };
         constraints.push(Box::new(vc));
 
-        let vc = AnnotationVerifier { annotations };
+        let vc = AnnotationVerifier {
+            annotations: annotations.clone(),
+        };
         constraints.push(Box::new(vc));
 
         let error =
