@@ -1,6 +1,6 @@
-This is a simple example program that shows how perform cosign verification.
+This is a simple example program that shows how to perform cosign verifications.
 
-The program allows also to use annotation, in the same way as `cosign verify -a key=value`
+The program allows also to use annotations, in the same way as `cosign verify -a key=value`
 does.
 
 The program prints to the standard output all the Simple Signing objects that
