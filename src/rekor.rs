@@ -182,7 +182,7 @@ pub async fn rekor_upload(
     let rest: &str = &response[69..response.len() - 2];
     let sum = "{\"uuid\": ".to_string() + &(uuid.to_owned()) + "," + rest;
     let v: Result<Post, serde_json::Error> = serde_json::from_str(&sum);
-    v.or_else(|err| Err(Box::new(err) as Box<dyn std::error::Error>))
+    v.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
 }
 
 #[cfg(test)]
