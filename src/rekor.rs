@@ -28,12 +28,31 @@ pub struct Root {
     pub spec: Spec,
 }
 
+impl Root {
+    pub fn new(api_version: String, kind: String, spec: Spec) -> Root {
+        Root {
+            api_version: api_version,
+            kind: kind,
+            spec: spec,
+        }
+    }
+}
+
 /// Stores the Signature and Data struct
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Spec {
     pub signature: Signature,
     pub data: Data,
+}
+
+impl Spec {
+    pub fn new(signature: Signature, data: Data) -> Spec {
+        Spec {
+            signature: signature,
+            data: data,
+        }
+    }
 }
 
 /// Stores the signature format, signature of the artifact and the PublicKey struct
@@ -45,11 +64,27 @@ pub struct Signature {
     pub public_key: PublicKey,
 }
 
+impl Signature {
+    pub fn new(format: String, content: String, public_key: PublicKey) -> Signature {
+        Signature {
+            format: format,
+            content: content,
+            public_key: public_key,
+        }
+    }
+}
+
 /// Stores the public key used to sign the artifact
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKey {
     pub content: String,
+}
+
+impl PublicKey {
+    pub fn new(content: String) -> PublicKey {
+        PublicKey { content: content }
+    }
 }
 
 /// Stores the Hash struct and location of the file
@@ -60,12 +95,30 @@ pub struct Data {
     pub url: String,
 }
 
+impl Data {
+    pub fn new(hash: Hash, url: String) -> Data {
+        Data {
+            hash: hash,
+            url: url,
+        }
+    }
+}
+
 /// Stores the algorithm used to hash the artifact and the value of the hash
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hash {
     pub algorithm: String,
     pub value: String,
+}
+
+impl Hash {
+    pub fn new(algorithm: String, value: String) -> Hash {
+        Hash {
+            algorithm: algorithm,
+            value: value,
+        }
+    }
 }
 
 /// Stores the response returned by Rekor after making a new entry
@@ -88,51 +141,7 @@ pub struct Verification {
 }
 
 /// Creates an entry in the Rekor server
-pub async fn rekor_upload(
-    api_version_val: String,
-    object_type: String,
-    key_format: String,
-    signature_val: String,
-    pub_key_val: String,
-    file_url: String,
-    algorithm_name: String,
-    hash_val: String,
-) -> Result<Post, Box<dyn Error>> {
-    // This is the body of the post request
-    let body = Root {
-        api_version: api_version_val,
-        kind: object_type,
-        spec: Spec {
-            signature: Signature {
-                format: key_format,
-                content: signature_val,
-                public_key: PublicKey {
-                    content: pub_key_val,
-                },
-            },
-            data: Data {
-                url: file_url,
-                hash: Hash {
-                    algorithm: algorithm_name,
-                    value: hash_val,
-                },
-            },
-        },
-    };
-
-    /*
-    (Not for testing)
-    To make a post request to create an entry in the live Rekor server :
-
-    let response = reqwest::Client::new()
-        .post("https://rekor.sigstore.dev/api/v1/log/entries")
-        .json(&body)
-        .send()
-        .await?
-        .text()
-        .await?;
-    */
-
+pub async fn rekor_upload(body: Root) -> Result<Post, Box<dyn Error>> {
     // Let's create a mock Rekor Server for testing
     let server = httpmock::MockServer::start();
     server.mock(|when, then| {
@@ -145,6 +154,11 @@ pub async fn rekor_upload(
             );
     });
 
+    /*
+    To make a post request to create an entry in the live Rekor server
+    use the url "https://rekor.sigstore.dev/api/v1/log/entries"
+    */
+
     let response = reqwest::Client::new()
         .post(server.url("/api/v1/log/entries"))
         .json(&body)
@@ -152,10 +166,6 @@ pub async fn rekor_upload(
         .await?
         .text()
         .await?;
-
-    // println!();
-    // println!("{:#?}", response);
-    // println!();
 
     /*
     We need to modify the response before we can read it into a Struct
@@ -188,28 +198,39 @@ pub async fn rekor_upload(
 #[cfg(test)]
 mod tests {
 
-    use crate::rekor::rekor_upload;
+    use crate::rekor::{rekor_upload, Data, Hash, PublicKey, Root, Signature, Spec};
 
     #[tokio::test]
     async fn verify_rekor_upload() -> Result<(), reqwest::Error> {
-        let response = rekor_upload(
-        "0.0.1".to_string(),
-        "rekord".to_string(),
-        "ssh".to_string(),
-        "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWcvdmVTYzRvbHBLdE1vT1I3cndmOFZHSHpoaApnMEZJb0R0YzVSMkpsdHpHZ0FBQUFFWm1sc1pRQUFBQUFBQUFBR2MyaGhOVEV5QUFBQVV3QUFBQXR6YzJndFpXUXlOVFV4Ck9RQUFBRUR4VFg4dDMva0lvbEpYai9aZnJXQTAvNUg2cEhSTUhEeWNmWStPR3M0MUhXMCt0bkxESGFuQ3R3NGtsY3BpZk0KTHVLdk5LYXB6V0hiazh5d3NHRTVvTAotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K".to_string(),
-        "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSVA3M2tuT0tKYVNyVEtEa2U2OEgvRlJoODRZWU5CU0tBN1hPVWRpWmJjeG8gdGVzdEByZWtvci5kZXYK".to_string(),
-        "https://raw.githubusercontent.com/jyotsna-penumaka/integrate-rekor/main/README.md".to_string(),
-        "sha256".to_string(),
-        "58f7c1bab6fc37b4679abf5971898d0b61cd29c9afe153bfcfafabb23c256883".to_string()).await;
-        assert!(response.is_ok());
+        let hash = Hash::new(
+            "sha256".to_string(),
+            "58f7c1bab6fc37b4679abf5971898d0b61cd29c9afe153bfcfafabb23c256883".to_string(),
+        );
+        let data = Data::new(
+            hash,
+            "https://raw.githubusercontent.com/jyotsna-penumaka/integrate-rekor/main/README.md"
+                .to_string(),
+        );
+        let public_key = PublicKey::new(
+            "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSVA3M2tuT0tKYVNyVEtEa2U2OEgvRlJoODRZWU5CU0tBN1hPVWRpWmJjeG8gdGVzdEByZWtvci5kZXYK".to_string(),
+        );
+        let signature = Signature::new(
+            "ssh".to_string(),
+            "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWcvdmVTYzRvbHBLdE1vT1I3cndmOFZHSHpoaApnMEZJb0R0YzVSMkpsdHpHZ0FBQUFFWm1sc1pRQUFBQUFBQUFBR2MyaGhOVEV5QUFBQVV3QUFBQXR6YzJndFpXUXlOVFV4Ck9RQUFBRUR4VFg4dDMva0lvbEpYai9aZnJXQTAvNUg2cEhSTUhEeWNmWStPR3M0MUhXMCt0bkxESGFuQ3R3NGtsY3BpZk0KTHVLdk5LYXB6V0hiazh5d3NHRTVvTAotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K".to_string(),
+            public_key,
+        );
+        let spec = Spec::new(signature, data);
+        let root = Root::new("0.0.1".to_string(), "rekord".to_string(), spec);
+
+        let response = rekor_upload(root);
+        assert!(response.await.is_ok());
+
         Ok(())
     }
 }
 
 /*
 TO DO:
-1. replace isach with request once you get it to work
-2. Check if you can move httpmock = "0.6", isahc = "1.6.0" into dev-dependencies
-
-
+1. Custom default implementation of Root
+2. Use a builder pattern to make the body of the request
 */
