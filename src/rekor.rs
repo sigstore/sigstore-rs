@@ -19,20 +19,54 @@ use serde_derive::Deserialize;
 use serde_derive::Serialize;
 
 /// Stores the Rekor object type, API version and the Spec struct
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Root {
+pub struct Rekord {
     pub api_version: String,
     pub kind: String,
     pub spec: Spec,
 }
 
-impl Root {
-    pub fn new(api_version: String, kind: String, spec: Spec) -> Root {
-        Root {
-            api_version,
-            kind,
+impl Rekord {
+    pub fn new() -> RekordBuilder {
+        RekordBuilder::default()
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RekordBuilder {
+    pub api_version: String,
+    pub kind: String,
+    pub spec: Spec,
+}
+
+impl RekordBuilder {
+    pub fn new(spec: Spec) -> RekordBuilder {
+        RekordBuilder {
+            api_version: String::from("0.0.1"),
+            kind: String::from("rekord"),
             spec,
+        }
+    }
+
+    pub fn api_version(mut self, api_version: String) -> RekordBuilder {
+        // Set the api version on the RekordBuilder itself, and return the builder by value.
+        self.api_version = api_version;
+        self
+    }
+
+    pub fn kind(mut self, kind: String) -> RekordBuilder {
+        // Set the kind (Rekor type) on the RekordBuilder itself, and return the builder by value.
+        self.kind = kind;
+        self
+    }
+
+    pub fn build(self) -> Rekord {
+        Rekord {
+            api_version: self.api_version,
+            kind: self.kind,
+            spec: self.spec,
         }
     }
 }
@@ -61,11 +95,39 @@ pub struct Signature {
 }
 
 impl Signature {
-    pub fn new(format: String, content: String, public_key: PublicKey) -> Signature {
-        Signature {
-            format,
+    pub fn new() -> SignatureBuilder {
+        SignatureBuilder::default()
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureBuilder {
+    pub format: String,
+    pub content: String,
+    pub public_key: PublicKey,
+}
+
+impl SignatureBuilder {
+    pub fn new(content: String, public_key: PublicKey) -> SignatureBuilder {
+        SignatureBuilder {
+            format: String::from("ssh"),
             content,
             public_key,
+        }
+    }
+
+    pub fn format(mut self, format: String) -> SignatureBuilder {
+        // Set the format on the SignatureBuilder itself, and return the builder by value.
+        self.format = format;
+        self
+    }
+
+    pub fn build(self) -> Signature {
+        Signature {
+            format: self.format,
+            content: self.content,
+            public_key: self.public_key,
         }
     }
 }
@@ -106,15 +168,44 @@ pub struct Hash {
 }
 
 impl Hash {
-    pub fn new(algorithm: String, value: String) -> Hash {
-        Hash { algorithm, value }
+    pub fn new() -> HashBuilder {
+        HashBuilder::default()
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashBuilder {
+    pub algorithm: String,
+    pub value: String,
+}
+
+impl HashBuilder {
+    pub fn new(value: String) -> HashBuilder {
+        HashBuilder {
+            algorithm: "sha256".to_string(),
+            value,
+        }
+    }
+
+    pub fn algorithm(mut self, algorithm: String) -> HashBuilder {
+        // Set the algorithm on the HashBuilder itself, and return the builder by value.
+        self.algorithm = algorithm;
+        self
+    }
+
+    pub fn build(self) -> Hash {
+        Hash {
+            algorithm: self.algorithm,
+            value: self.value,
+        }
     }
 }
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Post {
+pub struct LogEntry {
     uuid: String,
     body: String,
     integrated_time: i64,
@@ -133,11 +224,13 @@ pub struct Verification {
 #[cfg(test)]
 mod tests {
 
-    use crate::rekor::{Data, Hash, Post, PublicKey, Root, Signature, Spec};
+    use crate::rekor::{
+        Data, HashBuilder, LogEntry, PublicKey, Rekord, RekordBuilder, SignatureBuilder, Spec,
+    };
     use std::error::Error;
 
     /// Creates an entry in the Rekor server
-    pub async fn rekor_upload(body: Root) -> Result<Post, Box<dyn Error>> {
+    pub async fn rekor_upload(body: Rekord) -> Result<LogEntry, Box<dyn Error>> {
         // Let's create a mock Rekor Server for testing
         let server = httpmock::MockServer::start();
         server.mock(|when, then| {
@@ -180,48 +273,37 @@ mod tests {
         }
 
         Since there is no member called "uuid" in the json body,
-        we cannot read it into the Post struct.
+        we cannot read it into the LogEntry struct.
         So we add "{\"uuid\": " to the returned response and make it a valid json
         */
 
         let uuid: &str = &response[1..67];
         let rest: &str = &response[69..response.len() - 2];
         let sum = "{\"uuid\": ".to_string() + &(uuid.to_owned()) + "," + rest;
-        let v: Result<Post, serde_json::Error> = serde_json::from_str(&sum);
+        let v: Result<LogEntry, serde_json::Error> = serde_json::from_str(&sum);
         v.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
     }
 
     #[tokio::test]
     async fn verify_rekor_upload() -> Result<(), reqwest::Error> {
-        let hash = Hash::new(
-            "sha256".to_string(),
-            "58f7c1bab6fc37b4679abf5971898d0b61cd29c9afe153bfcfafabb23c256883".to_string(),
-        );
-        let data = Data::new(
-            hash,
+        let hash_val =
+            "58f7c1bab6fc37b4679abf5971898d0b61cd29c9afe153bfcfafabb23c256883".to_string();
+        let file_url =
             "https://raw.githubusercontent.com/jyotsna-penumaka/integrate-rekor/main/README.md"
-                .to_string(),
-        );
-        let public_key = PublicKey::new(
-            "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSVA3M2tuT0tKYVNyVEtEa2U2OEgvRlJoODRZWU5CU0tBN1hPVWRpWmJjeG8gdGVzdEByZWtvci5kZXYK".to_string(),
-        );
-        let signature = Signature::new(
-            "ssh".to_string(),
-            "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWcvdmVTYzRvbHBLdE1vT1I3cndmOFZHSHpoaApnMEZJb0R0YzVSMkpsdHpHZ0FBQUFFWm1sc1pRQUFBQUFBQUFBR2MyaGhOVEV5QUFBQVV3QUFBQXR6YzJndFpXUXlOVFV4Ck9RQUFBRUR4VFg4dDMva0lvbEpYai9aZnJXQTAvNUg2cEhSTUhEeWNmWStPR3M0MUhXMCt0bkxESGFuQ3R3NGtsY3BpZk0KTHVLdk5LYXB6V0hiazh5d3NHRTVvTAotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K".to_string(),
-            public_key,
-        );
-        let spec = Spec::new(signature, data);
-        let root = Root::new("0.0.1".to_string(), "rekord".to_string(), spec);
+                .to_string();
+        let pub_key_content = "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSVA3M2tuT0tKYVNyVEtEa2U2OEgvRlJoODRZWU5CU0tBN1hPVWRpWmJjeG8gdGVzdEByZWtvci5kZXYK".to_string();
+        let signature_content = "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWcvdmVTYzRvbHBLdE1vT1I3cndmOFZHSHpoaApnMEZJb0R0YzVSMkpsdHpHZ0FBQUFFWm1sc1pRQUFBQUFBQUFBR2MyaGhOVEV5QUFBQVV3QUFBQXR6YzJndFpXUXlOVFV4Ck9RQUFBRUR4VFg4dDMva0lvbEpYai9aZnJXQTAvNUg2cEhSTUhEeWNmWStPR3M0MUhXMCt0bkxESGFuQ3R3NGtsY3BpZk0KTHVLdk5LYXB6V0hiazh5d3NHRTVvTAotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K".to_string();
 
-        let response = rekor_upload(root);
+        let hash = HashBuilder::new(hash_val).build();
+        let data = Data::new(hash, file_url);
+        let public_key = PublicKey::new(pub_key_content);
+        let signature = SignatureBuilder::new(signature_content, public_key).build();
+        let spec = Spec::new(signature, data);
+        let rekord = RekordBuilder::new(spec).build();
+        let response = rekor_upload(rekord);
+
         assert!(response.await.is_ok());
 
         Ok(())
     }
 }
-
-/*
-TO DO:
-1. Custom default implementation of Root
-2. Use a builder pattern to make the body of the request
-*/
