@@ -17,7 +17,6 @@
 
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use std::error::Error;
 
 /// Stores the Rekor object type, API version and the Spec struct
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,9 +30,9 @@ pub struct Root {
 impl Root {
     pub fn new(api_version: String, kind: String, spec: Spec) -> Root {
         Root {
-            api_version: api_version,
-            kind: kind,
-            spec: spec,
+            api_version,
+            kind,
+            spec,
         }
     }
 }
@@ -48,10 +47,7 @@ pub struct Spec {
 
 impl Spec {
     pub fn new(signature: Signature, data: Data) -> Spec {
-        Spec {
-            signature: signature,
-            data: data,
-        }
+        Spec { signature, data }
     }
 }
 
@@ -67,9 +63,9 @@ pub struct Signature {
 impl Signature {
     pub fn new(format: String, content: String, public_key: PublicKey) -> Signature {
         Signature {
-            format: format,
-            content: content,
-            public_key: public_key,
+            format,
+            content,
+            public_key,
         }
     }
 }
@@ -83,7 +79,7 @@ pub struct PublicKey {
 
 impl PublicKey {
     pub fn new(content: String) -> PublicKey {
-        PublicKey { content: content }
+        PublicKey { content }
     }
 }
 
@@ -97,10 +93,7 @@ pub struct Data {
 
 impl Data {
     pub fn new(hash: Hash, url: String) -> Data {
-        Data {
-            hash: hash,
-            url: url,
-        }
+        Data { hash, url }
     }
 }
 
@@ -114,10 +107,7 @@ pub struct Hash {
 
 impl Hash {
     pub fn new(algorithm: String, value: String) -> Hash {
-        Hash {
-            algorithm: algorithm,
-            value: value,
-        }
+        Hash { algorithm, value }
     }
 }
 
@@ -140,11 +130,17 @@ pub struct Verification {
     signed_entry_timestamp: String,
 }
 
-/// Creates an entry in the Rekor server
-pub async fn rekor_upload(body: Root) -> Result<Post, Box<dyn Error>> {
-    // Let's create a mock Rekor Server for testing
-    let server = httpmock::MockServer::start();
-    server.mock(|when, then| {
+#[cfg(test)]
+mod tests {
+
+    use crate::rekor::{Data, Hash, Post, PublicKey, Root, Signature, Spec};
+    use std::error::Error;
+
+    /// Creates an entry in the Rekor server
+    pub async fn rekor_upload(body: Root) -> Result<Post, Box<dyn Error>> {
+        // Let's create a mock Rekor Server for testing
+        let server = httpmock::MockServer::start();
+        server.mock(|when, then| {
         when.method("POST")
             .path("/api/v1/log/entries")
             .json_body_obj(&body);
@@ -154,51 +150,46 @@ pub async fn rekor_upload(body: Root) -> Result<Post, Box<dyn Error>> {
             );
     });
 
-    /*
-    To make a post request to create an entry in the live Rekor server
-    use the url "https://rekor.sigstore.dev/api/v1/log/entries"
-    */
+        /*
+        To make a post request to create an entry in the live Rekor server
+        use the url "https://rekor.sigstore.dev/api/v1/log/entries"
+        */
 
-    let response = reqwest::Client::new()
-        .post(server.url("/api/v1/log/entries"))
-        .json(&body)
-        .send()
-        .await?
-        .text()
-        .await?;
+        let response = reqwest::Client::new()
+            .post(server.url("/api/v1/log/entries"))
+            .json(&body)
+            .send()
+            .await?
+            .text()
+            .await?;
 
-    /*
-    We need to modify the response before we can read it into a Struct
+        /*
+        We need to modify the response before we can read it into a Struct
 
-    This is the response that is returned by Rekor:
-    {
-        "9bf4f37447a48848c1f69b6463190cd6cef7728d6b86b7723f08aad0c54cb8d4": {
-            "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoicmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI0NmJkMzE5ZDM1OTBkMmI0ZDdjN2EyN2M5OWQzMmY3ZWE2MGE4NTBlYzM4MDYzNTFlMDRkMTYxZDAxNGVjYzAxIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6IkxTMHRMUzFDUlVkSlRpQlRVMGdnVTBsSFRrRlVWVkpGTFMwdExTMEtWVEZPU1ZVd2JFaEJRVUZCUVZGQlFVRkVUVUZCUVVGTVl6Tk9iMHhYVm10TmFsVXhUVlJyUVVGQlFXY3ZkbVZUWXpSdmJIQkxkRTF2VDFJM2NuZG1PQXBXUjBoNmFHaG5NRVpKYjBSMFl6VlNNa3BzZEhwSFowRkJRVUZGV20xc2MxcFJRVUZCUVVGQlFVRkJSMk15YUdoT1ZFVjVRVUZCUVZWM1FVRkJRWFI2Q21NeVozUmFWMUY1VGxSVmVFOVJRVUZCUlVKalEydDBaME14V1dwcmIzZEtkSEJzZVhCRFNEUTJhbkV5UW1Sb05tUjZhblIwZVd0SFpWRjVLMG8xZUhvS2RIRlVlbXRqUXpCWVNHRkZZWEZPZFdNMWNURnpUbEZNWTJRNFNEUjRNM0ZLU2xSRFFsRnZUd290TFMwdExVVk9SQ0JUVTBnZ1UwbEhUa0ZVVlZKRkxTMHRMUzBLIiwiZm9ybWF0Ijoic3NoIiwicHVibGljS2V5Ijp7ImNvbnRlbnQiOiJjM05vTFdWa01qVTFNVGtnUVVGQlFVTXpUbnBoUXpGc1drUkpNVTVVUlRWQlFVRkJTVkEzTTJ0dVQwdEtZVk55VkV0RWEyVTJPRWd2UmxKb09EUlpXVTVDVTB0Qk4xaFBWV1JwV21KamVHOEsifX19fQ==",
-            "integratedTime": 1643749079,
-            "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d",
-            "logIndex": 1236200,
-            "verification": {
-                "signedEntryTimestamp": "MEQCID3QHHXwGauKUfFvs0YCMKZ4e3BE1ZIhrJ5RHnoHGophAiA/R5cDc8JnSUq6F7U/8oTk8/mn7QCdDXI+NRT7qm78+Q=="
+        This is the response that is returned by Rekor:
+        {
+            "9bf4f37447a48848c1f69b6463190cd6cef7728d6b86b7723f08aad0c54cb8d4": {
+                "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoicmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI0NmJkMzE5ZDM1OTBkMmI0ZDdjN2EyN2M5OWQzMmY3ZWE2MGE4NTBlYzM4MDYzNTFlMDRkMTYxZDAxNGVjYzAxIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6IkxTMHRMUzFDUlVkSlRpQlRVMGdnVTBsSFRrRlVWVkpGTFMwdExTMEtWVEZPU1ZVd2JFaEJRVUZCUVZGQlFVRkVUVUZCUVVGTVl6Tk9iMHhYVm10TmFsVXhUVlJyUVVGQlFXY3ZkbVZUWXpSdmJIQkxkRTF2VDFJM2NuZG1PQXBXUjBoNmFHaG5NRVpKYjBSMFl6VlNNa3BzZEhwSFowRkJRVUZGV20xc2MxcFJRVUZCUVVGQlFVRkJSMk15YUdoT1ZFVjVRVUZCUVZWM1FVRkJRWFI2Q21NeVozUmFWMUY1VGxSVmVFOVJRVUZCUlVKalEydDBaME14V1dwcmIzZEtkSEJzZVhCRFNEUTJhbkV5UW1Sb05tUjZhblIwZVd0SFpWRjVLMG8xZUhvS2RIRlVlbXRqUXpCWVNHRkZZWEZPZFdNMWNURnpUbEZNWTJRNFNEUjRNM0ZLU2xSRFFsRnZUd290TFMwdExVVk9SQ0JUVTBnZ1UwbEhUa0ZVVlZKRkxTMHRMUzBLIiwiZm9ybWF0Ijoic3NoIiwicHVibGljS2V5Ijp7ImNvbnRlbnQiOiJjM05vTFdWa01qVTFNVGtnUVVGQlFVTXpUbnBoUXpGc1drUkpNVTVVUlRWQlFVRkJTVkEzTTJ0dVQwdEtZVk55VkV0RWEyVTJPRWd2UmxKb09EUlpXVTVDVTB0Qk4xaFBWV1JwV21KamVHOEsifX19fQ==",
+                "integratedTime": 1643749079,
+                "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d",
+                "logIndex": 1236200,
+                "verification": {
+                    "signedEntryTimestamp": "MEQCID3QHHXwGauKUfFvs0YCMKZ4e3BE1ZIhrJ5RHnoHGophAiA/R5cDc8JnSUq6F7U/8oTk8/mn7QCdDXI+NRT7qm78+Q=="
+                }
             }
         }
+
+        Since there is no member called "uuid" in the json body,
+        we cannot read it into the Post struct.
+        So we add "{\"uuid\": " to the returned response and make it a valid json
+        */
+
+        let uuid: &str = &response[1..67];
+        let rest: &str = &response[69..response.len() - 2];
+        let sum = "{\"uuid\": ".to_string() + &(uuid.to_owned()) + "," + rest;
+        let v: Result<Post, serde_json::Error> = serde_json::from_str(&sum);
+        v.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
     }
-
-    Since there is no member called "uuid" in the json body,
-    we cannot read it into the Post struct.
-    So we add "{\"uuid\": " to the returned response and make it a valid json
-    */
-
-    let uuid: &str = &response[1..67];
-    let rest: &str = &response[69..response.len() - 2];
-    let sum = "{\"uuid\": ".to_string() + &(uuid.to_owned()) + "," + rest;
-    let v: Result<Post, serde_json::Error> = serde_json::from_str(&sum);
-    v.map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::rekor::{rekor_upload, Data, Hash, PublicKey, Root, Signature, Spec};
 
     #[tokio::test]
     async fn verify_rekor_upload() -> Result<(), reqwest::Error> {
