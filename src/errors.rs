@@ -28,6 +28,9 @@ pub enum SigstoreError {
     PEMParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
 
     #[error(transparent)]
+    FromPEMError(#[from] pem::PemError),
+
+    #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
 
     #[error(transparent)]
@@ -36,8 +39,11 @@ pub enum SigstoreError {
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
 
-    #[error(transparent)]
-    EcdsaError(#[from] ecdsa::Error),
+    #[error("Public key with unsupported algorithm: {0}")]
+    PublicKeyUnsupportedAlgorithmError(String),
+
+    #[error("Public key verification error")]
+    PublicKeyVerificationError,
 
     #[error("Certificate validity check failed: cannot be used before {0}")]
     CertificateValidityError(String),

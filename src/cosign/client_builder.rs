@@ -16,7 +16,9 @@
 use tracing::info;
 
 use super::client::Client;
-use crate::crypto;
+use crate::crypto::{
+    certificate::extract_public_key_from_pem_cert, CosignVerificationKey, SignatureDigestAlgorithm,
+};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
 
@@ -86,7 +88,10 @@ impl ClientBuilder {
                 info!("rekor public key not provided");
                 None
             }
-            Some(der) => Some(crypto::new_verification_key(&der)?),
+            Some(data) => Some(CosignVerificationKey::from_pem(
+                data.as_bytes(),
+                SignatureDigestAlgorithm::default(),
+            )?),
         };
 
         let fulcio_pub_key_der = match self.fulcio_cert {
@@ -94,7 +99,7 @@ impl ClientBuilder {
                 info!("The fulcio cert has not been provided");
                 None
             }
-            Some(cert) => Some(crypto::extract_public_key_from_pem_cert(&cert)?),
+            Some(cert) => Some(extract_public_key_from_pem_cert(&cert)?),
         };
 
         let oci_client =
