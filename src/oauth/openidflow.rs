@@ -14,6 +14,7 @@
 // limitations under the License.
 #![allow(warnings, unused)]
 
+use std::io;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use openidconnect::core::{
@@ -72,10 +73,16 @@ impl OpenID {
     }
 }
 
-pub fn redirect_listener(_csrf_state: CsrfToken, client: CoreClient, nonce: Nonce, pkce_verifier: PkceCodeVerifier)  {
+pub fn redirect_listener(_csrf_state: CsrfToken,
+    client: CoreClient,
+    nonce: Nonce, pkce_verifier:
+    PkceCodeVerifier)
+    ->
+    String {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    let email = String::new();
     println!("Requesting access token...\n");
-    let _result = for stream in listener.incoming() {
+    for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
             let code;
             #[allow(dead_code)]
@@ -112,7 +119,7 @@ pub fn redirect_listener(_csrf_state: CsrfToken, client: CoreClient, nonce: Nonc
                 state = CsrfToken::new(value.into_owned());
             }
 
-            let html_page = "<html><body>Sigstore Auth Successful!</body></html>";
+            let html_page = "<html><title>Sigstore Auth</title><body><h1>Sigstore Auth Successful</h1><p>You may now close this page.</p></body></html>";
 
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
@@ -143,18 +150,23 @@ pub fn redirect_listener(_csrf_state: CsrfToken, client: CoreClient, nonce: Nonc
                     unreachable!();
                 });
 
-            println!("ID TOKEN CLAIMS: {:?}", id_token_claims.access_token_hash());
+            // println!("ID TOKEN CLAIMS: {:?}", id_token_claims.access_token_hash());
 
             match id_token_claims.email() {
                 Some(email) => println!("ID TOKEN CLAIMS: {:?}", email),
                 None => println!("ID TOKEN CLAIMS: {:?}", "No email found"),
             }
 
-            println!(
-                "User scope granted with e-mail address {}",
-                id_token_claims.email().map(|email| email.as_str()).unwrap_or("<not provided>"),
-            );
+            let email = id_token_claims.email().unwrap().to_string();
+            println!("EMAIL: {:?}", email);
+
+            // println!(
+            //     "User scope granted with e-mail address {}",
+            //     id_token_claims.email().map(|email| email.as_str()).unwrap_or("<not provided>"),
+            // );
             break;
         }
     };
+    // println!("EMAIL OUTER: {:?}", email);
+    email // return the email here to the client
 }
