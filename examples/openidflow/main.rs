@@ -15,20 +15,21 @@
 
 extern crate sigstore;
 
-use sigstore::openidconnect;
+use sigstore::oauth;
 
 
 fn main() {
-    let (authorize_url, csrf_state, client, nonce) = openidconnect::openidconnect::OpenID::auth_url(
+    let (authorize_url, csrf_state, client, nonce, pkce_verifier) = oauth::openidflow::OpenID::auth_url(
         "sigstore".to_string(),
         "".to_string(),
         "https://oauth2.sigstore.dev/auth".to_string(),
     );
-    println!("{:?}", authorize_url);
-    println!("{:?}", csrf_state);
-    println!("{:?}", nonce);
     if open::that(authorize_url.to_string()).is_ok() {
-        println!("Look at your browser !");
+        println!(
+            "Open this URL in your browser:\n{}\n",
+            authorize_url.to_string()
+        );
     }
-    openidconnect::openidconnect::redirect_listener(csrf_state, client, nonce)
+
+    let _result = oauth::openidflow::redirect_listener(csrf_state, client, nonce, pkce_verifier);
 }

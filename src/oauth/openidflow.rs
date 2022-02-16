@@ -12,6 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![allow(warnings, unused)]
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -20,11 +21,9 @@ use openidconnect::core::{
 };
 use openidconnect::reqwest::http_client;
 use openidconnect::{
-    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce, RedirectUrl, Scope,
+    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce, RedirectUrl, Scope, StandardTokenResponse, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier
 };
 use url::Url;
-
-use crate::cosign::Client;
 
 #[derive(Debug, PartialEq)]
 pub struct OpenID {
@@ -35,10 +34,13 @@ pub struct OpenID {
 
 
 impl OpenID {
-    pub fn auth_url(oidc_client_id: String, oidc_client_secret: String, oidc_issuer: String) -> (Url, CsrfToken, CoreClient, Nonce) {
+    pub fn auth_url(oidc_client_id: String, oidc_client_secret: String, oidc_issuer: String) -> (Url, CsrfToken, CoreClient, Nonce, PkceCodeVerifier) {
         let oidc_client_id = ClientId::new(oidc_client_id);
         let oidc_client_secret = ClientSecret::new(oidc_client_secret);
         let oidc_issuer = IssuerUrl::new(oidc_issuer).expect("Missing the OIDC_ISSUER.");
+
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
 
          let provider_metadata = CoreProviderMetadata::discover(&oidc_issuer, http_client)
             .unwrap_or_else(|_err| {
@@ -64,26 +66,19 @@ impl OpenID {
 
         .add_scope(Scope::new("email".to_string()))
         .add_scope(Scope::new("profile".to_string()))
+        .set_pkce_challenge(pkce_challenge)
         .url();
-
-        // println!(
-        //     "Open this URL in your browser:\n{}\n",
-        //     authorize_url.to_string()
-        // );
-        // if open::that(authorize_url.to_string()).is_ok() {
-        //     println!("Look at your browser !");
-        // }
-
-        // redirect_listener(csrf_state, client, nonce);
-        return (authorize_url, csrf_state, client, nonce);
+        return (authorize_url, csrf_state, client, nonce, pkce_verifier);
     }
 }
 
-pub fn redirect_listener(csrf_state: CsrfToken, client: CoreClient, nonce: Nonce) {
+pub fn redirect_listener(_csrf_state: CsrfToken, client: CoreClient, nonce: Nonce, pkce_verifier: PkceCodeVerifier)  {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-    let result = for stream in listener.incoming() {
+    println!("Requesting access token...\n");
+    let _result = for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
             let code;
+            #[allow(dead_code)]
             let state;
             {
                 let mut reader = BufReader::new(&stream);
@@ -126,26 +121,16 @@ pub fn redirect_listener(csrf_state: CsrfToken, client: CoreClient, nonce: Nonce
             );
             // let _newstate = &state;
             stream.write_all(response.as_bytes()).unwrap();
-            println!(
-                "Open ID state:\n{} (expected `{}`)\n",
-                state.secret(),
-                csrf_state.secret()
-            );
 
             // Exchange the code with a token.
             let token_response = client
                 .exchange_code(code)
+                .set_pkce_verifier(pkce_verifier)
                 .request(http_client)
                 .unwrap_or_else(|_err| {
                     println!("Failed to access token endpoint");
                     unreachable!();
                 });
-
-            // println!(
-            //     "sigstore returned access token:\n{}\n",
-            //     token_response.access_token().secret()
-            // );
-            // println!("sigstore eturned scopes: {:?}", token_response.scopes());
 
             let id_token_verifier: CoreIdTokenVerifier = client.id_token_verifier();
             let id_token_claims: &CoreIdTokenClaims = token_response
@@ -157,10 +142,16 @@ pub fn redirect_listener(csrf_state: CsrfToken, client: CoreClient, nonce: Nonce
                     println!("Failed to verify ID token");
                     unreachable!();
                 });
-            // println!("Sigstore returned ID token: {:?}", id_token_claims);
-            // The server will terminate itself after collecting the first code.
+
+            println!("ID TOKEN CLAIMS: {:?}", id_token_claims.access_token_hash());
+
+            match id_token_claims.email() {
+                Some(email) => println!("ID TOKEN CLAIMS: {:?}", email),
+                None => println!("ID TOKEN CLAIMS: {:?}", "No email found"),
+            }
+
             println!(
-                "User with e-mail address {} has authenticated successfully",
+                "User scope granted with e-mail address {}",
                 id_token_claims.email().map(|email| email.as_str()).unwrap_or("<not provided>"),
             );
             break;
