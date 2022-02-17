@@ -133,7 +133,10 @@ mod tests {
     use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
     use crate::cosign::verification_constraint::{AnnotationVerifier, CertSubjectEmailVerifier};
-    use crate::crypto::{self, extract_public_key_from_pem_cert, CosignVerificationKey};
+    use crate::crypto::{
+        certificate::extract_public_key_from_pem_cert, CosignVerificationKey,
+        SignatureDigestAlgorithm,
+    };
     use crate::simple_signing::Optional;
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
@@ -161,7 +164,11 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
     }
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
-        crypto::new_verification_key(REKOR_PUB_KEY).expect("Cannot create test REKOR_PUB_KEY")
+        CosignVerificationKey::from_pem(
+            REKOR_PUB_KEY.as_bytes(),
+            SignatureDigestAlgorithm::default(),
+        )
+        .expect("Cannot create test REKOR_PUB_KEY")
     }
 
     #[test]

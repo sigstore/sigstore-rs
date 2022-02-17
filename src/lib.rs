@@ -68,6 +68,7 @@
 //!     PublicKeyVerifier,
 //!     VerificationConstraintVec,
 //! };
+//! use crate::sigstore::crypto::SignatureDigestAlgorithm;
 //! use crate::sigstore::errors::SigstoreError;
 //!
 //! use std::boxed::Box;
@@ -111,10 +112,12 @@
 //!     annotations,
 //!   };
 //!
-//!   let verification_key = fs::read_to_string("~/cosign.pub")
+//!   let verification_key = fs::read("~/cosign.pub")
 //!     .expect("Cannot read contents of cosign public key");
 //!   let pub_key_verifier = PublicKeyVerifier::new(
-//!     &verification_key).expect("Could not create verifier");
+//!     &verification_key,
+//!     SignatureDigestAlgorithm::default(),
+//!   ).expect("Could not create verifier");
 //!
 //!   let verification_constraints: VerificationConstraintVec = vec![
 //!     Box::new(annotation_verifier),
@@ -159,7 +162,7 @@
 //! Additional examples can be found inside of the [`examples`](https://github.com/sigstore/sigstore-rs/tree/main/examples/)
 //! directory.
 
-mod crypto;
+pub mod crypto;
 mod mock_client;
 
 pub mod cosign;

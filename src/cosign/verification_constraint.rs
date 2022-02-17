@@ -31,7 +31,7 @@
 use std::collections::HashMap;
 
 use super::signature_layers::{CertificateSubject, SignatureLayer};
-use crate::crypto::{self, CosignVerificationKey};
+use crate::crypto::{CosignVerificationKey, SignatureDigestAlgorithm};
 use crate::errors::Result;
 
 /// A list of objects implementing the [`VerificationConstraint`] trait
@@ -76,8 +76,11 @@ impl PublicKeyVerifier {
     /// Create a new instance of `PublicKeyVerifier`.
     /// The `key_raw` variable holds a PEM encoded rapresentation of the
     /// public key to be used at verification time.
-    pub fn new(key_raw: &str) -> Result<Self> {
-        let key = crypto::new_verification_key(key_raw)?;
+    pub fn new(
+        key_raw: &[u8],
+        signature_digest_algorithm: SignatureDigestAlgorithm,
+    ) -> Result<Self> {
+        let key = CosignVerificationKey::from_pem(key_raw, signature_digest_algorithm)?;
         Ok(PublicKeyVerifier { key })
     }
 }

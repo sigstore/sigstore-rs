@@ -28,7 +28,9 @@ use super::constants::{
     SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION,
 };
 use crate::{
-    crypto::{verify_certificate_can_be_trusted, CosignVerificationKey},
+    crypto::{
+        self, CosignVerificationKey, Signature, SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
+    },
     errors::{Result, SigstoreError},
     simple_signing::SimpleSigning,
 };
@@ -262,7 +264,10 @@ impl SignatureLayer {
     /// Given a Cosign public key, check whether this Signature Layer has been
     /// signed by it
     pub(crate) fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> bool {
-        match crate::crypto::verify_signature(verification_key, &self.signature, &self.raw_data) {
+        match verification_key.verify_signature(
+            Signature::Base64Encoded(self.signature.as_bytes()),
+            &self.raw_data,
+        ) {
             Ok(_) => true,
             Err(e) => {
                 debug!(signature=self.signature.as_str(), reason=?e, "Cannot verify signature with the given key");
@@ -328,11 +333,13 @@ impl CertificateSignature {
         let (_, cert) = parse_x509_certificate(&pem.contents)?;
         let integrated_time = trusted_bundle.payload.integrated_time;
 
-        verify_certificate_can_be_trusted(&cert, fulcio_pub_key, integrated_time)?;
+        crypto::certificate::is_trusted(&cert, fulcio_pub_key, integrated_time)?;
 
         let subject = CertificateSubject::from_certificate(&cert)?;
-        let verification_key =
-            crate::crypto::new_verification_key_from_public_key_der(cert.public_key().raw)?;
+        let verification_key = CosignVerificationKey::from_der(
+            cert.public_key().raw,
+            SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
+        )?;
 
         let issuer_extension = cert.tbs_certificate.find_extension(&SIGSTORE_ISSUER_OID);
         let issuer: Option<String> = issuer_extension
@@ -382,6 +389,7 @@ pub(crate) mod tests {
     use x509_parser::traits::FromDer;
 
     use crate::cosign::tests::{get_fulcio_public_key, get_rekor_public_key};
+    use crate::crypto::SignatureDigestAlgorithm;
 
     pub(crate) fn build_correct_signature_layer_without_bundle(
     ) -> (SignatureLayer, CosignVerificationKey) {
@@ -391,7 +399,11 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
         let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
-        let verification_key = crate::crypto::new_verification_key(public_key).unwrap();
+        let verification_key = CosignVerificationKey::from_pem(
+            public_key.as_bytes(),
+            SignatureDigestAlgorithm::default(),
+        )
+        .expect("Cannot create CosignVerificationKey");
         let ss_value = json!({
             "critical": {
                 "identity": {
@@ -485,13 +497,15 @@ oXqqo/C9QnOHTto=
     #[test]
     fn is_signed_by_key_fails_when_signature_is_not_valid() {
         let (signature_layer, _) = build_correct_signature_layer_without_bundle();
-        let verification_key = crate::crypto::new_verification_key(
+        let verification_key = CosignVerificationKey::from_pem(
             r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
 JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
------END PUBLIC KEY-----"#,
+-----END PUBLIC KEY-----"#
+                .as_bytes(),
+            SignatureDigestAlgorithm::default(),
         )
-        .unwrap();
+        .expect("Cannot create CosignVerificationKey");
 
         let actual = signature_layer.is_signed_by_key(&verification_key);
         assert!(!actual, "expected false, got true");
@@ -705,13 +719,15 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let sl = build_correct_signature_layer_with_certificate();
 
         // fail because the signature layer wasn't signed with the given key
-        let verification_key = crate::crypto::new_verification_key(
+        let verification_key = CosignVerificationKey::from_pem(
             r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
 JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
------END PUBLIC KEY-----"#,
+-----END PUBLIC KEY-----"#
+                .as_bytes(),
+            SignatureDigestAlgorithm::default(),
         )
-        .unwrap();
+        .expect("Cannot create CosignVerificationKey");
         assert!(!sl.is_signed_by_key(&verification_key));
     }
 

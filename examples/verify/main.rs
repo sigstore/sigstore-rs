@@ -20,8 +20,10 @@ use sigstore::cosign::verification_constraint::{
 };
 use sigstore::cosign::CosignCapabilities;
 use sigstore::cosign::SignatureLayer;
+use sigstore::crypto::SignatureDigestAlgorithm;
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
+use std::convert::TryFrom;
 
 extern crate anyhow;
 use anyhow::anyhow;
@@ -47,6 +49,16 @@ fn cli() -> App<'static, 'static> {
                 .value_name("KEY")
                 .help("Verification Key")
                 .required(false)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("signature-digest-algorithm")
+                .long("signature-digest-algorithm")
+                .value_name("SIGNATURE-DIGEST-ALGORITHM")
+                .help("digest algorithm to use when processing a signature")
+                .required(true)
+                .default_value("sha256")
+                .possible_values(&["sha256", "sha384", "sha512"])
                 .takes_value(true),
         )
         .arg(
@@ -225,9 +237,12 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         }));
     }
     if let Some(path_to_key) = matches.value_of("key") {
-        let key =
-            fs::read_to_string(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
-        let verifier = PublicKeyVerifier::new(&key)
+        let key = fs::read(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
+        let signature_digest_algorithm = SignatureDigestAlgorithm::try_from(
+            matches.value_of("signature-digest-algorithm").unwrap(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let verifier = PublicKeyVerifier::new(&key, signature_digest_algorithm)
             .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
         verification_constraint.push(Box::new(verifier));
     }
