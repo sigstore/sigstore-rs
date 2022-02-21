@@ -19,6 +19,9 @@ pub type Result<T> = std::result::Result<T, SigstoreError>;
 
 #[derive(Error, Debug)]
 pub enum SigstoreError {
+    #[error("failed to parse URL: {0}")]
+    UrlParseError(#[from] url::ParseError),
+
     #[error("invalid key format: {error}")]
     InvalidKeyFormat { error: String },
 

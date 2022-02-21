@@ -19,7 +19,7 @@ use sigstore::oauth;
 
 
 fn main() {
-    let (authorize_url, csrf_state, client, nonce, pkce_verifier) = oauth::openidflow::OpenID::auth_url(
+    let (authorize_url, client, nonce, pkce_verifier) = oauth::openidflow::auth_url(
         "sigstore".to_string(),
         "".to_string(),
         "https://oauth2.sigstore.dev/auth".to_string(),
@@ -31,6 +31,14 @@ fn main() {
         );
     }
 
-    let result = oauth::openidflow::redirect_listener(csrf_state, client, nonce, pkce_verifier);
-    println!("result: {:?}", result);
+    let result = oauth::openidflow::redirect_listener(client, nonce, pkce_verifier);
+    match result {
+        Ok(token_response) => {
+            println!("Email {:?}", token_response.email().unwrap().to_string());
+            println!("Access Token:{:?}", token_response.access_token_hash().unwrap().to_string());
+        }
+        Err(err) => {
+            println!("{}", err);
+        }
+    }
 }
