@@ -99,9 +99,9 @@ pub struct SignatureLayer {
     /// The bundle produced by Rekor.
     pub bundle: Option<Bundle>,
     #[serde(skip_serializing)]
-    signature: String,
+    pub signature: String,
     #[serde(skip_serializing)]
-    raw_data: Vec<u8>,
+    pub raw_data: Vec<u8>,
 }
 
 impl fmt::Display for SignatureLayer {
