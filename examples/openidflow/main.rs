@@ -32,5 +32,5 @@ fn main() {
     }
 
     let result = oauth::openidflow::redirect_listener(csrf_state, client, nonce, pkce_verifier);
-    println!("{:?}", result);
+    println!("result: {:?}", result);
 }

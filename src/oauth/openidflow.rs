@@ -14,6 +14,8 @@
 // limitations under the License.
 #![allow(warnings, unused)]
 
+use crate::errors::{Result, SigstoreError};
+
 use std::io;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -28,7 +30,7 @@ use url::Url;
 
 #[derive(Debug, PartialEq)]
 pub struct OpenID {
-    pub(crate) oidc_client_id: String,
+    pub(crate) oidc_client_ip: String,
     pub(crate) oidc_client_secret: String,
     pub(crate) oidc_issuer: String,
 }
@@ -69,19 +71,17 @@ impl OpenID {
         .add_scope(Scope::new("profile".to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
+
         return (authorize_url, csrf_state, client, nonce, pkce_verifier);
     }
 }
 
-pub fn redirect_listener(_csrf_state: CsrfToken,
+pub fn redirect_listener(
+    _csrf_state: CsrfToken,
     client: CoreClient,
-    nonce: Nonce, pkce_verifier:
-    PkceCodeVerifier)
-    ->
-    String {
+    nonce: Nonce, pkce_verifier: PkceCodeVerifier) -> Result<String> {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-    let email = String::new();
-    println!("Requesting access token...\n");
+
     for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
             let code;
@@ -126,7 +126,6 @@ pub fn redirect_listener(_csrf_state: CsrfToken,
                 html_page.len(),
                 html_page
             );
-            // let _newstate = &state;
             stream.write_all(response.as_bytes()).unwrap();
 
             // Exchange the code with a token.
@@ -148,25 +147,29 @@ pub fn redirect_listener(_csrf_state: CsrfToken,
                 .unwrap_or_else(|_err| {
                     println!("Failed to verify ID token");
                     unreachable!();
-                });
+            });
 
-            // println!("ID TOKEN CLAIMS: {:?}", id_token_claims.access_token_hash());
-
-            match id_token_claims.email() {
-                Some(email) => println!("ID TOKEN CLAIMS: {:?}", email),
-                None => println!("ID TOKEN CLAIMS: {:?}", "No email found"),
-            }
+            let id_token = id_token_claims.access_token_hash();
 
             let email = id_token_claims.email().unwrap().to_string();
-            println!("EMAIL: {:?}", email);
 
-            // println!(
-            //     "User scope granted with e-mail address {}",
-            //     id_token_claims.email().map(|email| email.as_str()).unwrap_or("<not provided>"),
-            // );
-            break;
+            return Ok(email);
         }
     };
-    // println!("EMAIL OUTER: {:?}", email);
-    email // return the email here to the client
+    unreachable!()
+}
+
+
+// test code for getting the auth url
+#[test]
+fn test_auth_url() {
+    let (url, csrf_state, client, nonce, pkce_verifier) = OpenID::auth_url(
+        "sigstore".to_string(),
+        "client_secret".to_string(),
+        "https://oauth2.sigstore.dev/auth".to_string(),
+    );
+    assert!(url.to_string().contains("https://oauth2.sigstore.dev/auth"));
+    assert!(url.to_string().contains("response_type=code"));
+    assert!(url.to_string().contains("client_id=sigstore"));
+    assert!(url.to_string().contains("scope=openid+email+profile"));
 }
