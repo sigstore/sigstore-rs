@@ -78,6 +78,7 @@ pub fn redirect_listener(
 ) -> Result<CoreIdTokenClaims> {
     let listener = TcpListener::bind(redirect_url)?;
 
+    #[allow(clippy::manual_flatten)]
     for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
             let code;
