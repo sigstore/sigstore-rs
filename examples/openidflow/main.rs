@@ -30,11 +30,19 @@ fn main() {
         );
     }
 
-    let result = oauth::openidflow::redirect_listener("127.0.0.1:8080".to_string(), client, nonce, pkce_verifier);
+    let result = oauth::openidflow::redirect_listener(
+        "127.0.0.1:8080".to_string(),
+        client,
+        nonce,
+        pkce_verifier,
+    );
     match result {
         Ok(token_response) => {
             println!("Email {:?}", token_response.email().unwrap().to_string());
-            println!("Access Token:{:?}", token_response.access_token_hash().unwrap().to_string());
+            println!(
+                "Access Token:{:?}",
+                token_response.access_token_hash().unwrap().to_string()
+            );
         }
         Err(err) => {
             println!("{}", err);

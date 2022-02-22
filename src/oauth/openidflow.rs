@@ -52,9 +52,7 @@ pub fn auth_url(
         oidc_client_id,
         Some(oidc_client_secret),
     )
-    .set_redirect_uri(
-        RedirectUrl::new(redirect_url.to_string()).expect("Invalid redirect URL"),
-    );
+    .set_redirect_uri(RedirectUrl::new(redirect_url.to_string()).expect("Invalid redirect URL"));
 
     let (authorize_url, _, nonce) = client
         .authorize_url(
@@ -89,8 +87,10 @@ pub fn redirect_listener(
                 let mut request_line = String::new();
                 reader.read_line(&mut request_line)?;
 
-                let redirect_url = request_line.split_whitespace().nth(1)
-                .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
+                let redirect_url = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
                 let url = Url::parse(&("http://localhost".to_string() + redirect_url))?;
 
                 let code_pair = url
