@@ -52,7 +52,7 @@ pub fn auth_url(
         oidc_client_id,
         Some(oidc_client_secret),
     )
-    .set_redirect_uri(RedirectUrl::new(redirect_url.to_string()).expect("Invalid redirect URL"));
+    .set_redirect_uri(RedirectUrl::new(redirect_url).expect("Invalid redirect URL"));
 
     let (authorize_url, _, nonce) = client
         .authorize_url(
@@ -65,7 +65,7 @@ pub fn auth_url(
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-    return (authorize_url, client, nonce, pkce_verifier);
+    (authorize_url, client, nonce, pkce_verifier)
 }
 
 // The redirect listener spawns a listening TCP server on the specified port.

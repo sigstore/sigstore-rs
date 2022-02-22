@@ -26,7 +26,7 @@ fn main() {
     if open::that(authorize_url.to_string()).is_ok() {
         println!(
             "Open this URL in your browser:\n{}\n",
-            authorize_url.to_string()
+            authorize_url
         );
     }
 
