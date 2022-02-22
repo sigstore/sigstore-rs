@@ -14,7 +14,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
 use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
 
 use super::{
@@ -25,7 +24,6 @@ use super::{
 use crate::crypto::CosignVerificationKey;
 use crate::errors::{Result, SigstoreError};
 use crate::registry::Auth;
-use crate::simple_signing::SimpleSigning;
 
 /// Cosign Client
 ///
@@ -34,7 +32,6 @@ pub struct Client {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
     pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
     pub(crate) fulcio_pub_key_der: Option<Vec<u8>>,
-    pub(crate) cert_email: Option<String>,
 }
 
 #[async_trait]
@@ -67,15 +64,22 @@ impl CosignCapabilities for Client {
         Ok((reference, manifest_digest))
     }
 
-    async fn verify(
+    async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
         source_image_digest: &str,
         cosign_image: &str,
-        public_key: &Option<String>,
-        annotations: Option<HashMap<String, String>>,
-    ) -> Result<Vec<SimpleSigning>> {
+    ) -> Result<Vec<SignatureLayer>> {
         let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
+        let image_manifest = match manifest {
+            oci_distribution::manifest::OciManifest::Image(im) => im,
+            oci_distribution::manifest::OciManifest::ImageIndex(_) => {
+                return Err(SigstoreError::RegistryPullManifestError {
+                    image: cosign_image.to_string(),
+                    error: "Found a OciImageIndex instead of a OciImageManifest".to_string(),
+                });
+            }
+        };
 
         let fulcio_pub_key = match &self.fulcio_pub_key_der {
             None => None,
@@ -85,26 +89,13 @@ impl CosignCapabilities for Client {
             }
         };
 
-        let verification_key: Option<CosignVerificationKey> = match public_key {
-            Some(key) => Some(crate::crypto::new_verification_key(key)?),
-            None => None,
-        };
-
-        let signature_layers = build_signature_layers(
-            &manifest,
+        build_signature_layers(
+            &image_manifest,
+            source_image_digest,
             &layers,
             self.rekor_pub_key.as_ref(),
             fulcio_pub_key.as_ref(),
-            self.cert_email.as_ref(),
-        );
-
-        let verified_signatures = self.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            source_image_digest,
-            verification_key.as_ref(),
-            &annotations.unwrap_or_default(),
-        );
-        Ok(verified_signatures)
+        )
     }
 }
 
@@ -142,64 +133,25 @@ impl Client {
 
         Ok((manifest, image_data.layers))
     }
-
-    /// The heart of the verification code. This is where all the checks are done
-    /// against the SignatureLayer objects found inside of the OCI registry.
-    ///
-    /// The method returns a list of SimpleSigning object satisfying the requirements.
-    /// The list is empty if no SimpleSigning object satisfied the requirements.
-    fn find_simple_signing_objects_satisfying_constraints(
-        &self,
-        signature_layers: &[SignatureLayer],
-        source_image_digest: &str,
-        verification_key: Option<&CosignVerificationKey>,
-        annotations: &HashMap<String, String>,
-    ) -> Vec<SimpleSigning> {
-        let verified_signatures: Vec<SimpleSigning> = signature_layers
-            .iter()
-            .filter_map(|sl| {
-                // find all the layers that have a signature that
-                // can be either verified with the supplied verification_key
-                // or with of the trusted bundled certificates.
-                // Then convert them into SimpleSigning objects
-                if sl.verified(verification_key) {
-                    Some(sl.simple_signing.clone())
-                } else {
-                    None
-                }
-            })
-            .filter(|ss| {
-                // ensure given annotations are respected
-                ss.satisfies_annotations(annotations)
-            })
-            .filter(|ss| {
-                // ensure the manifest digest mentioned by the signed SimpleSigning
-                // object matches the value of the OCI object we're verifying
-                ss.satisfies_manifest_digest(source_image_digest)
-            })
-            .collect();
-        verified_signatures
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::signature_layers::tests::build_correct_signature_layer_without_bundle;
     use crate::cosign::tests::{FULCIO_CRT_PEM, REKOR_PUB_KEY};
-    use crate::{
-        crypto::{self},
-        mock_client::test::MockOciClient,
-    };
+    use crate::{crypto::SignatureDigestAlgorithm, mock_client::test::MockOciClient};
 
     fn build_test_client(mock_client: MockOciClient) -> Client {
-        let rekor_pub_key = crypto::new_verification_key(REKOR_PUB_KEY).unwrap();
+        let rekor_pub_key = CosignVerificationKey::from_pem(
+            REKOR_PUB_KEY.as_bytes(),
+            SignatureDigestAlgorithm::default(),
+        )
+        .expect("Cannot create CosignVerificationKey");
 
         Client {
             registry_client: Box::new(mock_client),
             rekor_pub_key: Some(rekor_pub_key),
             fulcio_pub_key_der: Some(FULCIO_CRT_PEM.as_bytes().to_vec()),
-            cert_email: None,
         }
     }
 
@@ -222,137 +174,5 @@ mod tests {
 
         assert!(reference.is_ok());
         assert_eq!(reference.unwrap(), (expected_image, image_digest));
-    }
-
-    #[test]
-    fn find_simple_signing_object_when_verification_key_and_no_annotations_are_provided() {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
-        let source_image_digest = signature_layer
-            .simple_signing
-            .critical
-            .image
-            .docker_manifest_digest
-            .clone();
-        let signature_layers = vec![signature_layer];
-
-        let annotations: HashMap<String, String> = HashMap::new();
-
-        let mock_client = MockOciClient::default();
-        let cosign_client = build_test_client(mock_client);
-
-        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            &source_image_digest,
-            Some(&verification_key),
-            &annotations,
-        );
-        assert!(!actual.is_empty());
-    }
-
-    #[test]
-    fn find_simple_signing_object_no_matches_when_no_signature_matches_the_given_key() {
-        let (signature_layer, _) = build_correct_signature_layer_without_bundle();
-        let source_image_digest = signature_layer
-            .simple_signing
-            .critical
-            .image
-            .docker_manifest_digest
-            .clone();
-        let signature_layers = vec![signature_layer];
-
-        let verification_key = crate::crypto::new_verification_key(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELKhD7F5OKy77Z582Y6h0u1J3GNA+
-kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
------END PUBLIC KEY-----"#,
-        )
-        .unwrap();
-
-        let annotations: HashMap<String, String> = HashMap::new();
-
-        let mock_client = MockOciClient::default();
-        let cosign_client = build_test_client(mock_client);
-
-        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            &source_image_digest,
-            Some(&verification_key),
-            &annotations,
-        );
-        assert!(actual.is_empty());
-    }
-
-    #[test]
-    fn find_simple_signing_object_no_matches_when_annotations_are_not_satisfied() {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
-        let source_image_digest = signature_layer
-            .simple_signing
-            .critical
-            .image
-            .docker_manifest_digest
-            .clone();
-        let signature_layers = vec![signature_layer];
-
-        let mut annotations: HashMap<String, String> = HashMap::new();
-        annotations.insert("env".into(), "prod".into());
-
-        let mock_client = MockOciClient::default();
-        let cosign_client = build_test_client(mock_client);
-
-        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            &source_image_digest,
-            Some(&verification_key),
-            &annotations,
-        );
-        assert!(actual.is_empty());
-    }
-
-    #[test]
-    fn find_simple_signing_object_no_matches_when_simple_signing_digest_does_not_match_the_expected_one(
-    ) {
-        let (signature_layer, verification_key) = build_correct_signature_layer_without_bundle();
-        let source_image_digest = "this is a different value";
-        let signature_layers = vec![signature_layer];
-
-        let annotations: HashMap<String, String> = HashMap::new();
-
-        let mock_client = MockOciClient::default();
-        let cosign_client = build_test_client(mock_client);
-
-        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            &source_image_digest,
-            Some(&verification_key),
-            &annotations,
-        );
-        assert!(actual.is_empty());
-    }
-
-    #[test]
-    fn find_simple_signing_object_no_matches_when_no_signature_layer_exists() {
-        let source_image_digest = "something";
-        let signature_layers: Vec<SignatureLayer> = Vec::new();
-
-        let verification_key = crate::crypto::new_verification_key(
-            r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELKhD7F5OKy77Z582Y6h0u1J3GNA+
-kvUsh4eKpd1lwkDAzfFDs7yXEExsEkPPuiQJBelDT68n7PDIWB/QEY7mrA==
------END PUBLIC KEY-----"#,
-        )
-        .unwrap();
-
-        let annotations: HashMap<String, String> = HashMap::new();
-
-        let mock_client = MockOciClient::default();
-        let cosign_client = build_test_client(mock_client);
-
-        let actual = cosign_client.find_simple_signing_objects_satisfying_constraints(
-            &signature_layers,
-            &source_image_digest,
-            Some(&verification_key),
-            &annotations,
-        );
-        assert!(actual.is_empty());
     }
 }

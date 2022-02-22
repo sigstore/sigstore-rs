@@ -17,12 +17,12 @@ use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 
-use crate::crypto::{verify_signature, CosignVerificationKey};
+use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::{Result, SigstoreError};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct Bundle {
+pub struct Bundle {
     pub signed_entry_timestamp: String,
     pub payload: Payload,
 }
@@ -46,14 +46,17 @@ impl Bundle {
             ))
         })?;
 
-        verify_signature(rekor_pub_key, &bundle.signed_entry_timestamp, &buf)?;
+        rekor_pub_key.verify_signature(
+            Signature::Base64Encoded(bundle.signed_entry_timestamp.as_bytes()),
+            &buf,
+        )?;
         Ok(bundle)
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Payload {
+pub struct Payload {
     pub body: String,
     pub integrated_time: i64,
     pub log_index: i64,
@@ -67,7 +70,7 @@ mod tests {
     use serde_json::json;
 
     use crate::cosign::tests::get_rekor_public_key;
-    use crate::crypto;
+    use crate::crypto::SignatureDigestAlgorithm;
 
     fn build_correct_bundle() -> String {
         let bundle_json = json!({
@@ -98,7 +101,11 @@ mod tests {
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
-        let not_rekor_pub_key = crypto::new_verification_key(public_key).unwrap();
+        let not_rekor_pub_key = CosignVerificationKey::from_pem(
+            public_key.as_bytes(),
+            SignatureDigestAlgorithm::default(),
+        )
+        .expect("Cannot create CosignVerificationKey");
 
         let bundle_json = build_correct_bundle();
         let bundle = Bundle::new_verified(&bundle_json, &not_rekor_pub_key);

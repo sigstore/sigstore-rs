@@ -1,7 +1,7 @@
 [package]
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2018"
 authors = [
   "sigstore-rs developers",
@@ -15,16 +15,19 @@ rustls-tls = ["oci-distribution/rustls-tls"]
 [dependencies]
 async-trait = "0.1.51"
 base64 = "0.13.0"
-ecdsa = { version = "0.12.4", features = ["verify", "pem", "der", "pkcs8"] }
-oci-distribution = { version = "0.8.1", default-features = false }
+der-parser = "6.0.1"
+# TODO: go back to the officially release oci-distribution once these patches are released
+oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "0f717968093a5415f428503d741dedf24ea97948", default-features = false }
+#oci-distribution = { version = "0.8.1", default-features = false }
 olpc-cjson = "0.1.1"
 open = "2.0.2"
 openidconnect = "2.2.0"
-p256 = {version = "0.9.0", features = ["ecdsa-core"]}
-sha2 = "0.10.1"
+pem = "1.0.2"
+reqwest = "0.11.9"
+ring = "0.16.20"
 serde_json = "1.0.68"
 serde = {version = "1.0.130", features = ["derive"]}
-reqwest = "0.11.9"
+sha2 = "0.10.1"
 thiserror = "1.0.30"
 tokio = { version = "1.12.0", features = ["full"]}
 tough = { version = "0.12.1", features = [ "http" ] }

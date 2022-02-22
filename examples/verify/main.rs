@@ -14,9 +14,16 @@
 // limitations under the License.
 
 extern crate sigstore;
+use sigstore::cosign::verification_constraint::{
+    AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, PublicKeyVerifier,
+    VerificationConstraintVec,
+};
 use sigstore::cosign::CosignCapabilities;
-use sigstore::simple_signing::SimpleSigning;
+use sigstore::cosign::SignatureLayer;
+use sigstore::crypto::SignatureDigestAlgorithm;
 use sigstore::tuf::SigstoreRepository;
+use std::boxed::Box;
+use std::convert::TryFrom;
 
 extern crate anyhow;
 use anyhow::anyhow;
@@ -45,6 +52,16 @@ fn cli() -> App<'static, 'static> {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("signature-digest-algorithm")
+                .long("signature-digest-algorithm")
+                .value_name("SIGNATURE-DIGEST-ALGORITHM")
+                .help("digest algorithm to use when processing a signature")
+                .required(true)
+                .default_value("sha256")
+                .possible_values(&["sha256", "sha384", "sha512"])
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("use-sigstore-tuf-data")
                 .long("use-sigstore-tuf-data")
                 .help("Fetch Rekor and Fulcio data from Sigstore's TUF repository")
@@ -70,11 +87,31 @@ fn cli() -> App<'static, 'static> {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("cert-issuer")
+                .long("cert-issuer")
+                .value_name("ISSUER")
+                .help(
+                    "The issuer of the OIDC token used by the user to authenticate against Fulcio",
+                )
+                .required(false)
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("cert-email")
                 .long("cert-email")
                 .value_name("EMAIL")
                 .help(
                     "The email expected in a valid fulcio cert",
+                )
+                .required(false)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("cert-url")
+                .long("cert-url")
+                .value_name("URL")
+                .help(
+                    "The URL expected in a valid fulcio cert",
                 )
                 .required(false)
                 .takes_value(true),
@@ -104,8 +141,15 @@ fn cli() -> App<'static, 'static> {
         )
 }
 
-async fn run_app() -> anyhow::Result<Vec<SimpleSigning>> {
+async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
     let matches = cli().get_matches();
+
+    // Note well: this a limitation deliberately introduced by this example.
+    if matches.is_present("cert-email") && matches.is_present("cert-url") {
+        return Err(anyhow!(
+            "The 'cert-email' and 'cert-url' flags cannot be used at the same time"
+        ));
+    }
 
     // setup logging
     let level_filter = if matches.is_present("verbose") {
@@ -167,67 +211,82 @@ async fn run_app() -> anyhow::Result<Vec<SimpleSigning>> {
         client_builder = client_builder.with_fulcio_cert(&cert);
     }
 
-    let mut client = client_builder
-        .with_cert_email(matches.value_of("cert-email"))
-        .build()?;
+    let mut client = client_builder.build()?;
+
+    // Build verification constraints
+    let mut verification_constraint: VerificationConstraintVec = Vec::new();
+    if let Some(cert_email) = matches.value_of("cert-email") {
+        let issuer = matches.value_of("cert-issuer").map(|i| i.to_string());
+
+        verification_constraint.push(Box::new(CertSubjectEmailVerifier {
+            email: cert_email.to_string(),
+            issuer,
+        }));
+    }
+    if let Some(cert_url) = matches.value_of("cert-url") {
+        let issuer = matches.value_of("cert-issuer").map(|i| i.to_string());
+        if issuer.is_none() {
+            return Err(anyhow!(
+                "'cert-issuer' is required when 'cert-url' is specified"
+            ));
+        }
+
+        verification_constraint.push(Box::new(CertSubjectUrlVerifier {
+            url: cert_url.to_string(),
+            issuer: issuer.unwrap(),
+        }));
+    }
+    if let Some(path_to_key) = matches.value_of("key") {
+        let key = fs::read(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
+        let signature_digest_algorithm = SignatureDigestAlgorithm::try_from(
+            matches.value_of("signature-digest-algorithm").unwrap(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let verifier = PublicKeyVerifier::new(&key, signature_digest_algorithm)
+            .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
+        verification_constraint.push(Box::new(verifier));
+    }
+
+    if let Some(annotations) = matches.values_of("annotations") {
+        let mut values: HashMap<String, String> = HashMap::new();
+        for annotation in annotations {
+            let tmp: Vec<_> = annotation.splitn(2, "=").collect();
+            if tmp.len() == 2 {
+                values.insert(String::from(tmp[0]), String::from(tmp[1]));
+            }
+        }
+        if !values.is_empty() {
+            let annotations_verifier = AnnotationVerifier {
+                annotations: values,
+            };
+            verification_constraint.push(Box::new(annotations_verifier));
+        }
+    }
 
     let image: &str = matches.value_of("IMAGE").unwrap();
 
     let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
 
-    let pub_key = match matches.value_of("key") {
-        Some(path) => {
-            Some(fs::read_to_string(path).map_err(|e| anyhow!("Cannot read key: {:?}", e))?)
-        }
-        None => None,
-    };
-
-    let annotations: Option<HashMap<String, String>>;
-    annotations = match matches.values_of("annotations") {
-        None => None,
-        Some(items) => {
-            let mut values: HashMap<String, String> = HashMap::new();
-            for item in items {
-                let tmp: Vec<_> = item.splitn(2, "=").collect();
-                if tmp.len() == 2 {
-                    values.insert(String::from(tmp[0]), String::from(tmp[1]));
-                }
-            }
-            if values.is_empty() {
-                None
-            } else {
-                Some(values)
-            }
-        }
-    };
-
-    let matches = client
-        .verify(
-            auth,
-            &source_image_digest,
-            &cosign_signature_image,
-            &pub_key,
-            annotations,
-        )
+    let trusted_layers = client
+        .trusted_signature_layers(auth, &source_image_digest, &cosign_signature_image)
         .await?;
 
-    Ok(matches)
+    sigstore::cosign::filter_signature_layers(&trusted_layers, verification_constraint)
+        .map_err(|e| anyhow!("{}", e))
 }
 
 #[tokio::main]
 pub async fn main() {
-    let satistied_simple_signatures: anyhow::Result<Vec<SimpleSigning>> = run_app().await;
+    let trusted_signatures: anyhow::Result<Vec<SignatureLayer>> = run_app().await;
 
-    std::process::exit(match satistied_simple_signatures {
+    std::process::exit(match trusted_signatures {
         Ok(signatures) => {
             if signatures.is_empty() {
                 eprintln!("Image verification failed: no matching signature found.");
                 1
             } else {
                 println!("Image successfully verified");
-                for signature in signatures {
-                    println!("{}", signature);
-                }
+                serde_json::to_writer_pretty(std::io::stdout(), &signatures).unwrap();
                 0
             }
         }

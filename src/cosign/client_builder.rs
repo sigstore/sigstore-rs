@@ -16,7 +16,9 @@
 use tracing::info;
 
 use super::client::Client;
-use crate::crypto;
+use crate::crypto::{
+    certificate::extract_public_key_from_pem_cert, CosignVerificationKey, SignatureDigestAlgorithm,
+};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
 
@@ -42,7 +44,6 @@ pub struct ClientBuilder {
     oci_client_config: ClientConfig,
     rekor_pub_key: Option<String>,
     fulcio_cert: Option<Vec<u8>>,
-    cert_email: Option<String>,
 }
 
 impl ClientBuilder {
@@ -81,19 +82,16 @@ impl ClientBuilder {
         self
     }
 
-    /// Optional: the email expected in a valid fulcio cert
-    pub fn with_cert_email(mut self, cert_email: Option<&str>) -> Self {
-        self.cert_email = cert_email.map(String::from);
-        self
-    }
-
     pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {
                 info!("rekor public key not provided");
                 None
             }
-            Some(der) => Some(crypto::new_verification_key(&der)?),
+            Some(data) => Some(CosignVerificationKey::from_pem(
+                data.as_bytes(),
+                SignatureDigestAlgorithm::default(),
+            )?),
         };
 
         let fulcio_pub_key_der = match self.fulcio_cert {
@@ -101,10 +99,8 @@ impl ClientBuilder {
                 info!("The fulcio cert has not been provided");
                 None
             }
-            Some(cert) => Some(crypto::extract_public_key_from_pem_cert(&cert)?),
+            Some(cert) => Some(extract_public_key_from_pem_cert(&cert)?),
         };
-
-        let cert_email = self.cert_email.clone();
 
         let oci_client =
             oci_distribution::client::Client::new(self.oci_client_config.clone().into());
@@ -114,7 +110,6 @@ impl ClientBuilder {
             }),
             rekor_pub_key,
             fulcio_pub_key_der,
-            cert_email,
         })
     }
 }

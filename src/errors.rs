@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The errors that can be raised by sigstore-rs
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SigstoreError>;
@@ -35,6 +37,9 @@ pub enum SigstoreError {
     PEMParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
 
     #[error(transparent)]
+    FromPEMError(#[from] pem::PemError),
+
+    #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
 
     #[error(transparent)]
@@ -43,8 +48,11 @@ pub enum SigstoreError {
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
 
-    #[error(transparent)]
-    EcdsaError(#[from] ecdsa::Error),
+    #[error("Public key with unsupported algorithm: {0}")]
+    PublicKeyUnsupportedAlgorithmError(String),
+
+    #[error("Public key verification error")]
+    PublicKeyVerificationError,
 
     #[error("Certificate validity check failed: cannot be used before {0}")]
     CertificateValidityError(String),
@@ -73,6 +81,9 @@ pub enum SigstoreError {
     #[error("Certificate without Subject Alternative Name")]
     CertificateWithoutSubjectAlternativeName,
 
+    #[error("Certificate with incomplete Subject Alternative Name")]
+    CertificateWithIncompleteSubjectAlternativeName,
+
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
 
@@ -97,6 +108,12 @@ pub enum SigstoreError {
     #[error("Rekor bundle missing")]
     SigstoreRekorBundleNotFoundError,
 
+    #[error("Fulcio public key not provided")]
+    SigstoreFulcioPublicNotProvidedError,
+
+    #[error("No Signature Layer passed verification")]
+    SigstoreNoVerifiedLayer,
+
     #[error(transparent)]
     TufError(#[from] tough::error::Error),
 
@@ -108,4 +125,7 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     UnexpectedError(String),
+
+    #[error("{0}")]
+    VerificationConstraintError(String),
 }
