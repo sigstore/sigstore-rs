@@ -14,15 +14,14 @@
 // limitations under the License.
 
 extern crate sigstore;
-
 use sigstore::oauth;
-
 
 fn main() {
     let (authorize_url, client, nonce, pkce_verifier) = oauth::openidflow::auth_url(
         "sigstore".to_string(),
         "".to_string(),
         "https://oauth2.sigstore.dev/auth".to_string(),
+        "http://localhost:8080".to_string(),
     );
     if open::that(authorize_url.to_string()).is_ok() {
         println!(
@@ -31,7 +30,7 @@ fn main() {
         );
     }
 
-    let result = oauth::openidflow::redirect_listener(client, nonce, pkce_verifier);
+    let result = oauth::openidflow::redirect_listener("127.0.0.1:8080".to_string(), client, nonce, pkce_verifier);
     match result {
         Ok(token_response) => {
             println!("Email {:?}", token_response.email().unwrap().to_string());

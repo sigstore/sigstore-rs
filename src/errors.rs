@@ -22,6 +22,12 @@ pub enum SigstoreError {
     #[error("failed to parse URL: {0}")]
     UrlParseError(#[from] url::ParseError),
 
+    #[error("failed to construct redirect URL")]
+    RedirectUrlRequestLineError,
+
+    #[error("failed to construct oauth code pair")]
+    CodePairError,
+
     #[error("invalid key format: {error}")]
     InvalidKeyFormat { error: String },
 
