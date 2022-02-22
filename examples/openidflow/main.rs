@@ -24,10 +24,7 @@ fn main() {
         "http://localhost:8080".to_string(),
     );
     if open::that(authorize_url.to_string()).is_ok() {
-        println!(
-            "Open this URL in your browser:\n{}\n",
-            authorize_url
-        );
+        println!("Open this URL in your browser:\n{}\n", authorize_url);
     }
 
     let result = oauth::openidflow::redirect_listener(
