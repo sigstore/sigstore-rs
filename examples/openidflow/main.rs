@@ -18,10 +18,10 @@ use sigstore::oauth;
 
 fn main() {
     let (authorize_url, client, nonce, pkce_verifier) = oauth::openidflow::auth_url(
-        "sigstore".to_string(),
-        "".to_string(),
-        "https://oauth2.sigstore.dev/auth".to_string(),
-        "http://localhost:8080".to_string(),
+        "sigstore",
+        "",
+        "https://oauth2.sigstore.dev/auth",
+        "http://localhost:8080",
     );
     if open::that(authorize_url.to_string()).is_ok() {
         println!("Open this URL in your browser:\n{}\n", authorize_url);

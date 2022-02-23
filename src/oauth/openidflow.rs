@@ -27,18 +27,18 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use url::Url;
 
-// Generate a authorization URL for the OpenID Connect flow and return to the caller.
-// The caller can then pass the values to the redirect listener, or should they wish to
-// they could alternatively pass the values to their own method for handling the redirect.
+/// Generate a authorization URL for the OpenID Connect flow and return to the caller.
+/// The caller can then pass the values to the redirect listener, or should they wish to
+/// they could alternatively pass the values to their own method for handling the redirect.
 pub fn auth_url(
-    oidc_client_id: String,
-    oidc_client_secret: String,
-    oidc_issuer: String,
-    redirect_url: String,
+    oidc_client_id: &str,
+    oidc_client_secret: &str,
+    oidc_issuer: &str,
+    redirect_url: &str,
 ) -> (Url, CoreClient, Nonce, PkceCodeVerifier) {
-    let oidc_client_id = ClientId::new(oidc_client_id);
-    let oidc_client_secret = ClientSecret::new(oidc_client_secret);
-    let oidc_issuer = IssuerUrl::new(oidc_issuer).expect("Missing the OIDC_ISSUER.");
+    let oidc_client_id = ClientId::new(oidc_client_id.to_owned());
+    let oidc_client_secret = ClientSecret::new(oidc_client_secret.to_owned());
+    let oidc_issuer = IssuerUrl::new(oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let provider_metadata = CoreProviderMetadata::discover(&oidc_issuer, http_client)
@@ -52,7 +52,7 @@ pub fn auth_url(
         oidc_client_id,
         Some(oidc_client_secret),
     )
-    .set_redirect_uri(RedirectUrl::new(redirect_url).expect("Invalid redirect URL"));
+    .set_redirect_uri(RedirectUrl::new(redirect_url.to_owned()).expect("Invalid redirect URL"));
 
     let (authorize_url, _, nonce) = client
         .authorize_url(
@@ -68,8 +68,8 @@ pub fn auth_url(
     (authorize_url, client, nonce, pkce_verifier)
 }
 
-// The redirect listener spawns a listening TCP server on the specified port.
-// It will then extract values such as the email address and access token
+/// The redirect listener spawns a listening TCP server on the specified port.
+/// It will then extract values such as the email address and access token
 pub fn redirect_listener(
     redirect_url: String,
     client: CoreClient,
@@ -92,7 +92,7 @@ pub fn redirect_listener(
                     .split_whitespace()
                     .nth(1)
                     .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
-                let url = Url::parse(&("http://localhost".to_string() + redirect_url))?;
+                let url = Url::parse(format!("http://localhost{}", redirect_url).as_str())?;
 
                 let code_pair = url
                     .query_pairs()
@@ -106,8 +106,14 @@ pub fn redirect_listener(
                 code = AuthorizationCode::new(value.into_owned());
             }
 
-            let html_page = "<html><title>Sigstore Auth</title><body><h1>Sigstore Auth Successful</h1><p>You may now close this page.</p></body></html>";
-
+            // let html_page = "<html><title>Sigstore Auth</title><body><h1>Sigstore Auth Successful</h1><p>You may now close this page.</p></body></html>";
+            let html_page = r#"<html>
+            <title>Sigstore Auth</title>
+            <body>
+            <h1>Sigstore Auth Successful</h1>
+            <p>You may now close this page.</p>
+            </body>
+            </html>"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
                 html_page.len(),
@@ -145,10 +151,10 @@ pub fn redirect_listener(
 #[test]
 fn test_auth_url() {
     let (url, _, _, _) = auth_url(
-        "sigstore".to_string(),
-        "some_secret".to_string(),
-        "https://oauth2.sigstore.dev/auth".to_string(),
-        "http://localhost:8080".to_string(),
+        "sigstore",
+        "some_secret",
+        "https://oauth2.sigstore.dev/auth",
+        "http://localhost:8080",
     );
     assert!(url.to_string().contains("https://oauth2.sigstore.dev/auth"));
     assert!(url.to_string().contains("response_type=code"));
