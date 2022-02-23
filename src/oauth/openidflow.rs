@@ -1,5 +1,5 @@
 //
-// Copyright 2021 The Sigstore Authors.
+// Copyright 2022 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 //! sigstore project.
 //!
 //! The main entry point is the [`openidflow::auth_url`](openidflow::auth_url) function.
-//! This requires three parameters:
+//! This requires four parameters:
 //! - `client_id`: the client ID of the application
 //! - `client_secret`: the client secret of the application
 //! - `issuer`: the URL of the OpenID Connect server
@@ -107,7 +107,6 @@ pub fn auth_url(
             Nonce::new_random,
         )
         .add_scope(Scope::new("email".to_string()))
-        .add_scope(Scope::new("profile".to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -152,7 +151,6 @@ pub fn redirect_listener(
                 code = AuthorizationCode::new(value.into_owned());
             }
 
-            // let html_page = "<html><title>Sigstore Auth</title><body><h1>Sigstore Auth Successful</h1><p>You may now close this page.</p></body></html>";
             let html_page = r#"<html>
             <title>Sigstore Auth</title>
             <body>
@@ -205,5 +203,5 @@ fn test_auth_url() {
     assert!(url.to_string().contains("https://oauth2.sigstore.dev/auth"));
     assert!(url.to_string().contains("response_type=code"));
     assert!(url.to_string().contains("client_id=sigstore"));
-    assert!(url.to_string().contains("scope=openid+email+profile"));
+    assert!(url.to_string().contains("scope=openid+email"));
 }
