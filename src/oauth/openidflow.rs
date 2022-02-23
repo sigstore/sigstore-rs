@@ -13,6 +13,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This provides a method for retreiving a OpenID Connect ID Token and scope from the
+//! sigstore project.
+//!
+//! The main entry point is the [`openidflow::auth_url`](openidflow::auth_url) function.
+//! This requires three parameters:
+//! - `client_id`: the client ID of the application
+//! - `client_secret`: the client secret of the application
+//! - `issuer`: the URL of the OpenID Connect server
+//! - `redirect_uri`: the URL of the callback endpoint
+//!
+//! The function returns a tuple of the following:
+//! - `authorize_url`: the URL to open in the browser
+//! - `client`: the client object
+//! - `nonce`: the nonce value
+//! - `pkce_verifier`: the PKCE verifier
+//!
+//! The `authorize_url` is a URL that can be opened in a browser. The user will be
+//! prompted to login and authorize the application. The user will be redirected to
+//! the `redirect_uri` URL with a code parameter.
+//!
+//! The `client` is a client object that can be used to make requests to the OpenID
+//! Connect server.
+//!
+//! The `nonce` is a random value that is used to prevent replay attacks.
+//!
+//! The `pkce_verifier` is a PKCE verifier that can be used to generate the code_verifier
+//! value.
+//!
+//! Once you have recieved the above tuple, you can use the [`openidflow::redirect_listener`](openidflow::redirect_listener)
+//! function to get the ID Token and scope.
+//!
+//! The `redirect_listener` function requires the following parameters:
+//! - `redirect_url`: the address to listen on
+//! - `client`: the client object
+//! - `nonce`: the nonce value
+//! - `pkce_verifier`: the PKCE verifier
+//!
+//! The `redirect_url` is the address to listen on. The `client` is the client object
+//! that can be used to make requests to the OpenID Connect server.
+//!
+//! It maybe prefered to instead develop your own listener. If so bypass using the
+//! [`openidflow::redirect_listener`](openidflow::redirect_listener) function and
+//! simple send the values retrieved from the [`openidflow::auth_url`](openidflow::auth_url)
+//! to your own listener.
+//!
+
 use crate::errors::{Result, SigstoreError};
 
 use openidconnect::core::{
