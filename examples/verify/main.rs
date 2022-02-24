@@ -29,7 +29,7 @@ extern crate anyhow;
 use anyhow::anyhow;
 
 extern crate clap;
-use clap::{App, Arg};
+use clap::Parser;
 
 use std::{collections::HashMap, fs};
 use tokio::task::spawn_blocking;
@@ -39,124 +39,72 @@ use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
-fn cli() -> App<'static, 'static> {
-    App::new("verify")
-        .about("verify a container image")
-        .arg(
-            Arg::with_name("key")
-                .short("k")
-                .long("key")
-                .value_name("KEY")
-                .help("Verification Key")
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("signature-digest-algorithm")
-                .long("signature-digest-algorithm")
-                .value_name("SIGNATURE-DIGEST-ALGORITHM")
-                .help("digest algorithm to use when processing a signature")
-                .required(true)
-                .default_value("sha256")
-                .possible_values(&["sha256", "sha384", "sha512"])
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("use-sigstore-tuf-data")
-                .long("use-sigstore-tuf-data")
-                .help("Fetch Rekor and Fulcio data from Sigstore's TUF repository")
-                .required(false)
-                .takes_value(false),
-        )
-        .arg(
-            Arg::with_name("rekor-pub-key")
-                .long("rekor-pub-key")
-                .value_name("KEY")
-                .help("File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)")
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("fulcio-crt")
-                .long("fulcio-crt")
-                .value_name("CERT")
-                .help(
-                    "File containing Fulcio's certificate (e.g.: ~/.sigstore/root/targets/fulcio.crt.pem)",
-                )
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("cert-issuer")
-                .long("cert-issuer")
-                .value_name("ISSUER")
-                .help(
-                    "The issuer of the OIDC token used by the user to authenticate against Fulcio",
-                )
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("cert-email")
-                .long("cert-email")
-                .value_name("EMAIL")
-                .help(
-                    "The email expected in a valid fulcio cert",
-                )
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("cert-url")
-                .long("cert-url")
-                .value_name("URL")
-                .help(
-                    "The URL expected in a valid fulcio cert",
-                )
-                .required(false)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("annotations")
-                .short("a")
-                .long("annotation")
-                .value_name("PAIR")
-                .help("Annotations that have to be satisfied")
-                .required(false)
-                .multiple(true)
-                .number_of_values(1)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .long("verbose")
-                .short("v")
-                .help("Enable verbose mode"),
-        )
-        .arg(
-            Arg::with_name("IMAGE")
-                .help("Name of the image to use")
-                .required(true)
-                .index(1),
-        )
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Cli {
+    /// Verification key
+    #[clap(short, long, required(false))]
+    key: Option<String>,
+
+    /// Digest algorithm to use when processing a signature
+    #[clap(long, default_value = "sha256")]
+    signature_digest_algorithm: String,
+
+    /// Fetch Rekor and Fulcio data from Sigstore's TUF repository"
+    #[clap(long)]
+    use_sigstore_tuf_data: bool,
+
+    /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
+    #[clap(long, required(false))]
+    rekor_pub_key: Option<String>,
+
+    /// File containing Fulcio's certificate (e.g.: ~/.sigstore/root/targets/fulcio.crt.pem)
+    #[clap(long, required(false))]
+    fulcio_cert: Option<String>,
+
+    /// The issuer of the OIDC token used by the user to authenticate against Fulcio
+    #[clap(long, required(false))]
+    cert_issuer: Option<String>,
+
+    /// The email expected in a valid fulcio cert
+    #[clap(long, required(false))]
+    cert_email: Option<String>,
+
+    /// The URL expected in a valid fulcio cert
+    #[clap(long, required(false))]
+    cert_url: Option<String>,
+
+    /// Annotations that have to be satisfied
+    #[clap(
+        short,
+        long,
+        parse(from_str),
+        takes_value(true),
+        required(false),
+        multiple_occurrences(true)
+    )]
+    annotations: Vec<String>,
+
+    /// Enable verbose mode
+    #[clap(short, long)]
+    verbose: bool,
+
+    /// Name of the image to verify
+    image: String,
 }
 
 async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
-    let matches = cli().get_matches();
+    let cli = Cli::parse();
 
     // Note well: this a limitation deliberately introduced by this example.
-    if matches.is_present("cert-email") && matches.is_present("cert-url") {
+    if cli.cert_email.is_some() && cli.cert_url.is_some() {
         return Err(anyhow!(
             "The 'cert-email' and 'cert-url' flags cannot be used at the same time"
         ));
     }
 
     // setup logging
-    let level_filter = if matches.is_present("verbose") {
-        "debug"
-    } else {
-        "info"
-    };
+    let level_filter = if cli.verbose { "debug" } else { "info" };
     let filter_layer = EnvFilter::new(level_filter);
     tracing_subscriber::registry()
         .with(filter_layer)
@@ -165,22 +113,22 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
 
     let auth = &sigstore::registry::Auth::Anonymous;
 
-    let rekor_pub_key: Option<String> = matches
-        .value_of("rekor-pub-key")
+    let rekor_pub_key: Option<String> = cli
+        .rekor_pub_key
         .map(|path| {
             fs::read_to_string(path)
                 .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))
         })
         .transpose()?;
 
-    let fulcio_cert: Option<Vec<u8>> = matches
-        .value_of("fulcio-crt")
+    let fulcio_cert: Option<Vec<u8>> = cli
+        .fulcio_cert
         .map(|path| {
             fs::read(path).map_err(|e| anyhow!("Error reading fulcio certificate from disk: {}", e))
         })
         .transpose()?;
 
-    let sigstore_repo: Option<SigstoreRepository> = if matches.is_present("use-sigstore-tuf-data") {
+    let sigstore_repo: Option<SigstoreRepository> = if cli.use_sigstore_tuf_data {
         let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
             info!("Downloading data from Sigstore TUF repository");
             sigstore::tuf::SigstoreRepository::fetch(None)
@@ -215,16 +163,16 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
 
     // Build verification constraints
     let mut verification_constraint: VerificationConstraintVec = Vec::new();
-    if let Some(cert_email) = matches.value_of("cert-email") {
-        let issuer = matches.value_of("cert-issuer").map(|i| i.to_string());
+    if let Some(cert_email) = cli.cert_email {
+        let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
 
         verification_constraint.push(Box::new(CertSubjectEmailVerifier {
             email: cert_email.to_string(),
             issuer,
         }));
     }
-    if let Some(cert_url) = matches.value_of("cert-url") {
-        let issuer = matches.value_of("cert-issuer").map(|i| i.to_string());
+    if let Some(cert_url) = cli.cert_url {
+        let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
         if issuer.is_none() {
             return Err(anyhow!(
                 "'cert-issuer' is required when 'cert-url' is specified"
@@ -236,20 +184,19 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
             issuer: issuer.unwrap(),
         }));
     }
-    if let Some(path_to_key) = matches.value_of("key") {
+    if let Some(path_to_key) = cli.key {
         let key = fs::read(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
-        let signature_digest_algorithm = SignatureDigestAlgorithm::try_from(
-            matches.value_of("signature-digest-algorithm").unwrap(),
-        )
-        .map_err(anyhow::Error::msg)?;
+        let signature_digest_algorithm =
+            SignatureDigestAlgorithm::try_from(cli.signature_digest_algorithm.as_str())
+                .map_err(anyhow::Error::msg)?;
         let verifier = PublicKeyVerifier::new(&key, signature_digest_algorithm)
             .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
         verification_constraint.push(Box::new(verifier));
     }
 
-    if let Some(annotations) = matches.values_of("annotations") {
+    if !cli.annotations.is_empty() {
         let mut values: HashMap<String, String> = HashMap::new();
-        for annotation in annotations {
+        for annotation in &cli.annotations {
             let tmp: Vec<_> = annotation.splitn(2, "=").collect();
             if tmp.len() == 2 {
                 values.insert(String::from(tmp[0]), String::from(tmp[1]));
@@ -263,7 +210,7 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         }
     }
 
-    let image: &str = matches.value_of("IMAGE").unwrap();
+    let image: &str = cli.image.as_str();
 
     let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
 

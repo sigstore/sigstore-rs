@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use der_parser::{oid, oid::Oid};
+use x509_parser::der_parser::{oid, oid::Oid};
 
 pub(crate) const SIGSTORE_ISSUER_OID: Oid<'static> = oid!(1.3.6 .1 .4 .1 .57264 .1 .1);
 
