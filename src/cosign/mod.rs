@@ -101,9 +101,9 @@ pub fn filter_signature_layers(
                 let is_a_match = if constraints.is_empty() {
                     true
                 } else {
-                    !constraints.iter().any(|c| {
+                    constraints.iter().any(|c| {
                         match c.verify(sl) {
-                            Ok(verification_passed) => !verification_passed,
+                            Ok(verification_passed) => verification_passed,
                             Err(e) => {
                                 warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
                                 // handle errors as verification failures
