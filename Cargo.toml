@@ -13,29 +13,29 @@ native-tls = ["oci-distribution/native-tls"]
 rustls-tls = ["oci-distribution/rustls-tls"]
 
 [dependencies]
-async-trait = "0.1.51"
+async-trait = "0.1.52"
 base64 = "0.13.0"
-der-parser = "6.0.1"
 # TODO: go back to the officially release oci-distribution once these patches are released
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "0f717968093a5415f428503d741dedf24ea97948", default-features = false }
 #oci-distribution = { version = "0.8.1", default-features = false }
 olpc-cjson = "0.1.1"
 pem = "1.0.2"
 ring = "0.16.20"
-serde_json = "1.0.68"
-serde = {version = "1.0.130", features = ["derive"]}
-sha2 = "0.10.1"
+serde_json = "1.0.79"
+serde = { version = "1.0.136", features = ["derive"] }
+sha2 = "0.10.2"
 thiserror = "1.0.30"
-tokio = { version = "1.12.0", features = ["full"]}
+tokio = { version = "1.17.0", features = ["full"] }
 tough = { version = "0.12.1", features = [ "http" ] }
-tracing = "0.1.29"
+tracing = "0.1.31"
 url = "2.2.2"
-x509-parser = { version = "0.12.0", features = ["verify"]}
+# DO not update to 0.13.0 - wait for a release that includes https://github.com/rusticata/x509-parser/pull/118 to be published
+x509-parser = { version = "0.12.0", features = ["verify"] }
 
 [dev-dependencies]
-anyhow = "1.0.44"
+anyhow = "1.0.54"
 chrono = "0.4.19"
-clap = "2.33.3"
+clap = { version = "3.1.0", features = ["derive"] }
 openssl = "0.10.38"
 tempfile = "3.3.0"
-tracing-subscriber = "0.2.25"
+tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }

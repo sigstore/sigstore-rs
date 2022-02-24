@@ -27,6 +27,6 @@ Verify the image signature using the example program defined under
 cargo run --example verify -- \
   -k cosign.pub \
   --rekor-pub-key ~/.sigstore/root/targets/rekor.pub \
-  --fulcio-crt fulcio.crt.pem \
+  --fulcio-cert fulcio.crt.pem \
   registry-testing.svc.lan/busybox
 ```
