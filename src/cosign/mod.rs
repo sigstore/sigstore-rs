@@ -275,10 +275,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
         let error =
             filter_signature_layers(&layers, constraints).expect_err("Should have got an error");
-        let found = match error {
-            SigstoreError::SigstoreNoVerifiedLayer => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreNoVerifiedLayer);
         assert!(found, "Didn't get the expected error, got {}", error);
     }
 }
