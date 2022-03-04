@@ -140,10 +140,7 @@
 //!     Ok(unsatisfied_constraints) => {
 //!       if unsatisfied_constraints.len() > 0 {
 //!         println!("Not all requirements were satisfied:");
-//!         // serde_json::to_writer_pretty(
-//!         //     std::io::stdout(),
-//!         //     &unsatisfied_constraints,
-//!         // ).unwrap();
+//!         println!("{:?}", unsatisfied_constraints);
 //!       } else {
 //!         println!("Image verified.");
 //!       }

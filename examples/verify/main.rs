@@ -232,7 +232,7 @@ pub async fn main() {
                 0
             } else {
                 eprintln!("Image verification failed: not all constraints satisfied.");
-                // serde_json::to_writer_pretty(std::io::stdout(), &unsatisfied_constraints).unwrap();
+                println!("{:?}", unsatisfied_constraints);
                 1
             }
         }
