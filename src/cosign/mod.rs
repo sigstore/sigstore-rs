@@ -86,41 +86,47 @@ pub trait CosignCapabilities {
     ) -> Result<Vec<SignatureLayer>>;
 }
 
-/// Given a list of trusted `SignatureLayer`, find all the layers that satisfy
-/// the given constraints.
+/// Given a list of trusted `SignatureLayer`, find all the constraints that
+/// aren't satisfied by the layers.
+/// If there's any unsatisfied constraints it means that the image failed
+/// verification.
+/// If there's no unsatisfied constraints it means that the image passed
+/// verification.
 ///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
 /// details about how to define verification constraints.
-pub fn filter_signature_layers(
+pub fn filter_constraints(
     signature_layers: &[SignatureLayer],
     constraints: VerificationConstraintVec,
-) -> Result<Vec<SignatureLayer>> {
-    let layers: Vec<SignatureLayer> = signature_layers
-            .iter()
-            .filter(|sl| {
-                let is_a_match = if constraints.is_empty() {
-                    true
-                } else {
-                    constraints.iter().any(|c| {
-                        match c.verify(sl) {
-                            Ok(verification_passed) => verification_passed,
-                            Err(e) => {
-                                warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
-                                // handle errors as verification failures
-                                false
-                            }
-                        }
-                    })
-                };
-                is_a_match
-            })
-            .cloned()
-            .collect();
+) -> Result<VerificationConstraintVec> {
+    let constraints_length = constraints.len();
+    let unsatisfied_constraints: VerificationConstraintVec = constraints.into_iter().filter(|c| {
+        let mut is_c_unsatisfied = true;
+        signature_layers.iter().any( | sl | {
+            // iterate through all layers and find if at least one layer
+            // satisfies constraint. If so, we stop iterating
+            match c.verify(sl) {
+                Ok(is_sl_verified) => {
+                    is_c_unsatisfied = !is_sl_verified;
+                    is_sl_verified // if true, stop searching
+                }
+                Err(e) => {
+                    warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
+                    // handle errors as verification failures
+                    is_c_unsatisfied = true;
+                    false // keep searching to see if other layer satisfies
+                }
+            }
+        });
+        is_c_unsatisfied // if true, constraint gets filtered into result
+    }).collect();
 
-    if layers.is_empty() {
+    if unsatisfied_constraints.len() == constraints_length {
+        // not even 1 layer was verified
         Err(SigstoreError::SigstoreNoVerifiedLayer)
     } else {
-        Ok(layers)
+        // some, or all layers may have been verified
+        Ok(unsatisfied_constraints)
     }
 }
 
