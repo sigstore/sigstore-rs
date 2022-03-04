@@ -61,7 +61,7 @@
 //! ```rust,no_run
 //! use crate::sigstore::cosign::{
 //!     CosignCapabilities,
-//!     filter_signature_layers,
+//!     filter_constraints,
 //! };
 //! use crate::sigstore::cosign::verification_constraint::{
 //!     AnnotationVerifier,
@@ -124,25 +124,29 @@
 //!     Box::new(pub_key_verifier),
 //!   ];
 //!
-//!   // Filter all the trusted layers, find the ones satisfying the constraints
-//!   // we just defined
-//!   let signatures_matching_requirements = filter_signature_layers(
+//!   // Filter the constraints, find the ones not satisfied by the layers on
+//!   // the image
+//!   let unsatisfied_constraints = filter_constraints(
 //!     &signature_layers,
 //!     verification_constraints);
 //!
-//!   match signatures_matching_requirements {
+//!   match unsatisfied_constraints {
 //!     Err(SigstoreError::SigstoreNoVerifiedLayer) => {
 //!       panic!("no signature is matching the requirements")
 //!     },
 //!     Err(e) => {
 //!       panic!("Something went wrong while verifying the image: {}", e)
 //!     },
-//!     Ok(signatures) => {
-//!       println!("signatures matching the requirements:");
-//!       serde_json::to_writer_pretty(
-//!           std::io::stdout(),
-//!           &signatures,
-//!       ).unwrap();
+//!     Ok(unsatisfied_constraints) => {
+//!       if unsatisfied_constraints.len() > 0 {
+//!         println!("Not all requirements were satisfied:");
+//!         // serde_json::to_writer_pretty(
+//!         //     std::io::stdout(),
+//!         //     &unsatisfied_constraints,
+//!         // ).unwrap();
+//!       } else {
+//!         println!("Image verified.");
+//!       }
 //!     }
 //!   }
 //! }

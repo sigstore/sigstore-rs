@@ -178,7 +178,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
     }
 
     #[test]
-    fn filter_signature_layers_matches() {
+    fn filter_constraints_all_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
 
@@ -187,8 +187,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         annotations.insert("key2".into(), "value2".into());
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
-        let expected_matches = 5;
-        for _ in 0..expected_matches {
+        for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
             let mut cert_signature = sl.certificate_signature.unwrap();
             let cert_subj = CertificateSubject::Email(email.clone());
@@ -217,12 +216,12 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
-            issuer: Some(issuer.clone()),
+            issuer: Some(issuer),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email.clone(),
+            email,
             issuer: None,
         };
         constraints.push(Box::new(vc));
@@ -230,20 +229,19 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let vc = AnnotationVerifier { annotations };
         constraints.push(Box::new(vc));
 
-        let matches = filter_signature_layers(&layers, constraints)
-            .expect("Should not have returned an error");
-        assert_eq!(matches.len(), expected_matches);
+        let unsatisfied_constraints =
+            filter_constraints(&layers, constraints).expect("Should not have returned an error");
+        assert_eq!(unsatisfied_constraints.len(), 0);
     }
 
     #[test]
-    fn filter_signature_layers_no_matches() {
+    fn filter_constraints_none_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
         let email_constraint = "bob@example.com".to_string();
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
-        let expected_matches = 5;
-        for _ in 0..expected_matches {
+        for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
             let mut cert_signature = sl.certificate_signature.unwrap();
             let cert_subj = CertificateSubject::Email(email.clone());
@@ -269,19 +267,66 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
             email: email_constraint.clone(),
-            issuer: Some(issuer.clone()),
+            issuer: Some(issuer),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email_constraint.clone(),
+            email: email_constraint,
             issuer: None,
         };
         constraints.push(Box::new(vc));
 
-        let error =
-            filter_signature_layers(&layers, constraints).expect_err("Should have got an error");
+        let error = filter_constraints(&layers, constraints).expect_err("Should have got an error");
         let found = matches!(error, SigstoreError::SigstoreNoVerifiedLayer);
         assert!(found, "Didn't get the expected error, got {}", error);
+    }
+
+    #[test]
+    fn filter_constraints_some_unsatisfied() {
+        let email = "alice@example.com".to_string();
+        let issuer = "an issuer".to_string();
+        let email_incorrect = "bob@example.com".to_string();
+
+        let mut layers: Vec<SignatureLayer> = Vec::new();
+        for _ in 0..5 {
+            let mut sl = build_correct_signature_layer_with_certificate();
+            let mut cert_signature = sl.certificate_signature.unwrap();
+            let cert_subj = CertificateSubject::Email(email.clone());
+            cert_signature.issuer = Some(issuer.clone());
+            cert_signature.subject = cert_subj;
+            sl.certificate_signature = Some(cert_signature);
+
+            let mut extra: HashMap<String, serde_json::Value> = HashMap::new();
+            extra.insert("something extra".into(), json!("value extra"));
+
+            let mut simple_signing = sl.simple_signing;
+            let optional = Optional {
+                creator: Some("test".into()),
+                timestamp: None,
+                extra,
+            };
+            simple_signing.optional = Some(optional);
+            sl.simple_signing = simple_signing;
+
+            layers.push(sl);
+        }
+
+        let mut constraints: VerificationConstraintVec = Vec::new();
+        let satisfied_constraint = CertSubjectEmailVerifier {
+            email,
+            issuer: Some(issuer),
+        };
+        constraints.push(Box::new(satisfied_constraint));
+
+        let unsatisfied_constraint = CertSubjectEmailVerifier {
+            email: email_incorrect,
+            issuer: None,
+        };
+        constraints.push(Box::new(unsatisfied_constraint));
+
+        let unsatisfied_constraints =
+            filter_constraints(&layers, constraints).expect("Should not have returned an error");
+        assert_eq!(unsatisfied_constraints.len(), 1);
     }
 }

@@ -19,7 +19,6 @@ use sigstore::cosign::verification_constraint::{
     VerificationConstraintVec,
 };
 use sigstore::cosign::CosignCapabilities;
-use sigstore::cosign::SignatureLayer;
 use sigstore::crypto::SignatureDigestAlgorithm;
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
@@ -93,7 +92,7 @@ struct Cli {
     image: String,
 }
 
-async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
+async fn run_app() -> anyhow::Result<VerificationConstraintVec> {
     let cli = Cli::parse();
 
     // Note well: this a limitation deliberately introduced by this example.
@@ -218,23 +217,23 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         .trusted_signature_layers(auth, &source_image_digest, &cosign_signature_image)
         .await?;
 
-    sigstore::cosign::filter_signature_layers(&trusted_layers, verification_constraint)
+    sigstore::cosign::filter_constraints(&trusted_layers, verification_constraint)
         .map_err(|e| anyhow!("{}", e))
 }
 
 #[tokio::main]
 pub async fn main() {
-    let trusted_signatures: anyhow::Result<Vec<SignatureLayer>> = run_app().await;
+    let unsatisfied_constraints: anyhow::Result<VerificationConstraintVec> = run_app().await;
 
-    std::process::exit(match trusted_signatures {
-        Ok(signatures) => {
-            if signatures.is_empty() {
-                eprintln!("Image verification failed: no matching signature found.");
-                1
-            } else {
+    std::process::exit(match unsatisfied_constraints {
+        Ok(unsatisfied_constraints) => {
+            if unsatisfied_constraints.is_empty() {
                 println!("Image successfully verified");
-                serde_json::to_writer_pretty(std::io::stdout(), &signatures).unwrap();
                 0
+            } else {
+                eprintln!("Image verification failed: not all constraints satisfied.");
+                // serde_json::to_writer_pretty(std::io::stdout(), &unsatisfied_constraints).unwrap();
+                1
             }
         }
         Err(err) => {
