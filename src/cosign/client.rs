@@ -53,7 +53,7 @@ impl CosignCapabilities for Client {
             "{}/{}:{}.sig",
             image_reference.registry(),
             image_reference.repository(),
-            manifest_digest.replace(":", "-")
+            manifest_digest.replace(':', "-")
         );
         let reference = sign
             .parse()
