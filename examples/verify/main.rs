@@ -145,7 +145,7 @@ async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstrain
 
     if let Some(repo) = sigstore_repo {
         client_builder = client_builder.with_rekor_pub_key(repo.rekor_pub_key());
-        client_builder = client_builder.with_fulcio_cert(repo.fulcio_cert());
+        client_builder = client_builder.with_fulcio_certs(repo.fulcio_certs());
     }
 
     // Set Rekor public key. Give higher precendece to the key specified by the user over the

@@ -112,8 +112,8 @@ pub enum SigstoreError {
     #[error("Rekor bundle missing")]
     SigstoreRekorBundleNotFoundError,
 
-    #[error("Fulcio public key not provided")]
-    SigstoreFulcioPublicNotProvidedError,
+    #[error("Fulcio certificates not provided")]
+    SigstoreFulcioCertificatesNotProvidedError,
 
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,

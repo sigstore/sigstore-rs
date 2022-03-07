@@ -17,10 +17,10 @@ use tracing::info;
 
 use super::client::Client;
 use crate::crypto::{
-    certificate::extract_public_key_from_pem_cert, CosignVerificationKey, SignatureDigestAlgorithm,
+    certificate_pool::CertificatePool, CosignVerificationKey, SignatureDigestAlgorithm,
 };
 use crate::errors::Result;
-use crate::registry::ClientConfig;
+use crate::registry::{Certificate, ClientConfig};
 
 /// A builder that generates Client objects.
 ///
@@ -29,47 +29,64 @@ use crate::registry::ClientConfig;
 /// Rekor integration can be enabled by specifying Rekor's public key.
 /// This can be provided via the [`ClientBuilder::with_rekor_pub_key`] method.
 ///
-/// > Note well: currently this library is not able to retrieve the key from Sigstore's
-/// > TUF repository like `cosign` does. This will be done in the near future.
+/// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+/// > to obtain this data from the official TUF repository of the Sigstore project.
 ///
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
 /// This can be provided via the [`ClientBuilder::with_fulcio_cert`] method.
 ///
-/// > Note well: currently this library is not able to retrieve the certificate from Sigstore's
-/// > TUF repository like `cosign` does. This will be done in the near future.
+/// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+/// > to obtain this data from the official TUF repository of the Sigstore project.
 #[derive(Default)]
 pub struct ClientBuilder {
     oci_client_config: ClientConfig,
     rekor_pub_key: Option<String>,
-    fulcio_cert: Option<Vec<u8>>,
+    fulcio_certs: Vec<Certificate>,
 }
 
 impl ClientBuilder {
     /// Specify the public key used by Rekor.
     ///
-    /// Currently this library is not able to retrieve the key from Sigstore's
-    /// TUF repository like `cosign` does. This will be done in the near future.
+    /// The public key can be obtained by using the helper methods under the
+    /// [`tuf`](crate::tuf) module.
     ///
-    /// In the meantime, end users of the library can fetch the key in a secure
-    /// way by using `cosign initialize`.
-    /// This will place the key under `~/.sigstore/root/targets/rekor.pub`.
+    /// `key` is a PEM encoded public key
+    ///
+    /// When provided, this enables Rekor's integration.
     pub fn with_rekor_pub_key(mut self, key: &str) -> Self {
         self.rekor_pub_key = Some(key.to_string());
         self
     }
 
-    /// Specify the certificate used by Fulcio.
+    /// Specify the certificate used by Fulcio. This method can be invoked
+    /// multiple times to add all the certificates that Fulcio used over the
+    /// time.
     ///
-    /// Currently this library is not able to retrieve the certificate from Sigstore's
-    /// TUF repository like `cosign` does. This will be done in the near future.
+    /// `cert` is a PEM encoded certificate
     ///
-    /// In the meantime, end users of the library can fetch the certificate in a secure
-    /// way by using `cosign initialize`.
-    /// This will place the key under `~/.sigstore/root/targets/fulcio.crt.pem`.
+    /// The certificates can be obtained by using the helper methods under the
+    /// [`tuf`](crate::tuf) module.
+    ///
+    /// When provided, this enables Fulcio's integration.
     pub fn with_fulcio_cert(mut self, cert: &[u8]) -> Self {
-        self.fulcio_cert = Some(cert.to_owned());
+        let certificate = Certificate {
+            encoding: crate::registry::CertificateEncoding::Pem,
+            data: cert.to_owned(),
+        };
+        self.fulcio_certs.push(certificate);
+        self
+    }
+
+    /// Specify the certificates used by Fulcio.
+    ///
+    /// The certificates can be obtained by using the helper methods under the
+    /// [`tuf`](crate::tuf) module.
+    ///
+    /// When provided, this enables Fulcio's integration.
+    pub fn with_fulcio_certs(mut self, certs: &[crate::registry::Certificate]) -> Self {
+        self.fulcio_certs = certs.to_vec();
         self
     }
 
@@ -85,7 +102,7 @@ impl ClientBuilder {
     pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {
-                info!("rekor public key not provided");
+                info!("Rekor public key not provided. Rekor integration disabled");
                 None
             }
             Some(data) => Some(CosignVerificationKey::from_pem(
@@ -94,12 +111,12 @@ impl ClientBuilder {
             )?),
         };
 
-        let fulcio_pub_key_der = match self.fulcio_cert {
-            None => {
-                info!("The fulcio cert has not been provided");
-                None
-            }
-            Some(cert) => Some(extract_public_key_from_pem_cert(&cert)?),
+        let fulcio_cert_pool = if self.fulcio_certs.is_empty() {
+            info!("No Fulcio cert has been provided. Fulcio integration disabled");
+            None
+        } else {
+            let cert_pool = CertificatePool::from_certificates(&self.fulcio_certs)?;
+            Some(cert_pool)
         };
 
         let oci_client =
@@ -109,7 +126,7 @@ impl ClientBuilder {
                 registry_client: oci_client,
             }),
             rekor_pub_key,
-            fulcio_pub_key_der,
+            fulcio_cert_pool,
         })
     }
 }
