@@ -69,9 +69,18 @@ use openidconnect::{
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
 };
+use tracing::error;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use url::Url;
+
+
+
+pub struct OpenIDAuthorize {
+    oidc_cliend_id: Option<String>,
+    oidc_client_secret: Option<String>,
+    oidc_issuer: Option<String>,
+}
 
 /// Generate a authorization URL for the OpenID Connect flow and return to the caller.
 /// The caller can then pass the values to the redirect listener, or should they wish to
@@ -171,7 +180,7 @@ pub fn redirect_listener(
                 .set_pkce_verifier(pkce_verifier)
                 .request(http_client)
                 .unwrap_or_else(|_err| {
-                    println!("Failed to access token endpoint");
+                    error!("Failed to access token endpoint");
                     unreachable!();
                 });
 
@@ -182,7 +191,7 @@ pub fn redirect_listener(
                 .expect("Server did not return an ID token")
                 .claims(&id_token_verifier, &nonce)
                 .unwrap_or_else(|_err| {
-                    println!("Failed to verify ID token");
+                    error!("Failed to verify ID token");
                     unreachable!();
                 });
 
