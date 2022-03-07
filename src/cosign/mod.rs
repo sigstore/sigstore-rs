@@ -101,9 +101,9 @@ pub fn filter_signature_layers(
                 let is_a_match = if constraints.is_empty() {
                     true
                 } else {
-                    !constraints.iter().any(|c| {
+                    constraints.iter().any(|c| {
                         match c.verify(sl) {
-                            Ok(verification_passed) => !verification_passed,
+                            Ok(verification_passed) => verification_passed,
                             Err(e) => {
                                 warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
                                 // handle errors as verification failures
@@ -233,10 +233,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
     fn filter_signature_layers_no_matches() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
-
-        let mut annotations: HashMap<String, String> = HashMap::new();
-        annotations.insert("key1".into(), "value1".into());
-        annotations.insert("key2".into(), "value2".into());
+        let email_constraint = "bob@example.com".to_string();
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
         let expected_matches = 5;
@@ -265,26 +262,20 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
-            email: email.clone(),
+            email: email_constraint.clone(),
             issuer: Some(issuer.clone()),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email.clone(),
+            email: email_constraint.clone(),
             issuer: None,
         };
         constraints.push(Box::new(vc));
 
-        let vc = AnnotationVerifier { annotations };
-        constraints.push(Box::new(vc));
-
         let error =
-            filter_signature_layers(&layers, constraints).expect_err("Should have god an error");
-        let found = match error {
-            SigstoreError::SigstoreNoVerifiedLayer => true,
-            _ => false,
-        };
+            filter_signature_layers(&layers, constraints).expect_err("Should have got an error");
+        let found = matches!(error, SigstoreError::SigstoreNoVerifiedLayer);
         assert!(found, "Didn't get the expected error, got {}", error);
     }
 }
