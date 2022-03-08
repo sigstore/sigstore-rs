@@ -52,9 +52,9 @@ pub use self::client::Client;
 
 pub mod client_builder;
 pub use self::client_builder::ClientBuilder;
+use self::verification_constraint::VerificationConstraint;
 
 pub mod verification_constraint;
-use verification_constraint::VerificationConstraintVec;
 
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
@@ -144,7 +144,9 @@ mod tests {
     use super::*;
     use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
-    use crate::cosign::verification_constraint::{AnnotationVerifier, CertSubjectEmailVerifier};
+    use crate::cosign::verification_constraint::{
+        AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
+    };
     use crate::crypto::{
         certificate::extract_public_key_from_pem_cert, CosignVerificationKey,
         SignatureDigestAlgorithm,
@@ -184,7 +186,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
     }
 
     #[test]
-    fn filter_constraints_all_satisfied() {
+    fn verify_constraints_all_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
 
@@ -235,16 +237,14 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let vc = AnnotationVerifier { annotations };
         constraints.push(Box::new(vc));
 
-        let unsatisfied_constraints =
-            filter_constraints(&layers, constraints).expect("Should not have returned an error");
-        assert_eq!(unsatisfied_constraints.len(), 0);
+        verify_constraints(&layers, constraints.iter()).expect("should not return an error");
     }
 
     #[test]
-    fn filter_constraints_none_satisfied() {
+    fn verify_constraints_none_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
-        let email_constraint = "bob@example.com".to_string();
+        let wrong_email = "bob@example.com".to_string();
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
         for _ in 0..5 {
@@ -272,24 +272,24 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
-            email: email_constraint.clone(),
-            issuer: Some(issuer),
+            email: wrong_email.clone(),
+            issuer: Some(issuer), // correct issuer
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email_constraint,
-            issuer: None,
+            email: wrong_email,
+            issuer: None, // missing issuer
         };
         constraints.push(Box::new(vc));
 
-        let error = filter_constraints(&layers, constraints).expect_err("Should have got an error");
-        let found = matches!(error, SigstoreError::SigstoreNoVerifiedLayer);
-        assert!(found, "Didn't get the expected error, got {}", error);
+        let err =
+            verify_constraints(&layers, constraints.iter()).expect_err("we should have an err");
+        assert_eq!(err.unsatisfied_constraints.len(), 2);
     }
 
     #[test]
-    fn filter_constraints_some_unsatisfied() {
+    fn verify_constraints_some_unsatisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
         let email_incorrect = "bob@example.com".to_string();
@@ -331,8 +331,8 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         };
         constraints.push(Box::new(unsatisfied_constraint));
 
-        let unsatisfied_constraints =
-            filter_constraints(&layers, constraints).expect("Should not have returned an error");
-        assert_eq!(unsatisfied_constraints.len(), 1);
+        let err =
+            verify_constraints(&layers, constraints.iter()).expect_err("we should have an err");
+        assert_eq!(err.unsatisfied_constraints.len(), 1);
     }
 }

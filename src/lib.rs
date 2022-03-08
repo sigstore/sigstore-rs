@@ -61,7 +61,7 @@
 //! ```rust,no_run
 //! use crate::sigstore::cosign::{
 //!     CosignCapabilities,
-//!     filter_constraints,
+//!     verify_constraints,
 //! };
 //! use crate::sigstore::cosign::verification_constraint::{
 //!     AnnotationVerifier,
@@ -70,6 +70,7 @@
 //! };
 //! use crate::sigstore::crypto::SignatureDigestAlgorithm;
 //! use crate::sigstore::errors::SigstoreError;
+//! use sigstore::errors::SigstoreVerifyConstraintsError;
 //!
 //! use std::boxed::Box;
 //! use std::collections::HashMap;
@@ -126,25 +127,24 @@
 //!
 //!   // Filter the constraints, find the ones not satisfied by the layers on
 //!   // the image
-//!   let unsatisfied_constraints = filter_constraints(
+//!   let result = verify_constraints(
 //!     &signature_layers,
-//!     verification_constraints);
+//!     verification_constraints.iter());
 //!
-//!   match unsatisfied_constraints {
-//!     Err(SigstoreError::SigstoreNoVerifiedLayer) => {
-//!       panic!("no signature is matching the requirements")
-//!     },
-//!     Err(e) => {
-//!       panic!("Something went wrong while verifying the image: {}", e)
-//!     },
-//!     Ok(unsatisfied_constraints) => {
-//!       if unsatisfied_constraints.len() > 0 {
-//!         println!("Not all requirements were satisfied:");
-//!         println!("{:?}", unsatisfied_constraints);
-//!       } else {
-//!         println!("Image verified.");
+//!   match result {
+//!       Ok(()) => {
+//!           println!("Image successfully verified");
 //!       }
-//!     }
+//!       Err(SigstoreVerifyConstraintsError {
+//!           unsatisfied_constraints,
+//!       }) => {
+//!           if unsatisfied_constraints.is_empty() {
+//!               println!("Image successfully verified");
+//!           } else {
+//!               println!("{:?}", unsatisfied_constraints);
+//!              panic!("Image verification failed")
+//!           }
+//!       }
 //!   }
 //! }
 //! ```
