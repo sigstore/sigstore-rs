@@ -125,8 +125,9 @@
 //!     Box::new(pub_key_verifier),
 //!   ];
 //!
-//!   // Filter the constraints, find the ones not satisfied by the layers on
-//!   // the image
+//!   // Use the given list of constraints to verify the trusted
+//!   // `signature_layers`. This will raise an error if one or more verification
+//!   // constraints are not satisfied.
 //!   let result = verify_constraints(
 //!     &signature_layers,
 //!     verification_constraints.iter());
@@ -138,12 +139,8 @@
 //!       Err(SigstoreVerifyConstraintsError {
 //!           unsatisfied_constraints,
 //!       }) => {
-//!           if unsatisfied_constraints.is_empty() {
-//!               println!("Image successfully verified");
-//!           } else {
-//!               println!("{:?}", unsatisfied_constraints);
-//!              panic!("Image verification failed")
-//!           }
+//!           println!("{:?}", unsatisfied_constraints);
+//!           panic!("Image verification failed")
 //!       }
 //!   }
 //! }
