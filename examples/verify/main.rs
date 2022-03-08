@@ -18,9 +18,9 @@ use sigstore::cosign::verification_constraint::{
     AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, PublicKeyVerifier,
     VerificationConstraintVec,
 };
-use sigstore::cosign::CosignCapabilities;
-use sigstore::cosign::SignatureLayer;
+use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SignatureDigestAlgorithm;
+use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
 use std::convert::TryFrom;
@@ -93,7 +93,7 @@ struct Cli {
     image: String,
 }
 
-async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
+async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
     let cli = Cli::parse();
 
     // Note well: this a limitation deliberately introduced by this example.
@@ -162,11 +162,11 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
     let mut client = client_builder.build()?;
 
     // Build verification constraints
-    let mut verification_constraint: VerificationConstraintVec = Vec::new();
+    let mut verification_constraints: VerificationConstraintVec = Vec::new();
     if let Some(cert_email) = cli.cert_email {
         let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
 
-        verification_constraint.push(Box::new(CertSubjectEmailVerifier {
+        verification_constraints.push(Box::new(CertSubjectEmailVerifier {
             email: cert_email.to_string(),
             issuer,
         }));
@@ -179,7 +179,7 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
             ));
         }
 
-        verification_constraint.push(Box::new(CertSubjectUrlVerifier {
+        verification_constraints.push(Box::new(CertSubjectUrlVerifier {
             url: cert_url.to_string(),
             issuer: issuer.unwrap(),
         }));
@@ -191,13 +191,13 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
                 .map_err(anyhow::Error::msg)?;
         let verifier = PublicKeyVerifier::new(&key, signature_digest_algorithm)
             .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
-        verification_constraint.push(Box::new(verifier));
+        verification_constraints.push(Box::new(verifier));
     }
 
     if !cli.annotations.is_empty() {
         let mut values: HashMap<String, String> = HashMap::new();
         for annotation in &cli.annotations {
-            let tmp: Vec<_> = annotation.splitn(2, "=").collect();
+            let tmp: Vec<_> = annotation.splitn(2, '=').collect();
             if tmp.len() == 2 {
                 values.insert(String::from(tmp[0]), String::from(tmp[1]));
             }
@@ -206,7 +206,7 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
             let annotations_verifier = AnnotationVerifier {
                 annotations: values,
             };
-            verification_constraint.push(Box::new(annotations_verifier));
+            verification_constraints.push(Box::new(annotations_verifier));
         }
     }
 
@@ -218,23 +218,29 @@ async fn run_app() -> anyhow::Result<Vec<SignatureLayer>> {
         .trusted_signature_layers(auth, &source_image_digest, &cosign_signature_image)
         .await?;
 
-    sigstore::cosign::filter_signature_layers(&trusted_layers, verification_constraint)
-        .map_err(|e| anyhow!("{}", e))
+    Ok((trusted_layers, verification_constraints))
 }
 
 #[tokio::main]
 pub async fn main() {
-    let trusted_signatures: anyhow::Result<Vec<SignatureLayer>> = run_app().await;
-
-    std::process::exit(match trusted_signatures {
-        Ok(signatures) => {
-            if signatures.is_empty() {
-                eprintln!("Image verification failed: no matching signature found.");
-                1
-            } else {
-                println!("Image successfully verified");
-                serde_json::to_writer_pretty(std::io::stdout(), &signatures).unwrap();
-                0
+    std::process::exit(match run_app().await {
+        Ok((trusted_layers, verification_constraints)) => {
+            let filter_result = sigstore::cosign::verify_constraints(
+                &trusted_layers,
+                verification_constraints.iter(),
+            );
+            match filter_result {
+                Ok(()) => {
+                    println!("Image successfully verified");
+                    0
+                }
+                Err(SigstoreVerifyConstraintsError {
+                    unsatisfied_constraints,
+                }) => {
+                    eprintln!("Image verification failed: not all constraints satisfied.");
+                    eprintln!("{:?}", unsatisfied_constraints);
+                    1
+                }
             }
         }
         Err(err) => {

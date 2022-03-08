@@ -61,7 +61,7 @@
 //! ```rust,no_run
 //! use crate::sigstore::cosign::{
 //!     CosignCapabilities,
-//!     filter_signature_layers,
+//!     verify_constraints,
 //! };
 //! use crate::sigstore::cosign::verification_constraint::{
 //!     AnnotationVerifier,
@@ -70,6 +70,7 @@
 //! };
 //! use crate::sigstore::crypto::SignatureDigestAlgorithm;
 //! use crate::sigstore::errors::SigstoreError;
+//! use sigstore::errors::SigstoreVerifyConstraintsError;
 //!
 //! use std::boxed::Box;
 //! use std::collections::HashMap;
@@ -124,26 +125,23 @@
 //!     Box::new(pub_key_verifier),
 //!   ];
 //!
-//!   // Filter all the trusted layers, find the ones satisfying the constraints
-//!   // we just defined
-//!   let signatures_matching_requirements = filter_signature_layers(
+//!   // Use the given list of constraints to verify the trusted
+//!   // `signature_layers`. This will raise an error if one or more verification
+//!   // constraints are not satisfied.
+//!   let result = verify_constraints(
 //!     &signature_layers,
-//!     verification_constraints);
+//!     verification_constraints.iter());
 //!
-//!   match signatures_matching_requirements {
-//!     Err(SigstoreError::SigstoreNoVerifiedLayer) => {
-//!       panic!("no signature is matching the requirements")
-//!     },
-//!     Err(e) => {
-//!       panic!("Something went wrong while verifying the image: {}", e)
-//!     },
-//!     Ok(signatures) => {
-//!       println!("signatures matching the requirements:");
-//!       serde_json::to_writer_pretty(
-//!           std::io::stdout(),
-//!           &signatures,
-//!       ).unwrap();
-//!     }
+//!   match result {
+//!       Ok(()) => {
+//!           println!("Image successfully verified");
+//!       }
+//!       Err(SigstoreVerifyConstraintsError {
+//!           unsatisfied_constraints,
+//!       }) => {
+//!           println!("{:?}", unsatisfied_constraints);
+//!           panic!("Image verification failed")
+//!       }
 //!   }
 //! }
 //! ```

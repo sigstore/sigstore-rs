@@ -39,7 +39,7 @@
 use async_trait::async_trait;
 use tracing::warn;
 
-use crate::errors::{Result, SigstoreError};
+use crate::errors::{Result, SigstoreVerifyConstraintsError};
 use crate::registry::Auth;
 
 mod bundle;
@@ -54,7 +54,7 @@ pub mod client_builder;
 pub use self::client_builder::ClientBuilder;
 
 pub mod verification_constraint;
-use verification_constraint::VerificationConstraintVec;
+use self::verification_constraint::{VerificationConstraint, VerificationConstraintRefVec};
 
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
@@ -76,8 +76,9 @@ pub trait CosignCapabilities {
     /// signature image. All the Bundled objects have been verified using Rekor's
     /// signature.
     ///
-    /// These returned objects can then be filtered using the [`filter_signature_layers`]
-    /// function.
+    /// These returned objects can then be verified against
+    /// [`VerificationConstraints`](crate::cosign::verification_constraint::VerificationConstraint)
+    /// using the [`verify_constraints`] function.
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
@@ -86,41 +87,54 @@ pub trait CosignCapabilities {
     ) -> Result<Vec<SignatureLayer>>;
 }
 
-/// Given a list of trusted `SignatureLayer`, find all the layers that satisfy
-/// the given constraints.
+/// Given a list of trusted `SignatureLayer`, find all the constraints that
+/// aren't satisfied by the layers.
+///
+/// If there's any unsatisfied constraints it means that the image failed
+/// verification.
+/// If there's no unsatisfied constraints it means that the image passed
+/// verification.
+///
+/// Returns a `Result` with either `Ok()` for passed verification or
+/// [`SigstoreVerifyConstraintsError`](crate::errors::SigstoreVerifyConstraintsError),
+/// which contains a vector of references to unsatisfied constraints.
 ///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
 /// details about how to define verification constraints.
-pub fn filter_signature_layers(
-    signature_layers: &[SignatureLayer],
-    constraints: VerificationConstraintVec,
-) -> Result<Vec<SignatureLayer>> {
-    let layers: Vec<SignatureLayer> = signature_layers
-            .iter()
-            .filter(|sl| {
-                let is_a_match = if constraints.is_empty() {
-                    true
-                } else {
-                    constraints.iter().any(|c| {
-                        match c.verify(sl) {
-                            Ok(verification_passed) => verification_passed,
-                            Err(e) => {
-                                warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
-                                // handle errors as verification failures
-                                false
-                            }
-                        }
-                    })
-                };
-                is_a_match
-            })
-            .cloned()
-            .collect();
+pub fn verify_constraints<'a, 'b, I>(
+    signature_layers: &'a [SignatureLayer],
+    constraints: I,
+) -> std::result::Result<(), SigstoreVerifyConstraintsError<'b>>
+where
+    I: Iterator<Item = &'b Box<dyn VerificationConstraint>>,
+{
+    let unsatisfied_constraints: VerificationConstraintRefVec = constraints.filter(|c| {
+        let mut is_c_unsatisfied = true;
+        signature_layers.iter().any( | sl | {
+            // iterate through all layers and find if at least one layer
+            // satisfies constraint. If so, we stop iterating
+            match c.verify(sl) {
+                Ok(is_sl_verified) => {
+                    is_c_unsatisfied = !is_sl_verified;
+                    is_sl_verified // if true, stop searching
+                }
+                Err(e) => {
+                    warn!(error = ?e, constraint = ?c, "Skipping layer because constraint verification returned an error");
+                    // handle errors as verification failures
+                    is_c_unsatisfied = true;
+                    false // keep searching to see if other layer satisfies
+                }
+            }
+        });
+        is_c_unsatisfied // if true, constraint gets filtered into result
+    }).collect();
 
-    if layers.is_empty() {
-        Err(SigstoreError::SigstoreNoVerifiedLayer)
+    if unsatisfied_constraints.is_empty() {
+        Ok(())
     } else {
-        Ok(layers)
+        Err(SigstoreVerifyConstraintsError {
+            unsatisfied_constraints,
+        })
     }
 }
 
@@ -132,7 +146,9 @@ mod tests {
     use super::*;
     use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
-    use crate::cosign::verification_constraint::{AnnotationVerifier, CertSubjectEmailVerifier};
+    use crate::cosign::verification_constraint::{
+        AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
+    };
     use crate::crypto::{
         certificate::extract_public_key_from_pem_cert, CosignVerificationKey,
         SignatureDigestAlgorithm,
@@ -172,7 +188,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
     }
 
     #[test]
-    fn filter_signature_layers_matches() {
+    fn verify_constraints_all_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
 
@@ -181,8 +197,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         annotations.insert("key2".into(), "value2".into());
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
-        let expected_matches = 5;
-        for _ in 0..expected_matches {
+        for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
             let mut cert_signature = sl.certificate_signature.unwrap();
             let cert_subj = CertificateSubject::Email(email.clone());
@@ -211,12 +226,12 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
             email: email.clone(),
-            issuer: Some(issuer.clone()),
+            issuer: Some(issuer),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email.clone(),
+            email,
             issuer: None,
         };
         constraints.push(Box::new(vc));
@@ -224,20 +239,17 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
         let vc = AnnotationVerifier { annotations };
         constraints.push(Box::new(vc));
 
-        let matches = filter_signature_layers(&layers, constraints)
-            .expect("Should not have returned an error");
-        assert_eq!(matches.len(), expected_matches);
+        verify_constraints(&layers, constraints.iter()).expect("should not return an error");
     }
 
     #[test]
-    fn filter_signature_layers_no_matches() {
+    fn verify_constraints_none_satisfied() {
         let email = "alice@example.com".to_string();
         let issuer = "an issuer".to_string();
-        let email_constraint = "bob@example.com".to_string();
+        let wrong_email = "bob@example.com".to_string();
 
         let mut layers: Vec<SignatureLayer> = Vec::new();
-        let expected_matches = 5;
-        for _ in 0..expected_matches {
+        for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
             let mut cert_signature = sl.certificate_signature.unwrap();
             let cert_subj = CertificateSubject::Email(email.clone());
@@ -262,20 +274,67 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
-            email: email_constraint.clone(),
-            issuer: Some(issuer.clone()),
+            email: wrong_email.clone(),
+            issuer: Some(issuer), // correct issuer
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: email_constraint.clone(),
-            issuer: None,
+            email: wrong_email,
+            issuer: None, // missing issuer, more relaxed
         };
         constraints.push(Box::new(vc));
 
-        let error =
-            filter_signature_layers(&layers, constraints).expect_err("Should have got an error");
-        let found = matches!(error, SigstoreError::SigstoreNoVerifiedLayer);
-        assert!(found, "Didn't get the expected error, got {}", error);
+        let err =
+            verify_constraints(&layers, constraints.iter()).expect_err("we should have an err");
+        assert_eq!(err.unsatisfied_constraints.len(), 2);
+    }
+
+    #[test]
+    fn verify_constraints_some_unsatisfied() {
+        let email = "alice@example.com".to_string();
+        let issuer = "an issuer".to_string();
+        let email_incorrect = "bob@example.com".to_string();
+
+        let mut layers: Vec<SignatureLayer> = Vec::new();
+        for _ in 0..5 {
+            let mut sl = build_correct_signature_layer_with_certificate();
+            let mut cert_signature = sl.certificate_signature.unwrap();
+            let cert_subj = CertificateSubject::Email(email.clone());
+            cert_signature.issuer = Some(issuer.clone());
+            cert_signature.subject = cert_subj;
+            sl.certificate_signature = Some(cert_signature);
+
+            let mut extra: HashMap<String, serde_json::Value> = HashMap::new();
+            extra.insert("something extra".into(), json!("value extra"));
+
+            let mut simple_signing = sl.simple_signing;
+            let optional = Optional {
+                creator: Some("test".into()),
+                timestamp: None,
+                extra,
+            };
+            simple_signing.optional = Some(optional);
+            sl.simple_signing = simple_signing;
+
+            layers.push(sl);
+        }
+
+        let mut constraints: VerificationConstraintVec = Vec::new();
+        let satisfied_constraint = CertSubjectEmailVerifier {
+            email,
+            issuer: Some(issuer),
+        };
+        constraints.push(Box::new(satisfied_constraint));
+
+        let unsatisfied_constraint = CertSubjectEmailVerifier {
+            email: email_incorrect,
+            issuer: None,
+        };
+        constraints.push(Box::new(unsatisfied_constraint));
+
+        let err =
+            verify_constraints(&layers, constraints.iter()).expect_err("we should have an err");
+        assert_eq!(err.unsatisfied_constraints.len(), 1);
     }
 }

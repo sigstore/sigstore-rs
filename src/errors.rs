@@ -17,6 +17,14 @@
 
 use thiserror::Error;
 
+use crate::cosign::verification_constraint::VerificationConstraintRefVec;
+
+#[derive(Error, Debug)]
+#[error("Several Signature Layers failed verification")]
+pub struct SigstoreVerifyConstraintsError<'a> {
+    pub unsatisfied_constraints: VerificationConstraintRefVec<'a>,
+}
+
 pub type Result<T> = std::result::Result<T, SigstoreError>;
 
 #[derive(Error, Debug)]
