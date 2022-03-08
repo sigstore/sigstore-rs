@@ -39,7 +39,7 @@
 use async_trait::async_trait;
 use tracing::warn;
 
-use crate::errors::{Result, SigstoreError};
+use crate::errors::{Result, SigstoreVerifyConstraintsError};
 use crate::registry::Auth;
 
 mod bundle;
@@ -88,19 +88,26 @@ pub trait CosignCapabilities {
 
 /// Given a list of trusted `SignatureLayer`, find all the constraints that
 /// aren't satisfied by the layers.
+///
 /// If there's any unsatisfied constraints it means that the image failed
 /// verification.
 /// If there's no unsatisfied constraints it means that the image passed
 /// verification.
 ///
+/// Returns a Result with either Ok() for passed verification or
+/// SigstoreError::SigstoreVerifyConstraintsError{}, which contains a vec of
+/// references to unsatisfied constraints.
+///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
 /// details about how to define verification constraints.
-pub fn filter_constraints(
-    signature_layers: &[SignatureLayer],
-    constraints: VerificationConstraintVec,
-) -> Result<VerificationConstraintVec> {
-    let constraints_length = constraints.len();
-    let unsatisfied_constraints: VerificationConstraintVec = constraints.into_iter().filter(|c| {
+pub fn verify_constraints<'a, 'b, I>(
+    signature_layers: &'a [SignatureLayer],
+    constraints: I,
+) -> std::result::Result<(), SigstoreVerifyConstraintsError<'b>>
+where
+    I: Iterator<Item = &'b Box<dyn VerificationConstraint>>,
+{
+    let unsatisfied_constraints: Vec<&Box<dyn VerificationConstraint>> = constraints.filter(|c| {
         let mut is_c_unsatisfied = true;
         signature_layers.iter().any( | sl | {
             // iterate through all layers and find if at least one layer
@@ -120,13 +127,12 @@ pub fn filter_constraints(
         });
         is_c_unsatisfied // if true, constraint gets filtered into result
     }).collect();
-
-    if unsatisfied_constraints.len() == constraints_length {
-        // not even 1 layer was verified
-        Err(SigstoreError::SigstoreNoVerifiedLayer)
+    if unsatisfied_constraints.is_empty() {
+        Ok(())
     } else {
-        // some, or all layers may have been verified
-        Ok(unsatisfied_constraints)
+        Err(SigstoreVerifyConstraintsError {
+            unsatisfied_constraints,
+        })
     }
 }
 
