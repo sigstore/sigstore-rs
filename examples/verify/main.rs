@@ -16,7 +16,7 @@
 extern crate sigstore;
 use sigstore::cosign::verification_constraint::{
     AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, PublicKeyVerifier,
-    VerificationConstraint, VerificationConstraintVec,
+    VerificationConstraintVec,
 };
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SignatureDigestAlgorithm;
@@ -93,7 +93,7 @@ struct Cli {
     image: String,
 }
 
-async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, Vec<Box<dyn VerificationConstraint>>)> {
+async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
     let cli = Cli::parse();
 
     // Note well: this a limitation deliberately introduced by this example.

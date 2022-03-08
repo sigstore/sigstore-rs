@@ -52,9 +52,9 @@ pub use self::client::Client;
 
 pub mod client_builder;
 pub use self::client_builder::ClientBuilder;
-use self::verification_constraint::VerificationConstraint;
 
 pub mod verification_constraint;
+use self::verification_constraint::{VerificationConstraint, VerificationConstraintRefVec};
 
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
@@ -108,7 +108,7 @@ pub fn verify_constraints<'a, 'b, I>(
 where
     I: Iterator<Item = &'b Box<dyn VerificationConstraint>>,
 {
-    let unsatisfied_constraints: Vec<&Box<dyn VerificationConstraint>> = constraints.filter(|c| {
+    let unsatisfied_constraints: VerificationConstraintRefVec = constraints.filter(|c| {
         let mut is_c_unsatisfied = true;
         signature_layers.iter().any( | sl | {
             // iterate through all layers and find if at least one layer
@@ -128,6 +128,7 @@ where
         });
         is_c_unsatisfied // if true, constraint gets filtered into result
     }).collect();
+
     if unsatisfied_constraints.is_empty() {
         Ok(())
     } else {
@@ -280,7 +281,7 @@ Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 
         let vc = CertSubjectEmailVerifier {
             email: wrong_email,
-            issuer: None, // missing issuer
+            issuer: None, // missing issuer, more relaxed
         };
         constraints.push(Box::new(vc));
 
