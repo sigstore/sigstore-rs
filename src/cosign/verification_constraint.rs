@@ -37,6 +37,9 @@ use crate::errors::Result;
 /// A list of objects implementing the [`VerificationConstraint`] trait
 pub type VerificationConstraintVec = Vec<Box<dyn VerificationConstraint>>;
 
+/// A list of references to objects implementing the [`VerificationConstraint`] trait
+pub type VerificationConstraintRefVec<'a> = Vec<&'a Box<dyn VerificationConstraint>>;
+
 /// A trait that can be used to define verification constraints objects
 /// that use a custom verification logic.
 pub trait VerificationConstraint: std::fmt::Debug {
