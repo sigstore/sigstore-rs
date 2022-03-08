@@ -76,8 +76,9 @@ pub trait CosignCapabilities {
     /// signature image. All the Bundled objects have been verified using Rekor's
     /// signature.
     ///
-    /// These returned objects can then be filtered using the [`filter_signature_layers`]
-    /// function.
+    /// These returned objects can then be verified against
+    /// [`VerificationConstraints`](crate::cosign::verification_constraint::VerificationConstraint)
+    /// using the [`verify_constraints`] function.
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
@@ -94,9 +95,9 @@ pub trait CosignCapabilities {
 /// If there's no unsatisfied constraints it means that the image passed
 /// verification.
 ///
-/// Returns a Result with either Ok() for passed verification or
-/// SigstoreError::SigstoreVerifyConstraintsError{}, which contains a vec of
-/// references to unsatisfied constraints.
+/// Returns a `Result` with either `Ok()` for passed verification or
+/// [`SigstoreVerifyConstraintsError`](crate::errors::SigstoreVerifyConstraintsError),
+/// which contains a vector of references to unsatisfied constraints.
 ///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
 /// details about how to define verification constraints.
