@@ -23,7 +23,7 @@ olpc-cjson = "0.1.1"
 pem = "1.0.2"
 # TODO: get rid of the git reference on the crate is published on crates.io
 picky = { git = "https://github.com/Devolutions/picky-rs.git", tag = "picky-7.0.0-rc.1", default-features = false, features = [ "x509" ] }
-regex = "1.5.4"
+regex = "1.5.5"
 ring = "0.16.20"
 serde_json = "1.0.79"
 serde = { version = "1.0.136", features = ["derive"] }
