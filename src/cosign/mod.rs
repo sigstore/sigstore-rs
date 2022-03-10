@@ -149,10 +149,8 @@ mod tests {
     use crate::cosign::verification_constraint::{
         AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
     };
-    use crate::crypto::{
-        certificate::extract_public_key_from_pem_cert, CosignVerificationKey,
-        SignatureDigestAlgorithm,
-    };
+    use crate::crypto::certificate_pool::CertificatePool;
+    use crate::crypto::{CosignVerificationKey, SignatureDigestAlgorithm};
     use crate::simple_signing::Optional;
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
@@ -160,7 +158,7 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
 kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
 -----END PUBLIC KEY-----"#;
 
-    pub(crate) const FULCIO_CRT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+    const FULCIO_CRT_1_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIIB+DCCAX6gAwIBAgITNVkDZoCiofPDsy7dfm6geLbuhzAKBggqhkjOPQQDAzAq
 MRUwEwYDVQQKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIx
 MDMwNzAzMjAyOVoXDTMxMDIyMzAzMjAyOVowKjEVMBMGA1UEChMMc2lnc3RvcmUu
@@ -174,9 +172,32 @@ Ve/83WrFomwmNf056y1X48F9c4m3a3ozXAIxAKjRay5/aj/jsKKGIkmQatjI8uup
 Hr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==
 -----END CERTIFICATE-----"#;
 
-    pub(crate) fn get_fulcio_public_key() -> Vec<u8> {
-        extract_public_key_from_pem_cert(FULCIO_CRT_PEM.as_bytes())
-            .expect("Cannot extract public key from Fulcio hard-coded cert")
+    const FULCIO_CRT_2_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMw
+KjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y
+MTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3Jl
+LmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7
+XeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxex
+X69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92j
+YzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRY
+wB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQ
+KsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCM
+WP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9
+TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
+-----END CERTIFICATE-----"#;
+
+    pub(crate) fn get_fulcio_cert_pool() -> CertificatePool {
+        let certificates = vec![
+            crate::registry::Certificate {
+                encoding: crate::registry::CertificateEncoding::Pem,
+                data: FULCIO_CRT_1_PEM.as_bytes().to_vec(),
+            },
+            crate::registry::Certificate {
+                encoding: crate::registry::CertificateEncoding::Pem,
+                data: FULCIO_CRT_2_PEM.as_bytes().to_vec(),
+            },
+        ];
+        CertificatePool::from_certificates(&certificates).unwrap()
     }
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {

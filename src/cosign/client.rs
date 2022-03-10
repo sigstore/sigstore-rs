@@ -14,7 +14,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
 
 use super::{
     constants::SIGSTORE_OCI_MEDIA_TYPE,
@@ -22,8 +21,11 @@ use super::{
     CosignCapabilities,
 };
 use crate::crypto::CosignVerificationKey;
-use crate::errors::{Result, SigstoreError};
 use crate::registry::Auth;
+use crate::{
+    crypto::certificate_pool::CertificatePool,
+    errors::{Result, SigstoreError},
+};
 
 /// Cosign Client
 ///
@@ -31,7 +33,7 @@ use crate::registry::Auth;
 pub struct Client {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
     pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
-    pub(crate) fulcio_pub_key_der: Option<Vec<u8>>,
+    pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
 #[async_trait]
@@ -81,20 +83,12 @@ impl CosignCapabilities for Client {
             }
         };
 
-        let fulcio_pub_key = match &self.fulcio_pub_key_der {
-            None => None,
-            Some(der) => {
-                let (_, key) = SubjectPublicKeyInfo::from_der(der)?;
-                Some(key)
-            }
-        };
-
         build_signature_layers(
             &image_manifest,
             source_image_digest,
             &layers,
             self.rekor_pub_key.as_ref(),
-            fulcio_pub_key.as_ref(),
+            self.fulcio_cert_pool.as_ref(),
         )
     }
 }
@@ -138,7 +132,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::tests::{FULCIO_CRT_PEM, REKOR_PUB_KEY};
+    use crate::cosign::tests::{get_fulcio_cert_pool, REKOR_PUB_KEY};
     use crate::{crypto::SignatureDigestAlgorithm, mock_client::test::MockOciClient};
 
     fn build_test_client(mock_client: MockOciClient) -> Client {
@@ -151,7 +145,7 @@ mod tests {
         Client {
             registry_client: Box::new(mock_client),
             rekor_pub_key: Some(rekor_pub_key),
-            fulcio_pub_key_der: Some(FULCIO_CRT_PEM.as_bytes().to_vec()),
+            fulcio_cert_pool: Some(get_fulcio_cert_pool()),
         }
     }
 

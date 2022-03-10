@@ -18,6 +18,7 @@
 use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
+use std::cmp::Ordering;
 use std::convert::From;
 
 /// A method for authenticating to a registry
@@ -69,7 +70,7 @@ impl From<ClientProtocol> for oci_distribution::client::ClientProtocol {
 }
 
 /// The encoding of the certificate
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CertificateEncoding {
     #[allow(missing_docs)]
     Der,
@@ -87,13 +88,25 @@ impl From<CertificateEncoding> for oci_distribution::client::CertificateEncoding
 }
 
 /// A x509 certificate
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Certificate {
     /// Which encoding is used by the certificate
     pub encoding: CertificateEncoding,
 
     /// Actual certificate
     pub data: Vec<u8>,
+}
+
+impl Ord for Certificate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.data.cmp(&other.data)
+    }
+}
+
+impl PartialOrd for Certificate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl From<&Certificate> for oci_distribution::client::Certificate {

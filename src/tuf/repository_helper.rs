@@ -22,7 +22,7 @@ use url::Url;
 
 use super::{
     super::errors::{Result, SigstoreError},
-    constants::{SIGSTORE_FULCIO_CERT_TARGET, SIGSTORE_REKOR_PUB_KEY_TARGET},
+    constants::{SIGSTORE_FULCIO_CERT_TARGET_REGEX, SIGSTORE_REKOR_PUB_KEY_TARGET},
 };
 
 pub(crate) struct RepositoryHelper {
@@ -50,23 +50,46 @@ impl RepositoryHelper {
         })
     }
 
-    /// Fetch Fulcio certificate from the given TUF repository or reuse
-    /// the local cache is used if its contents are not outdated.
+    /// Fetch Fulcio certificates from the given TUF repository or reuse
+    /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    pub(crate) fn fulcio_cert(&self) -> Result<Vec<u8>> {
-        let fulcio_target_name = TargetName::new(SIGSTORE_FULCIO_CERT_TARGET)?;
+    pub(crate) fn fulcio_certs(&self) -> Result<Vec<crate::registry::Certificate>> {
+        let fulcio_target_names = self.fulcio_cert_target_names();
+        let mut certs = vec![];
 
-        let local_fulcio_path = self
-            .checkout_dir
-            .as_ref()
-            .map(|d| Path::new(d).join(SIGSTORE_FULCIO_CERT_TARGET));
+        for fulcio_target_name in &fulcio_target_names {
+            let local_fulcio_path = self
+                .checkout_dir
+                .as_ref()
+                .map(|d| Path::new(d).join(fulcio_target_name.raw()));
 
-        fetch_target_or_reuse_local_cache(
-            &self.repository,
-            &fulcio_target_name,
-            local_fulcio_path.as_ref(),
-        )
+            let cert_data = fetch_target_or_reuse_local_cache(
+                &self.repository,
+                fulcio_target_name,
+                local_fulcio_path.as_ref(),
+            )?;
+            certs.push(crate::registry::Certificate {
+                data: cert_data,
+                encoding: crate::registry::CertificateEncoding::Pem,
+            });
+        }
+        Ok(certs)
+    }
+
+    fn fulcio_cert_target_names(&self) -> Vec<TargetName> {
+        self.repository
+            .targets()
+            .signed
+            .targets_iter()
+            .filter_map(|(target_name, _target)| {
+                if SIGSTORE_FULCIO_CERT_TARGET_REGEX.is_match(target_name.raw()) {
+                    Some(target_name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Fetch Rekor public key from the given TUF repository or reuse
@@ -243,14 +266,26 @@ mod tests {
             checkout_dir: None,
         };
 
-        let actual = helper.fulcio_cert().expect("fulcio cert cannot be read");
-        let expected = fs::read(
-            test_data()
-                .join("repository")
-                .join("targets")
-                .join("fulcio.crt.pem"),
-        )
-        .expect("cannot read fulcio cert from test data");
+        let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
+        actual.sort();
+        let mut expected: Vec<crate::registry::Certificate> =
+            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+                .iter()
+                .map(|filename| {
+                    let data = fs::read(
+                        test_data()
+                            .join("repository")
+                            .join("targets")
+                            .join(filename),
+                    )
+                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    crate::registry::Certificate {
+                        data,
+                        encoding: crate::registry::CertificateEncoding::Pem,
+                    }
+                })
+                .collect();
+        expected.sort();
 
         assert_eq!(
             actual, expected,
@@ -282,9 +317,26 @@ mod tests {
             checkout_dir: Some(cache_dir.path().to_path_buf()),
         };
 
-        let expected = helper.fulcio_cert().expect("fulcio cert cannot be read");
-        let actual = fs::read(cache_dir.path().join("fulcio.crt.pem"))
-            .expect("cannot read fulcio cert from test data");
+        let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
+        actual.sort();
+        let mut expected: Vec<crate::registry::Certificate> =
+            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+                .iter()
+                .map(|filename| {
+                    let data = fs::read(
+                        test_data()
+                            .join("repository")
+                            .join("targets")
+                            .join(filename),
+                    )
+                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    crate::registry::Certificate {
+                        data,
+                        encoding: crate::registry::CertificateEncoding::Pem,
+                    }
+                })
+                .collect();
+        expected.sort();
 
         assert_eq!(
             actual, expected,
@@ -306,11 +358,10 @@ mod tests {
         let cache_dir = TempDir::new().expect("Cannot create temp cache dir");
 
         // put some outdated files inside of the cache
-        fs::write(
-            cache_dir.path().join(SIGSTORE_FULCIO_CERT_TARGET),
-            b"fake fulcio",
-        )
-        .expect("Cannot write file to cache dir");
+        for filename in vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"] {
+            fs::write(cache_dir.path().join(filename), b"fake fulcio")
+                .expect("Cannot write file to cache dir");
+        }
         fs::write(
             cache_dir.path().join(SIGSTORE_REKOR_PUB_KEY_TARGET),
             b"fake rekor",
@@ -323,13 +374,30 @@ mod tests {
             checkout_dir: Some(cache_dir.path().to_path_buf()),
         };
 
-        let expected = helper.fulcio_cert().expect("fulcio cert cannot be read");
-        let actual = fs::read(cache_dir.path().join("fulcio.crt.pem"))
-            .expect("cannot read fulcio cert from test data");
+        let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
+        actual.sort();
+        let mut expected: Vec<crate::registry::Certificate> =
+            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+                .iter()
+                .map(|filename| {
+                    let data = fs::read(
+                        test_data()
+                            .join("repository")
+                            .join("targets")
+                            .join(filename),
+                    )
+                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    crate::registry::Certificate {
+                        data,
+                        encoding: crate::registry::CertificateEncoding::Pem,
+                    }
+                })
+                .collect();
+        expected.sort();
 
         assert_eq!(
             actual, expected,
-            "The fulcio cert read from the cache dir is not what was expected"
+            "The fulcio cert read from the TUF repository is not what was expected"
         );
 
         let expected = helper.rekor_pub_key().expect("rekor key cannot be read");

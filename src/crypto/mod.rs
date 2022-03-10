@@ -64,6 +64,7 @@ pub enum Signature<'a> {
 }
 
 pub(crate) mod certificate;
+pub(crate) mod certificate_pool;
 
 pub mod verification_key;
 pub use verification_key::CosignVerificationKey;

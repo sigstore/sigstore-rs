@@ -34,7 +34,7 @@
 //!     .expect("Error while building SigstoreRepository");
 //! let client = cosign::ClientBuilder::default()
 //!     .with_rekor_pub_key(repo.rekor_pub_key())
-//!     .with_fulcio_cert(repo.fulcio_cert())
+//!     .with_fulcio_certs(repo.fulcio_certs())
 //!     .build()
 //!     .expect("Error while building cosign client");
 //! ```
@@ -57,10 +57,10 @@ use repository_helper::RepositoryHelper;
 
 use super::errors::{Result, SigstoreError};
 
-/// Securely fetches Rekor public key and Fulcio certificate from Sigstore's TUF repository
+/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository
 pub struct SigstoreRepository {
     rekor_pub_key: String,
-    fulcio_cert: Vec<u8>,
+    fulcio_certs: Vec<crate::registry::Certificate>,
 }
 
 impl SigstoreRepository {
@@ -69,7 +69,7 @@ impl SigstoreRepository {
     /// ## Parameters
     ///
     /// * `checkout_dir`: path to a local directory where Rekor's public
-    /// key and Fulcio's certificate can be found
+    /// key and Fulcio's certificates can be found
     ///
     /// ## Behaviour
     ///
@@ -135,7 +135,7 @@ impl SigstoreRepository {
             checkout_dir,
         )?;
 
-        let fulcio_cert = repository_helper.fulcio_cert()?;
+        let fulcio_certs = repository_helper.fulcio_certs()?;
 
         let rekor_pub_key = repository_helper.rekor_pub_key().map(|data| {
             String::from_utf8(data).map_err(|e| {
@@ -148,7 +148,7 @@ impl SigstoreRepository {
 
         Ok(SigstoreRepository {
             rekor_pub_key,
-            fulcio_cert,
+            fulcio_certs,
         })
     }
 
@@ -158,7 +158,7 @@ impl SigstoreRepository {
     }
 
     /// Fulcio certificate
-    pub fn fulcio_cert(&self) -> &[u8] {
-        &self.fulcio_cert
+    pub fn fulcio_certs(&self) -> &[crate::registry::Certificate] {
+        &self.fulcio_certs
     }
 }

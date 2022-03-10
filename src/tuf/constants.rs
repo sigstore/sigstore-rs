@@ -13,11 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    pub(crate) static ref SIGSTORE_FULCIO_CERT_TARGET_REGEX: Regex =
+        Regex::new(r#"fulcio(_v\d+)?\.crt\.pem"#).unwrap();
+}
+
 pub(crate) const SIGSTORE_METADATA_BASE: &str = "http://sigstore-tuf-root.storage.googleapis.com/";
 pub(crate) const SIGSTORE_TARGET_BASE: &str =
     "http://sigstore-tuf-root.storage.googleapis.com/targets";
 
-pub(crate) const SIGSTORE_FULCIO_CERT_TARGET: &str = "fulcio.crt.pem";
 pub(crate) const SIGSTORE_REKOR_PUB_KEY_TARGET: &str = "rekor.pub";
 
 pub(crate) const SIGSTORE_ROOT: &str = r#"{
@@ -164,3 +171,18 @@ pub(crate) const SIGSTORE_ROOT: &str = r#"{
 		"version": 2
 	}
 }"#;
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rstest::*;
+
+    #[rstest]
+    #[case("fulcio.crt.pem", true)]
+    #[case("fulcio_v1.crt.pem", true)]
+    #[case("fulcio-v2.crt.pem", false)]
+    #[case("foo.crt.pem", false)]
+    fn check_fulcio_regex(#[case] input: &str, #[case] matches: bool) {
+        assert_eq!(SIGSTORE_FULCIO_CERT_TARGET_REGEX.is_match(input), matches);
+    }
+}
