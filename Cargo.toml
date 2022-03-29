@@ -15,6 +15,7 @@ rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls"]
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.13.0"
+lazy_static = "1.4.0"
 # TODO: go back to the officially release oci-distribution once these patches are released
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "0f717968093a5415f428503d741dedf24ea97948", default-features = false }
 #oci-distribution = { version = "0.8.1", default-features = false }
@@ -22,6 +23,8 @@ olpc-cjson = "0.1.1"
 open = "2.0.2"
 openidconnect = { version = "2.2.0", default-features = false, features = [ "reqwest" ] }
 pem = "1.0.2"
+picky = { version = "7.0.0-rc.2", default-features = false, features = [ "x509" ] }
+regex = "1.5.5"
 ring = "0.16.20"
 serde_json = "1.0.79"
 serde = { version = "1.0.136", features = ["derive"] }
@@ -40,5 +43,6 @@ anyhow = "1.0.54"
 chrono = "0.4.19"
 clap = { version = "3.1.0", features = ["derive"] }
 openssl = "0.10.38"
+rstest = "0.12.0"
 tempfile = "3.3.0"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }

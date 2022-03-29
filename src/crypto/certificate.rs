@@ -13,49 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use x509_parser::{
-    certificate::X509Certificate, parse_x509_certificate, pem::parse_x509_pem, prelude::ASN1Time,
-    x509::SubjectPublicKeyInfo,
-};
+use x509_parser::{certificate::X509Certificate, prelude::ASN1Time};
 
 use crate::errors::{Result, SigstoreError};
-
-/// Extract the public key stored inside of the given PEM-encoded certificate
-///
-/// Returns the DER key as a list of bytes
-pub fn extract_public_key_from_pem_cert(cert: &[u8]) -> Result<Vec<u8>> {
-    let (_, pem) = parse_x509_pem(cert)?;
-    let (_, res_x509) = parse_x509_certificate(&pem.contents)?;
-
-    Ok(res_x509.public_key().raw.to_owned())
-}
 
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
 ///
 /// The following checks are performed against the given certificate:
-/// * The certificate has been issued by the CA with the given SubjectPublicKeyInfo
 /// * The certificate has the right set of key usages
 /// * The certificate cannot be used before the current time
-pub(crate) fn is_trusted(
-    certificate: &X509Certificate,
-    ca_issuer_public_key: &SubjectPublicKeyInfo,
-    integrated_time: i64,
-) -> Result<()> {
-    verify_issuer(certificate, ca_issuer_public_key)?;
+pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
     verify_key_usages(certificate)?;
     verify_has_san(certificate)?;
     verify_validity(certificate)?;
     verify_expiration(certificate, integrated_time)?;
 
-    Ok(())
-}
-
-fn verify_issuer(
-    certificate: &X509Certificate,
-    ca_issuer_public_key: &SubjectPublicKeyInfo,
-) -> Result<()> {
-    certificate.verify_signature(Some(ca_issuer_public_key))?;
     Ok(())
 }
 
@@ -134,46 +107,6 @@ mod tests {
     use crate::crypto::tests::*;
 
     use chrono::{Duration, Utc};
-    use x509_parser::traits::FromDer;
-
-    #[test]
-    fn verify_cert_issuer_success() -> anyhow::Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
-        let ca_public_key_der = ca_data.private_key.public_key_to_der()?;
-        let (_, spki) = SubjectPublicKeyInfo::from_der(&ca_public_key_der)?;
-
-        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
-
-        assert!(verify_issuer(&cert, &spki).is_ok());
-
-        Ok(())
-    }
-
-    #[test]
-    fn verify_cert_issuer_failure() -> anyhow::Result<()> {
-        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
-
-        let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
-
-        let another_ca_data = generate_certificate(None, CertGenerationOptions::default())?;
-        let wrong_ca_public_key_der = another_ca_data.private_key.public_key_to_der()?;
-        let (_, spki) = SubjectPublicKeyInfo::from_der(&wrong_ca_public_key_der)?;
-
-        let err = verify_issuer(&cert, &spki).expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::X509Error(_) => true,
-            _ => false,
-        };
-        assert!(found, "Didn't get expected error, got {:?} instead", err);
-
-        Ok(())
-    }
 
     #[test]
     fn verify_cert_key_usages_success() -> anyhow::Result<()> {

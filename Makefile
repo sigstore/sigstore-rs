@@ -10,8 +10,12 @@ fmt:
 lint:
 	cargo clippy -- -D warnings
 
+.PHONY: doc
+doc:
+	cargo doc
+
 .PHONY: test
-test: fmt lint
+test: fmt lint doc
 	cargo test --workspace
 
 .PHONY: clean

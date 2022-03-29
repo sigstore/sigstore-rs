@@ -17,6 +17,14 @@
 
 use thiserror::Error;
 
+use crate::cosign::verification_constraint::VerificationConstraintRefVec;
+
+#[derive(Error, Debug)]
+#[error("Several Signature Layers failed verification")]
+pub struct SigstoreVerifyConstraintsError<'a> {
+    pub unsatisfied_constraints: VerificationConstraintRefVec<'a>,
+}
+
 pub type Result<T> = std::result::Result<T, SigstoreError>;
 
 #[derive(Error, Debug)]
@@ -41,9 +49,11 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
-
     #[error(transparent)]
     X509Error(#[from] x509_parser::error::X509Error),
+
+    #[error(transparent)]
+    CertError(#[from] picky::x509::certificate::CertError),
 
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
@@ -84,6 +94,9 @@ pub enum SigstoreError {
     #[error("Certificate with incomplete Subject Alternative Name")]
     CertificateWithIncompleteSubjectAlternativeName,
 
+    #[error("Certificate pool error: {0}")]
+    CertificatePoolError(String),
+
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
 
@@ -108,8 +121,8 @@ pub enum SigstoreError {
     #[error("Rekor bundle missing")]
     SigstoreRekorBundleNotFoundError,
 
-    #[error("Fulcio public key not provided")]
-    SigstoreFulcioPublicNotProvidedError,
+    #[error("Fulcio certificates not provided")]
+    SigstoreFulcioCertificatesNotProvidedError,
 
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,
