@@ -57,7 +57,7 @@
 //! reqwest = { version = "0.11", optional = true, default-features = false, features = ["blocking"] }
 
 use crate::errors::{Result, SigstoreError};
-use tracing::{error};
+use tracing::error;
 
 use openidconnect::core::{
     CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata, CoreResponseType,
