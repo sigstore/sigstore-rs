@@ -57,6 +57,7 @@
 //! reqwest = { version = "0.11", optional = true, default-features = false, features = ["blocking"] }
 
 use crate::errors::{Result, SigstoreError};
+use tracing::{info, error};
 
 use openidconnect::core::{
     CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata, CoreResponseType,
@@ -111,7 +112,7 @@ impl OpenIDAuthorize {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let provider_metadata = CoreProviderMetadata::discover(&issuer, http_client)
             .unwrap_or_else(|_err| {
-                println!("Failed to discover OpenID Provider");
+                error!("Failed to discover OpenID Provider");
                 unreachable!();
             });
 
@@ -221,7 +222,7 @@ impl RedirectListener {
                     .set_pkce_verifier(self.pkce_verifier)
                     .request(http_client)
                     .unwrap_or_else(|_err| {
-                        println!("Failed to access token endpoint");
+                        error!("Failed to access token endpoint");
                         unreachable!();
                     });
 
@@ -232,7 +233,7 @@ impl RedirectListener {
                     .expect("Server did not return an ID token")
                     .claims(&id_token_verifier, &self.nonce)
                     .unwrap_or_else(|_err| {
-                        println!("Failed to verify ID token");
+                        error!("Failed to verify ID token");
                         unreachable!();
                     });
                 return Ok(id_token_claims.clone());
