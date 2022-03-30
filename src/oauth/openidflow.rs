@@ -22,36 +22,37 @@
 //! - `issuer`: the URL of the OpenID Connect server
 //! - `redirect_uri`: the URL of the callback endpoint
 //!
-//! The `authorize_url` is a URL that can be opened in a browser. The user will be
+//! The `auth_url` function returns the following:
+//!
+//! - `authorize_url` is a URL that can be opened in a browser. The user will be
 //! prompted to login and authorize the application. The user will be redirected to
 //! the `redirect_uri` URL with a code parameter.
 //!
-//! The `client` is a client object that can be used to make requests to the OpenID
+//! - `client` is a client object that can be used to make requests to the OpenID
 //! Connect server.
 //!
-//! The `nonce` is a random value that is used to prevent replay attacks.
+//! - `nonce` is a random value that is used to prevent replay attacks.
 //!
-//! The `pkce_verifier` is a PKCE verifier that can be used to generate the code_verifier
+//! - `pkce_verifier` is a PKCE verifier that can be used to generate the code_verifier
 //! value.
 //!
 //! Once you have recieved the above tuple, you can use the [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener)
 //! function to get the ID Token and scope.
 //!
 //! The `redirect_listener` function requires the following parameters:
-//! - `redirect_url`: the address to listen on
+//! - `client_redirect_host`: the address for callback.
 //! - `client`: the client object
 //! - `nonce`: the nonce value
 //! - `pkce_verifier`: the PKCE verifier
 //!
-//! The `redirect_url` is the address to listen on. The `client` is the client object
-//! that can be used to make requests to the OpenID Connect server.
+//! The `IdTokenClaims` this contains params such as `email` and the `access_token`.
 //!
 //! It maybe prefered to instead develop your own listener. If so bypass using the
 //! [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) function and
-//! simple send the values retrieved from the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url)
+//! simply send the values retrieved from the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url)
 //! to your own listener.
 //!
-//! **Warning:** the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) function is blocking.
+//! **Warning:** the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) function is blocking
 //! and cannot be invoked from within a async function. The  reqwest dependency of oauth2
 //! uses the blocking reqwest feature, e.g:
 //! reqwest = { version = "0.11", optional = true, default-features = false, features = ["blocking"] }
