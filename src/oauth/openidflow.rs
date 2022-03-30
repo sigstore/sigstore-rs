@@ -115,23 +115,22 @@ impl OpenIDAuthorize {
                 unreachable!();
             });
 
-        let client = CoreClient::from_provider_metadata(
-            provider_metadata,
-            client_id,
-            Some(client_secret),
-        )
-        .set_redirect_uri(RedirectUrl::new(self.redirect_url.to_owned()).expect("Invalid redirect URL"));
+        let client =
+            CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
+                .set_redirect_uri(
+                    RedirectUrl::new(self.redirect_url.to_owned()).expect("Invalid redirect URL"),
+                );
 
         let (authorize_url, _, nonce) = client
-        .authorize_url(
-            AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
-            CsrfToken::new_random,
-            Nonce::new_random,
-        )
-        .add_scope(Scope::new("email".to_string()))
-        .set_pkce_challenge(pkce_challenge)
-        .url();
-    (authorize_url, client, nonce, pkce_verifier)
+            .authorize_url(
+                AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
+                CsrfToken::new_random,
+                Nonce::new_random,
+            )
+            .add_scope(Scope::new("email".to_string()))
+            .set_pkce_challenge(pkce_challenge)
+            .url();
+        (authorize_url, client, nonce, pkce_verifier)
     }
 }
 
@@ -142,7 +141,7 @@ pub struct RedirectListener {
     pkce_verifier: PkceCodeVerifier,
 }
 
-impl RedirectListener{
+impl RedirectListener {
     /// Create a new RedirectListener struct
     ///
     /// # Arguments
@@ -158,7 +157,12 @@ impl RedirectListener{
     ///
     /// let oidc = RedirectListener::new("127.0.0.1:8080", client, nonce, pkce_verifier).redirect_listener();
     /// ```
-    pub fn new(client_redirect_host: &str, client: CoreClient, nonce: Nonce, pkce_verifier: PkceCodeVerifier) -> Self {
+    pub fn new(
+        client_redirect_host: &str,
+        client: CoreClient,
+        nonce: Nonce,
+        pkce_verifier: PkceCodeVerifier,
+    ) -> Self {
         Self {
             client_redirect_host: client_redirect_host.to_string(),
             client: client,
@@ -182,7 +186,8 @@ impl RedirectListener{
                         .split_whitespace()
                         .nth(1)
                         .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
-                    let url = Url::parse(format!("http://localhost{}", client_redirect_host).as_str())?;
+                    let url =
+                        Url::parse(format!("http://localhost{}", client_redirect_host).as_str())?;
 
                     let code_pair = url
                         .query_pairs()
@@ -210,7 +215,8 @@ impl RedirectListener{
                 );
                 stream.write_all(response.as_bytes())?;
 
-                let token_response = self.client
+                let token_response = self
+                    .client
                     .exchange_code(code)
                     .set_pkce_verifier(self.pkce_verifier)
                     .request(http_client)
@@ -229,9 +235,9 @@ impl RedirectListener{
                         println!("Failed to verify ID token");
                         unreachable!();
                     });
-                    return Ok(id_token_claims.clone());
-                }
+                return Ok(id_token_claims.clone());
             }
+        }
         unreachable!()
     }
 }
@@ -245,7 +251,10 @@ fn test_auth_url() {
         "http://localhost:8080",
     )
     .auth_url();
-    assert!(oidc_url.0.to_string().contains("https://oauth2.sigstore.dev/auth"));
+    assert!(oidc_url
+        .0
+        .to_string()
+        .contains("https://oauth2.sigstore.dev/auth"));
     assert!(oidc_url.0.to_string().contains("response_type=code"));
     assert!(oidc_url.0.to_string().contains("client_id=sigstore"));
     assert!(oidc_url.0.to_string().contains("scope=openid+email"));

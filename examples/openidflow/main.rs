@@ -22,10 +22,14 @@ fn main() {
         "",
         "https://oauth2.sigstore.dev/auth",
         "http://localhost:8080",
-    ).auth_url();
+    )
+    .auth_url();
 
     if open::that(oidc_url.0.to_string()).is_ok() {
-        println!("Open this URL in your browser:\n{}\n", oidc_url.0.to_string());
+        println!(
+            "Open this URL in your browser:\n{}\n",
+            oidc_url.0.to_string()
+        );
     }
 
     let result = oauth::openidflow::RedirectListener::new(
@@ -33,9 +37,10 @@ fn main() {
         oidc_url.1,
         oidc_url.2,
         oidc_url.3,
-    ).redirect_listener();
+    )
+    .redirect_listener();
 
-    match result{
+    match result {
         Ok(token_response) => {
             println!("Email {:?}", token_response.email().unwrap().to_string());
             println!(
