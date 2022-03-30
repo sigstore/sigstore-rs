@@ -22,22 +22,19 @@ fn main() {
         "",
         "https://oauth2.sigstore.dev/auth",
         "http://localhost:8080",
-    );
+    ).auth_url();
 
-    let authz = oidc_url.auth_url();
-    println!("auth0: {:?}", authz.0.to_string());
-    if open::that(authz.0.to_string()).is_ok() {
-        println!("Open this URL in your browser:\n{}\n", authz.0.to_string());
+    if open::that(oidc_url.0.to_string()).is_ok() {
+        println!("Open this URL in your browser:\n{}\n", oidc_url.0.to_string());
     }
 
-    let redirectz = oauth::openidflow::RedirectListner::new(
+    let result = oauth::openidflow::RedirectListener::new(
         "127.0.0.1:8080",
-        authz.1,
-        authz.2,
-        authz.3,
+        oidc_url.1,
+        oidc_url.2,
+        oidc_url.3,
+    ).redirect_listener();
 
-    );
-    let result = redirectz.redirect_listener();
     match result{
         Ok(token_response) => {
             println!("Email {:?}", token_response.email().unwrap().to_string());

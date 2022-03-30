@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This provides a method for retreiving a OpenID Connect ID Token and scope from the sigstore project.
+//! This provides a method for retreiving a OpenID Connect ID Token and scope from the
+//! sigstore project.
 //!
 //! The main entry point is the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) function.
 //! This requires four parameters:
@@ -70,6 +71,7 @@ use openidconnect::{
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use url::Url;
+
 
 #[derive(Debug)]
 pub struct OpenIDAuthorize {
