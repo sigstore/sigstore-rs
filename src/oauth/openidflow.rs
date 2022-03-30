@@ -165,9 +165,9 @@ impl RedirectListener {
     ) -> Self {
         Self {
             client_redirect_host: client_redirect_host.to_string(),
-            client: client,
-            nonce: nonce,
-            pkce_verifier: pkce_verifier,
+            client,
+            nonce,
+            pkce_verifier,
         }
     }
     pub fn redirect_listener(self) -> Result<CoreIdTokenClaims> {
