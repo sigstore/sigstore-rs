@@ -9,8 +9,6 @@ signing certificate
 
 `cargo run --example openidflow`
 
-![oidc image](https://raw.githubusercontent.com/sigstore/sigstore-rs/main/examples/openidflow/oidc-term.png)
-
 The implementation contains a `redirect_listener` function that will create
 a local listening server to incept the ID token and scopes returned from
 sigstores OIDC service. However should you prefer, you can implement your
