@@ -52,10 +52,33 @@
 //! simply send the values retrieved from the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url)
 //! to your own listener.
 //!
-//! **Warning:** the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) function is blocking
-//! and cannot be invoked from within a async function. The  reqwest dependency of oauth2
-//! uses the blocking reqwest feature, e.g:
-//! reqwest = { version = "0.11", optional = true, default-features = false, features = ["blocking"] }
+//!
+//! **Warning:** one of the dependencies of the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) performs 
+//! blocking operations. Because of that it can cause panics at runtime if invoked inside of `async` code.
+//! If you need to use this function inside of an async code you must wrap it inside of a `spawn_blocking` instruction:
+//!
+//! ```
+//! use tokio::task::spawn_blocking;
+//!
+//! async fn my_async_function() {
+//!    // ... your code
+//!
+//!    let oidc_url = spawn_blocking(||
+//!     oauth::openidflow::OpenIDAuthorize::new(
+//!       "sigstore",
+//!       "",
+//!       "https://oauth2.sigstore.dev/auth",
+//!       "http://localhost:8080",
+//!     )
+//!     .auth_url()
+//!    )
+//!    .await
+//!    .expect("Error spawning blocking task");
+//!
+//!    // ... your code
+//! }
+//! ```
+//! This of course has a performance hit when used inside of an async function.
 
 use crate::errors::{Result, SigstoreError};
 use tracing::error;
