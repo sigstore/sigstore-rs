@@ -256,10 +256,10 @@ impl RedirectListener {
                     .id_token()
                     .expect("Server did not return an ID token")
                     .claims(&id_token_verifier, &self.nonce)
-                    .unwrap_or_else(|err| {
-                        error!(error =? err, "Failed to access token endpoint");
-                        unreachable!();
-                    });
+                    .map_err(|err| {
+                        println!("Error is: {:?}", err);
+                        SigstoreError::ClaimsVerificationError //TODO check what exactly happens here / which error is thrown
+                    })?;
                 return Ok(id_token_claims.clone());
             }
         }

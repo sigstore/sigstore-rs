@@ -141,4 +141,7 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     VerificationConstraintError(String),
+
+    #[error("Verification of OIDC claims received from OpenIdProvider failed")]
+    ClaimsVerificationError,
 }
