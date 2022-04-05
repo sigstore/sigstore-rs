@@ -258,7 +258,7 @@ impl RedirectListener {
                     .claims(&id_token_verifier, &self.nonce)
                     .map_err(|err| {
                         println!("Error is: {:?}", err);
-                        SigstoreError::ClaimsVerificationError //TODO check what exactly happens here / which error is thrown
+                        SigstoreError::ClaimsVerificationError
                     })?;
                 return Ok(id_token_claims.clone());
             }
