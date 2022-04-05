@@ -53,11 +53,11 @@
 //! to your own listener.
 //!
 //!
-//! **Warning:** one of the dependencies of the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) performs 
+//! **Warning:** one of the dependencies of the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) performs
 //! blocking operations. Because of that it can cause panics at runtime if invoked inside of `async` code.
 //! If you need to use this function inside of an async code you must wrap it inside of a `spawn_blocking` instruction:
 //!
-//! ```
+//! ```rust,ignore
 //! use tokio::task::spawn_blocking;
 //!
 //! async fn my_async_function() {
@@ -105,21 +105,21 @@ pub struct OpenIDAuthorize {
 }
 
 impl OpenIDAuthorize {
-    /// Create a new OpenIDAuthorize struct
-    ///
-    /// # Arguments
-    ///
-    /// * `client_id` - the client ID of the application
-    /// * `client_secret` - the client secret of the application
-    /// * `issuer` - the URL of the OpenID Connect server
-    /// * `redirect_url` - client redirect URL
-    /// # Example
-    ///
-    /// ```text
-    /// use sigstore::oauth::openidflow::OpenIDAuthorize;
-    ///
-    /// let oidc = OpenIDAuthorize::new("client_id", "client_secret", "https://example.com", "http://localhost:8080").auth_url();
-    /// ```
+    //! Create a new OpenIDAuthorize struct
+    //!
+    //! # Arguments
+    //!
+    //! * `client_id` - the client ID of the application
+    //! * `client_secret` - the client secret of the application
+    //! * `issuer` - the URL of the OpenID Connect server
+    //! * `redirect_url` - client redirect URL
+    //! # Example
+    //!
+    //! ```rust,ignore
+    //! use sigstore::oauth::openidflow::OpenIDAuthorize;
+    //!
+    //! let oidc = OpenIDAuthorize::new("client_id", "client_secret", "https://example.com", "http://localhost:8080").auth_url();
+    //! ```
     pub fn new(client_id: &str, client_secret: &str, issuer: &str, redirect_url: &str) -> Self {
         Self {
             oidc_cliend_id: client_id.to_string(),
@@ -167,21 +167,21 @@ pub struct RedirectListener {
 }
 
 impl RedirectListener {
-    /// Create a new RedirectListener struct
-    ///
-    /// # Arguments
-    ///
-    /// * `client_redirect_host` - The client callback host IP:PORT
-    /// * `client` - CoreClient instance (returned from OpenIDAuthorize)
-    /// * `nonce` - Nonce (returned from OpenIDAuthorize)
-    /// * `pkce_verifier` - client redirect URL
-    /// # Example
-    ///
-    /// ```text
-    /// use sigstore::oauth::openidflow::RedirectListener;
-    ///
-    /// let oidc = RedirectListener::new("127.0.0.1:8080", client, nonce, pkce_verifier).redirect_listener();
-    /// ```
+    //! Create a new RedirectListener struct
+    //!
+    //! # Arguments
+    //!
+    //! * `client_redirect_host` - The client callback host IP:PORT
+    //! * `client` - CoreClient instance (returned from OpenIDAuthorize)
+    //! * `nonce` - Nonce (returned from OpenIDAuthorize)
+    //! * `pkce_verifier` - client redirect URL
+    //! # Example
+    //!
+    //! ```rust,ignore
+    //! use sigstore::oauth::openidflow::RedirectListener;
+    //!
+    //! let oidc = RedirectListener::new("127.0.0.1:8080", client, nonce, pkce_verifier).redirect_listener();
+    //! ```
     pub fn new(
         client_redirect_host: &str,
         client: CoreClient,
@@ -256,8 +256,8 @@ impl RedirectListener {
                     .id_token()
                     .expect("Server did not return an ID token")
                     .claims(&id_token_verifier, &self.nonce)
-                    .unwrap_or_else(|_err| {
-                        error!("Failed to verify ID token");
+                    .unwrap_or_else(|err| {
+                        error!(error =? err, "Failed to access token endpoint");
                         unreachable!();
                     });
                 return Ok(id_token_claims.clone());
