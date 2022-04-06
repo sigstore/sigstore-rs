@@ -9,8 +9,8 @@ authors = [
 
 [features]
 default = ["native-tls"]
-native-tls = ["oci-distribution/native-tls"]
-rustls-tls = ["oci-distribution/rustls-tls"]
+native-tls = ["oci-distribution/native-tls", "openidconnect/native-tls"]
+rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls"]
 
 [dependencies]
 async-trait = "0.1.52"
@@ -20,6 +20,8 @@ lazy_static = "1.4.0"
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "0f717968093a5415f428503d741dedf24ea97948", default-features = false }
 #oci-distribution = { version = "0.8.1", default-features = false }
 olpc-cjson = "0.1.1"
+open = "2.0.2"
+openidconnect = { version = "2.2.0", default-features = false, features = [ "reqwest" ] }
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.2", default-features = false, features = [ "x509" ] }
 regex = "1.5.5"
@@ -34,6 +36,7 @@ tracing = "0.1.31"
 url = "2.2.2"
 # DO not update to 0.13.0 - wait for a release that includes https://github.com/rusticata/x509-parser/pull/118 to be published
 x509-parser = { version = "0.12.0", features = ["verify"] }
+
 
 [dev-dependencies]
 anyhow = "1.0.54"
