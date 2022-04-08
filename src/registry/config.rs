@@ -15,9 +15,6 @@
 
 //! Set of structs and enums used to define how to interact with OCI registries
 
-use crate::errors::{Result, SigstoreError};
-
-use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::convert::From;
 
@@ -162,83 +159,5 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
                 .collect(),
             ..Default::default()
         }
-    }
-}
-
-#[async_trait]
-/// Capabilities that are expected to be provided by a registry client
-pub(crate) trait ClientCapabilities: Send + Sync {
-    async fn fetch_manifest_digest(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<String>;
-
-    async fn pull(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-        accepted_media_types: Vec<&str>,
-    ) -> Result<oci_distribution::client::ImageData>;
-
-    async fn pull_manifest(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<(oci_distribution::manifest::OciManifest, String)>;
-}
-
-/// Internal client for an OCI Registry. This performs actual
-/// calls against the remote registry.OciClient
-///
-/// For testing purposes, use instead the client inside of the
-/// `mock_client` module.
-pub(crate) struct OciClient {
-    pub registry_client: oci_distribution::Client,
-}
-
-#[async_trait]
-impl ClientCapabilities for OciClient {
-    async fn fetch_manifest_digest(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<String> {
-        self.registry_client
-            .fetch_manifest_digest(image, auth)
-            .await
-            .map_err(|e| SigstoreError::RegistryFetchManifestError {
-                image: image.whole(),
-                error: e.to_string(),
-            })
-    }
-
-    async fn pull(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-        accepted_media_types: Vec<&str>,
-    ) -> Result<oci_distribution::client::ImageData> {
-        self.registry_client
-            .pull(image, auth, accepted_media_types)
-            .await
-            .map_err(|e| SigstoreError::RegistryPullError {
-                image: image.whole(),
-                error: e.to_string(),
-            })
-    }
-
-    async fn pull_manifest(
-        &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<(oci_distribution::manifest::OciManifest, String)> {
-        self.registry_client
-            .pull_manifest(image, auth)
-            .await
-            .map_err(|e| SigstoreError::RegistryPullManifestError {
-                image: image.whole(),
-                error: e.to_string(),
-            })
     }
 }
