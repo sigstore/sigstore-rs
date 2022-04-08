@@ -24,6 +24,7 @@ use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
 use std::convert::TryFrom;
+use std::time::Instant;
 
 extern crate anyhow;
 use anyhow::anyhow;
@@ -89,13 +90,22 @@ struct Cli {
     #[clap(short, long)]
     verbose: bool,
 
+    /// Enable caching of registry operations
+    #[clap(long)]
+    enable_registry_caching: bool,
+
+    /// Number of loops to be done. Useful only for testing `enable-registry-caching`
+    #[clap(long, default_value = "1")]
+    loops: u32,
+
     /// Name of the image to verify
     image: String,
 }
 
-async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
-    let cli = Cli::parse();
-
+async fn run_app(
+    cli: &Cli,
+    frd: &FulcioAndRekorData,
+) -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
     // Note well: this a limitation deliberately introduced by this example.
     if cli.cert_email.is_some() && cli.cert_url.is_some() {
         return Err(anyhow!(
@@ -103,67 +113,27 @@ async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstrain
         ));
     }
 
-    // setup logging
-    let level_filter = if cli.verbose { "debug" } else { "info" };
-    let filter_layer = EnvFilter::new(level_filter);
-    tracing_subscriber::registry()
-        .with(filter_layer)
-        .with(fmt::layer().with_writer(std::io::stderr))
-        .init();
-
     let auth = &sigstore::registry::Auth::Anonymous;
-
-    let rekor_pub_key: Option<String> = cli
-        .rekor_pub_key
-        .map(|path| {
-            fs::read_to_string(path)
-                .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))
-        })
-        .transpose()?;
-
-    let fulcio_cert: Option<Vec<u8>> = cli
-        .fulcio_cert
-        .map(|path| {
-            fs::read(path).map_err(|e| anyhow!("Error reading fulcio certificate from disk: {}", e))
-        })
-        .transpose()?;
-
-    let sigstore_repo: Option<SigstoreRepository> = if cli.use_sigstore_tuf_data {
-        let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
-            info!("Downloading data from Sigstore TUF repository");
-            sigstore::tuf::SigstoreRepository::fetch(None)
-        })
-        .await
-        .map_err(|e| anyhow!("Error spawining blocking task inside of tokio: {}", e))?;
-
-        Some(repo?)
-    } else {
-        None
-    };
 
     let mut client_builder = sigstore::cosign::ClientBuilder::default();
 
-    if let Some(repo) = sigstore_repo {
-        client_builder = client_builder.with_rekor_pub_key(repo.rekor_pub_key());
-        client_builder = client_builder.with_fulcio_certs(repo.fulcio_certs());
-    }
-
-    // Set Rekor public key. Give higher precendece to the key specified by the user over the
-    // one that can be obtained from Sigstore's TUF repository
-    if let Some(key) = rekor_pub_key {
+    if let Some(key) = frd.rekor_pub_key.as_ref() {
         client_builder = client_builder.with_rekor_pub_key(&key);
     }
-    // Set Fulcio certificate. Give higher precendece to the certificate specified by the user over the
-    // one that can be obtained from Sigstore's TUF repository
-    if let Some(cert) = fulcio_cert {
-        client_builder = client_builder.with_fulcio_cert(&cert);
+
+    if !frd.fulcio_certs.is_empty() {
+        client_builder = client_builder.with_fulcio_certs(&frd.fulcio_certs);
+    }
+
+    if cli.enable_registry_caching {
+        client_builder = client_builder.enable_registry_caching();
     }
 
     let mut client = client_builder.build()?;
 
     // Build verification constraints
     let mut verification_constraints: VerificationConstraintVec = Vec::new();
-    if let Some(cert_email) = cli.cert_email {
+    if let Some(cert_email) = cli.cert_email.as_ref() {
         let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
 
         verification_constraints.push(Box::new(CertSubjectEmailVerifier {
@@ -171,7 +141,7 @@ async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstrain
             issuer,
         }));
     }
-    if let Some(cert_url) = cli.cert_url {
+    if let Some(cert_url) = cli.cert_url.as_ref() {
         let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
         if issuer.is_none() {
             return Err(anyhow!(
@@ -184,7 +154,7 @@ async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstrain
             issuer: issuer.unwrap(),
         }));
     }
-    if let Some(path_to_key) = cli.key {
+    if let Some(path_to_key) = cli.key.as_ref() {
         let key = fs::read(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
         let signature_digest_algorithm =
             SignatureDigestAlgorithm::try_from(cli.signature_digest_algorithm.as_str())
@@ -221,31 +191,103 @@ async fn run_app() -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstrain
     Ok((trusted_layers, verification_constraints))
 }
 
+#[derive(Default)]
+struct FulcioAndRekorData {
+    pub rekor_pub_key: Option<String>,
+    pub fulcio_certs: Vec<sigstore::registry::Certificate>,
+}
+
+async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<FulcioAndRekorData> {
+    let mut data = FulcioAndRekorData::default();
+
+    if cli.use_sigstore_tuf_data {
+        let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
+            info!("Downloading data from Sigstore TUF repository");
+            sigstore::tuf::SigstoreRepository::fetch(None)
+        })
+        .await
+        .map_err(|e| anyhow!("Error spawining blocking task inside of tokio: {}", e))?;
+
+        let repo: SigstoreRepository = repo?;
+        data.fulcio_certs = repo.fulcio_certs().into();
+        data.rekor_pub_key = Some(repo.rekor_pub_key().to_string());
+    };
+
+    if let Some(path) = cli.rekor_pub_key.as_ref() {
+        data.rekor_pub_key = Some(
+            fs::read_to_string(path)
+                .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
+        );
+    }
+
+    if let Some(path) = cli.fulcio_cert.as_ref() {
+        let cert_data = fs::read(path)
+            .map_err(|e| anyhow!("Error reading fulcio certificate from disk: {}", e))?;
+
+        let certificate = sigstore::registry::Certificate {
+            encoding: sigstore::registry::CertificateEncoding::Pem,
+            data: cert_data,
+        };
+        data.fulcio_certs.push(certificate);
+    }
+
+    Ok(data)
+}
+
 #[tokio::main]
 pub async fn main() {
-    std::process::exit(match run_app().await {
-        Ok((trusted_layers, verification_constraints)) => {
-            let filter_result = sigstore::cosign::verify_constraints(
-                &trusted_layers,
-                verification_constraints.iter(),
-            );
-            match filter_result {
-                Ok(()) => {
-                    println!("Image successfully verified");
-                    0
-                }
-                Err(SigstoreVerifyConstraintsError {
-                    unsatisfied_constraints,
-                }) => {
-                    eprintln!("Image verification failed: not all constraints satisfied.");
-                    eprintln!("{:?}", unsatisfied_constraints);
-                    1
+    let cli = Cli::parse();
+
+    // setup logging
+    let level_filter = if cli.verbose { "debug" } else { "info" };
+    let filter_layer = EnvFilter::new(level_filter);
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .init();
+
+    let frd = match fulcio_and_rekor_data(&cli).await {
+        Ok(sr) => sr,
+        Err(e) => {
+            eprintln!("Cannot build sigstore repo data: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    for n in 0..(cli.loops) {
+        let now = Instant::now();
+        if cli.loops != 1 {
+            println!("Loop {}/{}", n + 1, cli.loops);
+        }
+
+        match run_app(&cli, &frd).await {
+            Ok((trusted_layers, verification_constraints)) => {
+                let filter_result = sigstore::cosign::verify_constraints(
+                    &trusted_layers,
+                    verification_constraints.iter(),
+                );
+                match filter_result {
+                    Ok(()) => {
+                        println!("Image successfully verified");
+                    }
+                    Err(SigstoreVerifyConstraintsError {
+                        unsatisfied_constraints,
+                    }) => {
+                        eprintln!("Image verification failed: not all constraints satisfied.");
+                        eprintln!("{:?}", unsatisfied_constraints);
+                    }
                 }
             }
+            Err(err) => {
+                eprintln!("Image verification failed: {:?}", err);
+            }
         }
-        Err(err) => {
-            eprintln!("Image verification failed: {:?}", err);
-            1
+
+        let elapsed = now.elapsed();
+
+        if cli.loops != 1 {
+            println!("Elapsed: {:.2?}", elapsed);
+            println!("------");
         }
-    });
+    }
 }
