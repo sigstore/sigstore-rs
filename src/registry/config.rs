@@ -15,10 +15,12 @@
 
 //! Set of structs and enums used to define how to interact with OCI registries
 
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::convert::From;
 
 /// A method for authenticating to a registry
+#[derive(Serialize, Debug)]
 pub enum Auth {
     /// Access the registry anonymously
     Anonymous,
@@ -32,6 +34,17 @@ impl From<&Auth> for oci_distribution::secrets::RegistryAuth {
             Auth::Anonymous => oci_distribution::secrets::RegistryAuth::Anonymous,
             Auth::Basic(username, pass) => {
                 oci_distribution::secrets::RegistryAuth::Basic(username.clone(), pass.clone())
+            }
+        }
+    }
+}
+
+impl From<&oci_distribution::secrets::RegistryAuth> for Auth {
+    fn from(auth: &oci_distribution::secrets::RegistryAuth) -> Self {
+        match auth {
+            oci_distribution::secrets::RegistryAuth::Anonymous => Auth::Anonymous,
+            oci_distribution::secrets::RegistryAuth::Basic(username, pass) => {
+                Auth::Basic(username.clone(), pass.clone())
             }
         }
     }

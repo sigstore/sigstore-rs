@@ -19,6 +19,9 @@ pub use config::*;
 pub(crate) mod oci_client;
 pub(crate) use oci_client::*;
 
+pub(crate) mod oci_caching_client;
+pub(crate) use oci_caching_client::*;
+
 use crate::errors::Result;
 
 use async_trait::async_trait;
