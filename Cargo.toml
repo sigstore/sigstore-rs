@@ -15,6 +15,7 @@ rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls"]
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.13.0"
+cached = "0.34.0"
 lazy_static = "1.4.0"
 # TODO: go back to the officially release oci-distribution once these patches are released
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution", rev = "0f717968093a5415f428503d741dedf24ea97948", default-features = false }

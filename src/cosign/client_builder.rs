@@ -39,14 +39,32 @@ use crate::registry::{Certificate, ClientConfig};
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
+///
+/// ## Registry caching
+///
+/// The [`cosign::Client`](crate::cosign::Client) interacts with remote container registries to obtain
+/// the data needed to perform Sigstore verification.
+///
+/// By default, the client will always reach out to the remote registry. However,
+/// it's possible to enable an in-memory cache. This behaviour can be enabled via
+/// the [`ClientBuilder::enable_registry_caching`] method.
+///
+/// Each cached entry will automatically expire after 60 seconds.
 #[derive(Default)]
 pub struct ClientBuilder {
     oci_client_config: ClientConfig,
     rekor_pub_key: Option<String>,
     fulcio_certs: Vec<Certificate>,
+    enable_registry_caching: bool,
 }
 
 impl ClientBuilder {
+    /// Enable caching of data returned from remote OCI registries
+    pub fn enable_registry_caching(mut self) -> Self {
+        self.enable_registry_caching = true;
+        self
+    }
+
     /// Specify the public key used by Rekor.
     ///
     /// The public key can be obtained by using the helper methods under the
@@ -121,10 +139,20 @@ impl ClientBuilder {
 
         let oci_client =
             oci_distribution::client::Client::new(self.oci_client_config.clone().into());
+
+        let registry_client: Box<dyn crate::registry::ClientCapabilities> =
+            if self.enable_registry_caching {
+                Box::new(crate::registry::OciCachingClient {
+                    registry_client: oci_client,
+                })
+            } else {
+                Box::new(crate::registry::OciClient {
+                    registry_client: oci_client,
+                })
+            };
+
         Ok(Client {
-            registry_client: Box::new(crate::registry::OciClient {
-                registry_client: oci_client,
-            }),
+            registry_client,
             rekor_pub_key,
             fulcio_cert_pool,
         })
