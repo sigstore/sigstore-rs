@@ -245,10 +245,7 @@ impl RedirectListener {
                     .exchange_code(code)
                     .set_pkce_verifier(self.pkce_verifier)
                     .request(http_client)
-                    .unwrap_or_else(|_err| {
-                        error!("Failed to access token endpoint");
-                        unreachable!();
-                    });
+                    .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
 
                 let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
                 let id_token_claims: &CoreIdTokenClaims = token_response
