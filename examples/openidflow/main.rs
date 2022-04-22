@@ -29,7 +29,7 @@ fn main() -> Result<(), anyhow::Error> {
         Ok(url) => {
             open::that(url.0.to_string())?;
             println!("{}", url.0.to_string());
-        },
+        }
         Err(e) => println!("{}", e),
     }
 
