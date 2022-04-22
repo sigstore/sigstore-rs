@@ -144,4 +144,7 @@ pub enum SigstoreError {
 
     #[error("Verification of OIDC claims received from OpenIdProvider failed")]
     ClaimsVerificationError,
+
+    #[error("Failed to access token endpoint")]
+    ClaimsAccessPointError,
 }
