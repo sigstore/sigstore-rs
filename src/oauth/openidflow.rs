@@ -265,20 +265,21 @@ impl RedirectListener {
     }
 }
 
-// #[test]
-// fn test_auth_url() {
-//     let oidc_url = OpenIDAuthorize::new(
-//         "sigstore",
-//         "some_secret",
-//         "https://oauth2.sigstore.dev/auth",
-//         "http://localhost:8080",
-//     )
-//     .auth_url();
-//     assert!(oidc_url
-//         .0
-//         .to_string()
-//         .contains("https://oauth2.sigstore.dev/auth"));
-//     assert!(oidc_url.0.to_string().contains("response_type=code"));
-//     assert!(oidc_url.0.to_string().contains("client_id=sigstore"));
-//     assert!(oidc_url.0.to_string().contains("scope=openid+email"));
-// }
+#[test]
+fn test_auth_url() {
+    let oidc_url = OpenIDAuthorize::new(
+        "sigstore",
+        "some_secret",
+        "https://oauth2.sigstore.dev/auth",
+        "http://localhost:8080",
+    )
+    .auth_url();
+    let oidc_url = oidc_url.unwrap();
+    assert!(oidc_url
+        .0
+        .to_string()
+        .contains("https://oauth2.sigstore.dev/auth"));
+    assert!(oidc_url.0.to_string().contains("response_type=code"));
+    assert!(oidc_url.0.to_string().contains("client_id=sigstore"));
+    assert!(oidc_url.0.to_string().contains("scope=openid+email"));
+}
