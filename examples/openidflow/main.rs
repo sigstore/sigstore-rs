@@ -33,9 +33,7 @@ fn main() -> Result<(), anyhow::Error> {
         Err(e) => println!("{}", e),
     }
 
-    // shadow odic_url
     let oidc_url = oidc_url?;
-
     let result = oauth::openidflow::RedirectListener::new(
         "127.0.0.1:8080",
         oidc_url.1, // client
