@@ -81,8 +81,6 @@
 //! This of course has a performance hit when used inside of an async function.
 
 use crate::errors::{Result, SigstoreError};
-// use anyhow::Error;
-// use tracing::error;
 
 use openidconnect::core::{
     CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata, CoreResponseType,
