@@ -28,7 +28,7 @@ fn main() -> Result<(), anyhow::Error> {
     match oidc_url.as_ref() {
         Ok(url) => {
             open::that(url.0.to_string())?;
-            println!("{}", url.0.to_string());
+            println!("Open this URL in a browser if it does not automatically open for you:\n{}\n", url.0.to_string());
         }
         Err(e) => println!("{}", e),
     }
