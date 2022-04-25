@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Result;
 use sigstore::oauth;
 
-fn main() {
+fn main() -> Result<(), anyhow::Error> {
     let oidc_url = oauth::openidflow::OpenIDAuthorize::new(
         "sigstore",
         "",
@@ -24,13 +25,18 @@ fn main() {
     )
     .auth_url();
 
-    if open::that(oidc_url.0.to_string()).is_ok() {
-        println!(
-            "Open this URL in a browser if it does not automatically open for you:\n{}\n",
-            oidc_url.0.to_string()
-        );
+    match oidc_url.as_ref() {
+        Ok(url) => {
+            open::that(url.0.to_string())?;
+            println!(
+                "Open this URL in a browser if it does not automatically open for you:\n{}\n",
+                url.0.to_string()
+            );
+        }
+        Err(e) => println!("{}", e),
     }
 
+    let oidc_url = oidc_url?;
     let result = oauth::openidflow::RedirectListener::new(
         "127.0.0.1:8080",
         oidc_url.1, // client
@@ -51,4 +57,5 @@ fn main() {
             println!("{}", err);
         }
     }
+    anyhow::Ok(())
 }
