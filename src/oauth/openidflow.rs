@@ -81,6 +81,7 @@
 //! This of course has a performance hit when used inside of an async function.
 
 use crate::errors::{Result, SigstoreError};
+use tracing::error;
 
 use openidconnect::core::{
     CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata, CoreResponseType,
@@ -135,7 +136,7 @@ impl OpenIDAuthorize {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let provider_metadata =
             CoreProviderMetadata::discover(&issuer, http_client).map_err(|err| {
-                println!("Error is: {:?}", err);
+                error!("Error is: {:?}", err);
                 SigstoreError::ClaimsVerificationError
             })?;
 
@@ -194,7 +195,7 @@ impl RedirectListener {
             pkce_verifier,
         }
     }
-    pub fn redirect_listener(self) -> Result<CoreIdTokenClaims> {
+    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, String)> {
         let listener = TcpListener::bind(self.client_redirect_host.clone())?;
         #[allow(clippy::manual_flatten)]
         for stream in listener.incoming() {
@@ -246,17 +247,24 @@ impl RedirectListener {
                     .request(http_client)
                     .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
 
+                let id_token = token_response
+                    .extra_fields()
+                    .id_token()
+                    .expect("Failed to get id_token")
+                    .to_string();
+
                 let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
+
                 let id_token_claims: &CoreIdTokenClaims = token_response
                     .extra_fields()
                     .id_token()
                     .expect("Server did not return an ID token")
                     .claims(&id_token_verifier, &self.nonce)
                     .map_err(|err| {
-                        println!("Error is: {:?}", err);
+                        error!("Error is: {:?}", err);
                         SigstoreError::ClaimsVerificationError
                     })?;
-                return Ok(id_token_claims.clone());
+                return Ok((id_token_claims.clone(), id_token));
             }
         }
         unreachable!()

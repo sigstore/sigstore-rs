@@ -46,12 +46,13 @@ fn main() -> Result<(), anyhow::Error> {
     .redirect_listener();
 
     match result {
-        Ok(token_response) => {
+        Ok((token_response, id_token)) => {
             println!("Email {:?}", token_response.email().unwrap().to_string());
             println!(
                 "Access Token:{:?}",
                 token_response.access_token_hash().unwrap().to_string()
             );
+            println!("id_token {:?}", id_token.to_string());
         }
         Err(err) => {
             println!("{}", err);
