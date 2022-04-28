@@ -250,8 +250,7 @@ impl RedirectListener {
 
                 let id_token = token_response
                     .extra_fields()
-                    .id_token()
-                    .ok_or_else(|| SigstoreError::NoIDToken)?;
+                    .id_token().ok_or(SigstoreError::NoIDToken)?;
 
                 let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
 
