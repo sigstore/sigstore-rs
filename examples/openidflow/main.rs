@@ -52,7 +52,7 @@ fn main() -> Result<(), anyhow::Error> {
                 "Access Token:{:?}",
                 token_response.access_token_hash().unwrap().to_string()
             );
-            println!("id_token {:?}", id_token.to_string());
+            println!("id_token: {:?}", id_token.to_string());
         }
         Err(err) => {
             println!("{}", err);

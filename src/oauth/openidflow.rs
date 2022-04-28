@@ -84,7 +84,8 @@ use crate::errors::{Result, SigstoreError};
 use tracing::error;
 
 use openidconnect::core::{
-    CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata, CoreResponseType,
+    CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata,
+    CoreResponseType,
 };
 use openidconnect::reqwest::http_client;
 use openidconnect::{
@@ -195,7 +196,7 @@ impl RedirectListener {
             pkce_verifier,
         }
     }
-    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, String)> {
+    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let listener = TcpListener::bind(self.client_redirect_host.clone())?;
         #[allow(clippy::manual_flatten)]
         for stream in listener.incoming() {
@@ -250,8 +251,7 @@ impl RedirectListener {
                 let id_token = token_response
                     .extra_fields()
                     .id_token()
-                    .expect("Failed to get id_token")
-                    .to_string();
+                    .ok_or_else(|| SigstoreError::NoIDToken)?;
 
                 let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
 
@@ -264,7 +264,7 @@ impl RedirectListener {
                         error!("Error is: {:?}", err);
                         SigstoreError::ClaimsVerificationError
                     })?;
-                return Ok((id_token_claims.clone(), id_token));
+                return Ok((id_token_claims.clone(), id_token.clone()));
             }
         }
         unreachable!()
