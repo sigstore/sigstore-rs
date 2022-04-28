@@ -147,4 +147,7 @@ pub enum SigstoreError {
 
     #[error("Failed to access token endpoint")]
     ClaimsAccessPointError,
+
+    #[error("Failed to get id_token")]
+    NoIDToken,
 }
