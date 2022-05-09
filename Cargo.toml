@@ -36,7 +36,7 @@ tough = { version = "0.12.1", features = [ "http" ] }
 tracing = "0.1.31"
 url = "2.2.2"
 # DO not update to 0.13.0 - wait for a release that includes https://github.com/rusticata/x509-parser/pull/118 to be published
-x509-parser = { version = "0.12.0", features = ["verify"] }
+x509-parser = { version = "0.13.2", features = ["verify"] }
 
 
 [dev-dependencies]
