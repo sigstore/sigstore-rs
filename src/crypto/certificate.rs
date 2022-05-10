@@ -33,19 +33,19 @@ pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) ->
 }
 
 fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
-    let (_critical, key_usage) = certificate
+    let key_usage = certificate
         .tbs_certificate
-        .key_usage()
+        .key_usage()?
         .ok_or(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?;
-    if !key_usage.digital_signature() {
+    if !key_usage.value.digital_signature() {
         return Err(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage);
     }
 
-    let (_critical, ext_key_usage) = certificate
+    let ext_key_usage = certificate
         .tbs_certificate
-        .extended_key_usage()
+        .extended_key_usage()?
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
-    if !ext_key_usage.code_signing {
+    if !ext_key_usage.value.code_signing {
         return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
 
@@ -53,9 +53,9 @@ fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
 }
 
 fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
-    let (_critical, _subject_alternative_name) = certificate
+    let _subject_alternative_name = certificate
         .tbs_certificate
-        .subject_alternative_name()
+        .subject_alternative_name()?
         .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
     Ok(())
 }
