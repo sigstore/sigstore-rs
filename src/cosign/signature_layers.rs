@@ -345,7 +345,9 @@ impl CertificateSignature {
             SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
         )?;
 
-        let issuer_extension = cert.tbs_certificate.find_extension(&SIGSTORE_ISSUER_OID);
+        let issuer_extension = cert
+            .tbs_certificate
+            .get_extension_unique(&SIGSTORE_ISSUER_OID)?;
         let issuer: Option<String> = issuer_extension
             .map(|ext| {
                 String::from_utf8(ext.value.to_vec()).map_err(|_| {
@@ -366,12 +368,12 @@ impl CertificateSignature {
 
 impl CertificateSubject {
     pub fn from_certificate(certificate: &X509Certificate) -> Result<CertificateSubject> {
-        let (_critical, subject_alternative_name) = certificate
+        let subject_alternative_name = certificate
             .tbs_certificate
-            .subject_alternative_name()
+            .subject_alternative_name()?
             .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
 
-        for general_name in &subject_alternative_name.general_names {
+        for general_name in &subject_alternative_name.value.general_names {
             if let GeneralName::RFC822Name(name) = general_name {
                 return Ok(CertificateSubject::Email(name.to_string()));
             }
