@@ -197,7 +197,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
                 data: FULCIO_CRT_2_PEM.as_bytes().to_vec(),
             },
         ];
-        CertificatePool::from_certificates(&certificates).unwrap()
+        CertificatePool::from_certificates(&certificates).unwrap() //#[allow_ci]
     }
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
@@ -220,7 +220,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
         let mut layers: Vec<SignatureLayer> = Vec::new();
         for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
-            let mut cert_signature = sl.certificate_signature.unwrap();
+            let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
             let cert_subj = CertificateSubject::Email(email.clone());
             cert_signature.issuer = Some(issuer.clone());
             cert_signature.subject = cert_subj;
@@ -272,7 +272,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
         let mut layers: Vec<SignatureLayer> = Vec::new();
         for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
-            let mut cert_signature = sl.certificate_signature.unwrap();
+            let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
             let cert_subj = CertificateSubject::Email(email.clone());
             cert_signature.issuer = Some(issuer.clone());
             cert_signature.subject = cert_subj;
@@ -320,7 +320,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
         let mut layers: Vec<SignatureLayer> = Vec::new();
         for _ in 0..5 {
             let mut sl = build_correct_signature_layer_with_certificate();
-            let mut cert_signature = sl.certificate_signature.unwrap();
+            let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
             let cert_subj = CertificateSubject::Email(email.clone());
             cert_signature.issuer = Some(issuer.clone());
             cert_signature.subject = cert_subj;

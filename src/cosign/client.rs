@@ -154,7 +154,7 @@ mod tests {
         let image = "docker.io/busybox:latest";
         let image_digest =
             String::from("sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b");
-        let expected_image = "docker.io/library/busybox:sha256-f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b.sig".parse().unwrap();
+        let expected_image = "docker.io/library/busybox:sha256-f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b.sig".parse().unwrap(); //#[allow_ci]
         let mock_client = MockOciClient {
             fetch_manifest_digest_response: Some(Ok(image_digest.clone())),
             pull_response: None,
@@ -167,6 +167,6 @@ mod tests {
             .await;
 
         assert!(reference.is_ok());
-        assert_eq!(reference.unwrap(), (expected_image, image_digest));
+        assert_eq!(reference.unwrap(), (expected_image, image_digest)); //#[allow_ci]
     }
 }

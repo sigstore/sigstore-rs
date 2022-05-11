@@ -32,8 +32,8 @@ jobs:
           command: test
           args: --workspace
 
-  fmt:
-    name: Rustfmt
+  static:
+    name: Static code checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -47,6 +47,8 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+    - name: Check for panics / unwraps
+      - run: ./tests/ban-list.py
 
   clippy:
     name: Clippy
@@ -63,3 +65,4 @@ jobs:
         with:
           command: clippy
           args: --workspace -- -D warnings
+

@@ -219,8 +219,8 @@ mod tests {
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_add_signed(Duration::days(5)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(6)).unwrap(),
+                not_before: Utc::now().checked_add_signed(Duration::days(5)).unwrap(), //#[allow_ci]
+                not_after: Utc::now().checked_add_signed(Duration::days(6)).unwrap(), //#[allow_ci]
                 ..Default::default()
             },
         )?;
@@ -247,8 +247,8 @@ mod tests {
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
+                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(), //#[allow_ci]
+                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(), //#[allow_ci]
                 ..Default::default()
             },
         )?;
@@ -265,17 +265,17 @@ mod tests {
     fn verify_cert_expiration_failure() -> anyhow::Result<()> {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let integrated_time = Utc::now().checked_add_signed(Duration::days(5)).unwrap();
+        let integrated_time = Utc::now().checked_add_signed(Duration::days(5)).unwrap(); //#[allow_ci]
 
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
+                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(), //#[allow_ci]
+                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(), //#[allow_ci]
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
+        let issued_cert_pem = issued_cert.cert.to_pem().unwrap(); //#[allow_ci]
         let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
         let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
 

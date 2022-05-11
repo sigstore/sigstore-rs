@@ -280,7 +280,7 @@ fn test_auth_url() {
         "http://localhost:8080",
     )
     .auth_url();
-    let oidc_url = oidc_url.unwrap();
+    let oidc_url = oidc_url.unwrap(); //#[allow_ci]
     assert!(oidc_url
         .0
         .to_string()

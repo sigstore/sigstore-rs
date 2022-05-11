@@ -424,12 +424,12 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         (
             SignatureLayer {
-                simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
+                simple_signing: serde_json::from_value(ss_value.clone()).unwrap(), //#[allow_ci]
                 oci_digest: String::from("digest"),
                 signature,
                 bundle: None,
                 certificate_signature: None,
-                raw_data: serde_json::to_vec(&ss_value).unwrap(),
+                raw_data: serde_json::to_vec(&ss_value).unwrap(), //#[allow_ci]
             },
             verification_key,
         )
@@ -488,12 +488,12 @@ oXqqo/C9QnOHTto=
                 .expect("Cannot create certificate signature");
 
         SignatureLayer {
-            simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
+            simple_signing: serde_json::from_value(ss_value.clone()).unwrap(), //#[allow_ci]
             oci_digest: String::from("sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e"),
             signature: String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA="),
             bundle: Some(bundle),
             certificate_signature: Some(certificate_signature),
-            raw_data: serde_json::to_vec(&ss_value).unwrap(),
+            raw_data: serde_json::to_vec(&ss_value).unwrap(), //#[allow_ci]
         }
     }
 
@@ -639,7 +639,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let actual =
             SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_key));
         assert!(actual.is_ok());
-        assert!(actual.unwrap().is_none());
+        assert!(actual.unwrap().is_none()); //#[allow_ci]
     }
 
     #[test]
@@ -653,7 +653,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             None,
         );
 
-        assert!(actual.unwrap().is_none());
+        assert!(actual.unwrap().is_none()); //#[allow_ci]
     }
 
     #[test]
@@ -752,10 +752,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()]; //#[allow_ci]
+        let cert_pool = CertificatePool::from_certificates(&certs).unwrap(); //#[allow_ci]
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap(); //#[allow_ci]
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {
@@ -799,10 +799,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()]; //#[allow_ci]
+        let cert_pool = CertificatePool::from_certificates(&certs).unwrap(); //#[allow_ci]
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap(); //#[allow_ci]
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {
@@ -845,10 +845,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()]; //#[allow_ci]
+        let cert_pool = CertificatePool::from_certificates(&certs).unwrap(); //#[allow_ci]
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap(); //#[allow_ci]
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {

@@ -140,7 +140,7 @@
 //!           unsatisfied_constraints,
 //!       }) => {
 //!           println!("{:?}", unsatisfied_constraints);
-//!           panic!("Image verification failed")
+//!           panic!("Image verification failed") //#[allow_ci]
 //!       }
 //!   }
 //! }

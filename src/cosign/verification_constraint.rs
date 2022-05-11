@@ -314,17 +314,17 @@ mod tests {
         let (sl, key) = build_correct_signature_layer_without_bundle();
 
         let vc = PublicKeyVerifier { key };
-        assert!(vc.verify(&sl).unwrap());
+        assert!(vc.verify(&sl).unwrap()); //#[allow_ci]
 
         let sl = build_correct_signature_layer_with_certificate();
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 
     #[test]
     fn cert_email_verifier_only_email() {
         let email = "alice@example.com".to_string();
         let mut sl = build_correct_signature_layer_with_certificate();
-        let mut cert_signature = sl.certificate_signature.unwrap();
+        let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
         let cert_subj = CertificateSubject::Email(email.clone());
         cert_signature.issuer = None;
         cert_signature.subject = cert_subj;
@@ -334,20 +334,20 @@ mod tests {
             email,
             issuer: None,
         };
-        assert!(vc.verify(&sl).unwrap());
+        assert!(vc.verify(&sl).unwrap()); //#[allow_ci]
 
         let vc = CertSubjectEmailVerifier {
             email: "different@email.com".to_string(),
             issuer: None,
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 
     #[test]
     fn cert_email_verifier_email_and_issuer() {
         let email = "alice@example.com".to_string();
         let mut sl = build_correct_signature_layer_with_certificate();
-        let mut cert_signature = sl.certificate_signature.unwrap();
+        let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
 
         // The cerificate subject doesn't have an issuer
         let cert_subj = CertificateSubject::Email(email.clone());
@@ -360,7 +360,7 @@ mod tests {
             email: email.clone(),
             issuer: Some("an issuer".to_string()),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
 
         // The cerificate subject has an issuer
         let issuer = "the issuer".to_string();
@@ -373,20 +373,20 @@ mod tests {
             email: email.clone(),
             issuer: Some(issuer.clone()),
         };
-        assert!(vc.verify(&sl).unwrap());
+        assert!(vc.verify(&sl).unwrap()); //#[allow_ci]
 
         let vc = CertSubjectEmailVerifier {
             email,
             issuer: Some("another issuer".to_string()),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
 
         // another verifier should fail
         let vc = CertSubjectUrlVerifier {
             url: "https://sigstore.dev/test".to_string(),
             issuer,
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 
     #[test]
@@ -397,7 +397,7 @@ mod tests {
             email: "alice@example.com".to_string(),
             issuer: None,
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 
     #[test]
@@ -406,7 +406,7 @@ mod tests {
         let issuer = "the issuer".to_string();
 
         let mut sl = build_correct_signature_layer_with_certificate();
-        let mut cert_signature = sl.certificate_signature.unwrap();
+        let mut cert_signature = sl.certificate_signature.unwrap(); //#[allow_ci]
         let cert_subj = CertificateSubject::Uri(url.clone());
         cert_signature.issuer = Some(issuer.clone());
         cert_signature.subject = cert_subj;
@@ -416,26 +416,26 @@ mod tests {
             url: url.clone(),
             issuer: issuer.clone(),
         };
-        assert!(vc.verify(&sl).unwrap());
+        assert!(vc.verify(&sl).unwrap()); //#[allow_ci]
 
         let vc = CertSubjectUrlVerifier {
             url: "a different url".to_string(),
             issuer: issuer.clone(),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
 
         let vc = CertSubjectUrlVerifier {
             url,
             issuer: "a different issuer".to_string(),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
 
         // A Cert email verifier should also report a non match
         let vc = CertSubjectEmailVerifier {
             email: "alice@example.com".to_string(),
             issuer: Some(issuer),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 
     #[test]
@@ -446,6 +446,6 @@ mod tests {
             url: "https://sigstore.dev/test".to_string(),
             issuer: "an issuer".to_string(),
         };
-        assert!(!vc.verify(&sl).unwrap());
+        assert!(!vc.verify(&sl).unwrap()); //#[allow_ci]
     }
 }

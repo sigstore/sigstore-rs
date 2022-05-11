@@ -192,7 +192,7 @@ mod tests {
                 }
             }
         });
-        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
+        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap(); //#[allow_ci]
 
         let mut annotations: HashMap<String, String> = HashMap::new();
         annotations.insert(String::from("env"), String::from("prod"));
@@ -213,7 +213,7 @@ mod tests {
                 }
             }
         });
-        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
+        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap(); //#[allow_ci]
         let annotations: HashMap<String, String> = HashMap::new();
 
         assert!(ss.satisfies_annotations(&annotations));
@@ -231,7 +231,7 @@ mod tests {
             "number": 1,
             "bool": true
         });
-        let optional: Optional = serde_json::from_value(optional_json).unwrap();
+        let optional: Optional = serde_json::from_value(optional_json).unwrap(); //#[allow_ci]
 
         assert!(optional.satisfies_annotations(&annotations));
     }
@@ -246,7 +246,7 @@ mod tests {
             "owner": "flavio",
             "team": "devops"
         });
-        let optional: Optional = serde_json::from_value(optional_json).unwrap();
+        let optional: Optional = serde_json::from_value(optional_json).unwrap(); //#[allow_ci]
 
         assert!(!optional.satisfies_annotations(&annotations));
     }
@@ -262,7 +262,7 @@ mod tests {
             "owner": "flavio",
             "team": "devops"
         });
-        let optional: Optional = serde_json::from_value(optional_json).unwrap();
+        let optional: Optional = serde_json::from_value(optional_json).unwrap(); //#[allow_ci]
 
         assert!(!optional.satisfies_annotations(&annotations));
     }
@@ -276,7 +276,7 @@ mod tests {
             "owner": "flavio",
             "team": "devops"
         });
-        let optional: Optional = serde_json::from_value(optional_json).unwrap();
+        let optional: Optional = serde_json::from_value(optional_json).unwrap(); //#[allow_ci]
 
         assert!(optional.satisfies_annotations(&annotations));
     }
@@ -295,7 +295,7 @@ mod tests {
                 }
             }
         });
-        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
+        let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap(); //#[allow_ci]
 
         assert!(ss.satisfies_manifest_digest(expected_digest));
         assert!(!ss.satisfies_manifest_digest("something different"));
