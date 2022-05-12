@@ -160,6 +160,8 @@
 //! Additional examples can be found inside of the [`examples`](https://github.com/sigstore/sigstore-rs/tree/main/examples/)
 //! directory.
 
+#![forbid(unsafe_code)]
+
 pub mod crypto;
 mod mock_client;
 
