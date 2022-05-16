@@ -161,6 +161,7 @@
 //! directory.
 
 #![forbid(unsafe_code)]
+#![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
 mod mock_client;
