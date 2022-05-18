@@ -18,7 +18,7 @@ use regex::Regex;
 
 lazy_static! {
     pub(crate) static ref SIGSTORE_FULCIO_CERT_TARGET_REGEX: Regex =
-        Regex::new(r#"fulcio(_v\d+)?\.crt\.pem"#).unwrap();
+        Regex::new(r#"fulcio(_v\d+)?\.crt\.pem"#).expect("cannot compile regexp");
 }
 
 pub(crate) const SIGSTORE_METADATA_BASE: &str = "http://sigstore-tuf-root.storage.googleapis.com/";

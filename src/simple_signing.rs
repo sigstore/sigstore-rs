@@ -30,7 +30,14 @@ pub struct SimpleSigning {
 
 impl fmt::Display for SimpleSigning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).map_err(|e| {
+                error!(error=?e, simple_signing=?self, "Cannot convert to JSON");
+                fmt::Error
+            })?
+        )
     }
 }
 
@@ -42,12 +49,8 @@ impl SimpleSigning {
             return true;
         }
 
-        match self.optional {
-            Some(_) => self
-                .optional
-                .clone()
-                .unwrap()
-                .satisfies_annotations(annotations),
+        match &self.optional {
+            Some(opt) => opt.satisfies_annotations(annotations),
             None => {
                 info!(
                     simple_signing=?self,

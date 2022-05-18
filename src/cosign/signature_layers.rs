@@ -246,19 +246,22 @@ impl SignatureLayer {
             None => return Ok(None),
         };
 
-        if fulcio_cert_pool.is_none() {
-            return Err(SigstoreError::SigstoreFulcioCertificatesNotProvidedError);
-        }
+        let fulcio_cert_pool = match fulcio_cert_pool {
+            Some(cp) => cp,
+            None => {
+                return Err(SigstoreError::SigstoreFulcioCertificatesNotProvidedError);
+            }
+        };
 
-        if bundle.is_none() {
-            return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
-        }
+        let bundle = match bundle {
+            Some(b) => b,
+            None => {
+                return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
+            }
+        };
 
-        let certificate_signature = CertificateSignature::from_certificate(
-            cert_raw.as_bytes(),
-            fulcio_cert_pool.unwrap(),
-            bundle.unwrap(),
-        )?;
+        let certificate_signature =
+            CertificateSignature::from_certificate(cert_raw.as_bytes(), fulcio_cert_pool, bundle)?;
         Ok(Some(certificate_signature))
     }
 
