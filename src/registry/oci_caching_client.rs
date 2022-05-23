@@ -81,6 +81,7 @@ impl<'a> PullSettings<'a> {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
     pub fn image(&self) -> oci_distribution::Reference {
         // we can use `unwrap` here, because this will never fail
         let reference: oci_distribution::Reference = self.image.parse().unwrap();
@@ -171,6 +172,7 @@ impl PullManifestSettings {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
     pub fn image(&self) -> oci_distribution::Reference {
         // we can use `unwrap` here, because this will never fail
         let reference: oci_distribution::Reference = self.image.parse().unwrap();
