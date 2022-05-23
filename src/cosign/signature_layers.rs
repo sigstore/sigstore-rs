@@ -18,13 +18,15 @@ use serde::Serialize;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, info};
 use x509_parser::{
-    certificate::X509Certificate, extensions::GeneralName, parse_x509_certificate,
-    pem::parse_x509_pem,
+    certificate::X509Certificate, der_parser::oid::Oid, extensions::GeneralName,
+    parse_x509_certificate, pem::parse_x509_pem,
 };
 
 use super::bundle::Bundle;
 use super::constants::{
-    SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_ISSUER_OID,
+    SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION, SIGSTORE_GITHUB_WORKFLOW_NAME_OID,
+    SIGSTORE_GITHUB_WORKFLOW_REF_OID, SIGSTORE_GITHUB_WORKFLOW_REPOSITORY_OID,
+    SIGSTORE_GITHUB_WORKFLOW_SHA_OID, SIGSTORE_GITHUB_WORKFLOW_TRIGGER_OID, SIGSTORE_ISSUER_OID,
     SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION,
 };
 use crate::crypto::certificate_pool::CertificatePool;
@@ -43,10 +45,20 @@ pub struct CertificateSignature {
     /// The verification key embedded into the Certificate
     #[serde(skip_serializing)]
     pub verification_key: CosignVerificationKey,
-    /// The issuer used by the signer to authenticate. (e.g. GitHub, GitHub Action, Microsoft, Google,...)
-    pub issuer: Option<String>,
     /// The unique ID associated to the identity
     pub subject: CertificateSubject,
+    /// The issuer used by the signer to authenticate. (e.g. GitHub, GitHub Action, Microsoft, Google,...)
+    pub issuer: Option<String>,
+    /// The trigger of the GitHub workflow (e.g. `push`)
+    pub github_workflow_trigger: Option<String>,
+    /// The commit ID that triggered the GitHub workflow
+    pub github_workflow_sha: Option<String>,
+    /// The name of the GitHub workflow (e.g. `release artifact`)
+    pub github_workflow_name: Option<String>,
+    /// The repository that owns the GitHub workflow (e.g. `octocat/example-repo`)
+    pub github_workflow_repository: Option<String>,
+    /// The Git ref of the commit that triggered the GitHub workflow (e.g. `refs/tags/v0.9.9`)
+    pub github_workflow_ref: Option<String>,
 }
 
 impl fmt::Display for CertificateSignature {
@@ -55,8 +67,19 @@ impl fmt::Display for CertificateSignature {
             r#"CertificateSignature
 - issuer: {:?}
 - subject: {:?}
+- GitHub Workflow trigger: {:?}
+- GitHub Workflow SHA: {:?}
+- GitHub Workflow name: {:?}
+- GitHub Workflow repository: {:?}
+- GitHub Workflow ref: {:?}
 ---"#,
-            self.issuer, self.subject,
+            self.issuer,
+            self.subject,
+            self.github_workflow_trigger,
+            self.github_workflow_sha,
+            self.github_workflow_name,
+            self.github_workflow_repository,
+            self.github_workflow_ref,
         );
 
         write!(f, "{}", msg)
@@ -348,25 +371,67 @@ impl CertificateSignature {
             SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
         )?;
 
-        let issuer_extension = cert
-            .tbs_certificate
-            .get_extension_unique(&SIGSTORE_ISSUER_OID)?;
-        let issuer: Option<String> = issuer_extension
-            .map(|ext| {
-                String::from_utf8(ext.value.to_vec()).map_err(|_| {
-                    SigstoreError::UnexpectedError(String::from(
-                        "Certificate's extension Sigstore Issuer is not UTF8 compatible",
-                    ))
-                })
-            })
-            .transpose()?;
+        let issuer = get_cert_extension_by_oid(&cert, SIGSTORE_ISSUER_OID, "Issuer")?;
+
+        let github_workflow_trigger = get_cert_extension_by_oid(
+            &cert,
+            SIGSTORE_GITHUB_WORKFLOW_TRIGGER_OID,
+            "GitHub Workflow trigger",
+        )?;
+
+        let github_workflow_sha = get_cert_extension_by_oid(
+            &cert,
+            SIGSTORE_GITHUB_WORKFLOW_SHA_OID,
+            "GitHub Workflow sha",
+        )?;
+
+        let github_workflow_name = get_cert_extension_by_oid(
+            &cert,
+            SIGSTORE_GITHUB_WORKFLOW_NAME_OID,
+            "GitHub Workflow name",
+        )?;
+
+        let github_workflow_repository = get_cert_extension_by_oid(
+            &cert,
+            SIGSTORE_GITHUB_WORKFLOW_REPOSITORY_OID,
+            "GitHub Workflow repository",
+        )?;
+
+        let github_workflow_ref = get_cert_extension_by_oid(
+            &cert,
+            SIGSTORE_GITHUB_WORKFLOW_REF_OID,
+            "GitHub Workflow ref",
+        )?;
 
         Ok(CertificateSignature {
             verification_key,
             issuer,
+            github_workflow_trigger,
+            github_workflow_sha,
+            github_workflow_name,
+            github_workflow_repository,
+            github_workflow_ref,
             subject,
         })
     }
+}
+
+fn get_cert_extension_by_oid(
+    cert: &X509Certificate,
+    ext_oid: Oid,
+    ext_oid_name: &str,
+) -> Result<Option<String>> {
+    let extension = cert.tbs_certificate.get_extension_unique(&ext_oid)?;
+    extension
+        .map(|ext| {
+            String::from_utf8(ext.value.to_vec()).map_err(|_| {
+                SigstoreError::UnexpectedError(format!(
+                    "Certificate's extension Sigstore {} is not UTF8 compatible",
+                    ext_oid_name,
+                ))
+            })
+        })
+        .transpose()
 }
 
 impl CertificateSubject {
