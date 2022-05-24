@@ -26,6 +26,7 @@ use crate::{
     crypto::certificate_pool::CertificatePool,
     errors::{Result, SigstoreError},
 };
+use tracing::debug;
 
 /// Cosign Client
 ///
@@ -83,13 +84,16 @@ impl CosignCapabilities for Client {
             }
         };
 
-        build_signature_layers(
+        let sl = build_signature_layers(
             &image_manifest,
             source_image_digest,
             &layers,
             self.rekor_pub_key.as_ref(),
             self.fulcio_cert_pool.as_ref(),
-        )
+        )?;
+
+        debug!(signature_layers=?sl, ?cosign_image, "trusted signature layers");
+        Ok(sl)
     }
 }
 

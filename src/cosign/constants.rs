@@ -16,6 +16,14 @@
 use x509_parser::der_parser::{oid, oid::Oid};
 
 pub(crate) const SIGSTORE_ISSUER_OID: Oid<'static> = oid!(1.3.6 .1 .4 .1 .57264 .1 .1);
+pub(crate) const SIGSTORE_GITHUB_WORKFLOW_TRIGGER_OID: Oid<'static> =
+    oid!(1.3.6 .1 .4 .1 .57264 .1 .2);
+pub(crate) const SIGSTORE_GITHUB_WORKFLOW_SHA_OID: Oid<'static> = oid!(1.3.6 .1 .4 .1 .57264 .1 .3);
+pub(crate) const SIGSTORE_GITHUB_WORKFLOW_NAME_OID: Oid<'static> =
+    oid!(1.3.6 .1 .4 .1 .57264 .1 .4);
+pub(crate) const SIGSTORE_GITHUB_WORKFLOW_REPOSITORY_OID: Oid<'static> =
+    oid!(1.3.6 .1 .4 .1 .57264 .1 .5);
+pub(crate) const SIGSTORE_GITHUB_WORKFLOW_REF_OID: Oid<'static> = oid!(1.3.6 .1 .4 .1 .57264 .1 .6);
 
 pub(crate) const SIGSTORE_OCI_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
 pub(crate) const SIGSTORE_SIGNATURE_ANNOTATION: &str = "dev.cosignproject.cosign/signature";
