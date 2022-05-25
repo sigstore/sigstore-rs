@@ -593,6 +593,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let layer = oci_distribution::client::ImageLayer {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             data: Vec::new(),
+            annotations: None,
         };
 
         let rekor_pub_key = get_rekor_public_key();
@@ -624,6 +625,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let layer = oci_distribution::client::ImageLayer {
             media_type: "not what you would expect".into(),
             data: Vec::new(),
+            annotations: None,
         };
 
         let rekor_pub_key = get_rekor_public_key();
@@ -656,6 +658,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let layer = oci_distribution::client::ImageLayer {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             data: "some other contents".into(),
+            annotations: None,
         };
 
         let rekor_pub_key = get_rekor_public_key();
