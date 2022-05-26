@@ -1,11 +1,13 @@
 [package]
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2018"
 authors = [
   "sigstore-rs developers",
 ]
+license = "Apache-2.0"
+readme = "README.md"
 
 [features]
 default = ["native-tls"]

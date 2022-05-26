@@ -21,9 +21,6 @@ Signature annotations and certificate email can be provided at verification time
 
 #### Known limitations
 
-* Users must provide the public key of the transparency log (Rekor) and the
-  certificate of the PKI (Fulcio). The removal of this limitation is tracked
-  by [this issue](https://github.com/sigstore/sigstore-rs/issues/9).
 * The crate does not handle verification of attestations yet.
 
 ## Examples
