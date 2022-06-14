@@ -21,7 +21,7 @@ cached = "0.34.0"
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9.0", default-features = false }
 olpc-cjson = "0.1.1"
-open = "2.0.2"
+open = "3.0.1"
 openidconnect = { version = "2.2.0", default-features = false, features = [ "reqwest" ] }
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.2", default-features = false, features = [ "x509" ] }
