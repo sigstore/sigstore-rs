@@ -104,7 +104,7 @@ impl CertificatePool {
             .iter()
             .any(|chain| {
                 cert.verifier()
-                    .chain(chain.iter().cloned())
+                    .chain(chain.iter().copied())
                     .exact_date(&cert.valid_not_before())
                     .verify()
                     .is_ok()
