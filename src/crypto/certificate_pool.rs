@@ -18,16 +18,35 @@ use crate::{
     registry::Certificate,
 };
 
+// The untrusted intermediate CA certificate, used for chain building
+// TODO: Remove once this is bundled in TUF metadata.
+const FULCIO_INTERMEDIATE_V1: &str = "-----BEGIN CERTIFICATE-----
+MIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMw
+KjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y
+MjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3Jl
+LmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0C
+AQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV7
+7LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS
+0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYB
+BQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjp
+KFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZI
+zj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJR
+nZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsP
+mygUY7Ii2zbdCdliiow=
+-----END CERTIFICATE-----";
+
 /// A collection of trusted root certificates
 #[derive(Default, Debug)]
 pub(crate) struct CertificatePool {
     trusted_roots: Vec<picky::x509::Cert>,
+    intermediates: Vec<picky::x509::Cert>,
 }
 
 impl CertificatePool {
     /// Build a `CertificatePool` instance using the provided list of [`Certificate`]
     pub(crate) fn from_certificates(certs: &[Certificate]) -> Result<Self> {
         let mut trusted_roots = vec![];
+        let mut intermediates = vec![];
 
         for c in certs {
             let pc = match c.encoding {
@@ -40,16 +59,30 @@ impl CertificatePool {
                 crate::registry::CertificateEncoding::Der => picky::x509::Cert::from_der(&c.data),
             }?;
 
-            if !matches!(pc.ty(), picky::x509::certificate::CertType::Root) {
-                return Err(SigstoreError::CertificatePoolError(
-                    "Cannot add non-root certificate".to_string(),
-                ));
+            match pc.ty() {
+                picky::x509::certificate::CertType::Root => {
+                    trusted_roots.push(pc);
+                }
+                picky::x509::certificate::CertType::Intermediate => {
+                    intermediates.push(pc);
+                }
+                _ => {
+                    return Err(SigstoreError::CertificatePoolError(
+                        "Cannot add a certificate that is no root or intermediate".to_string(),
+                    ));
+                }
             }
-
-            trusted_roots.push(pc);
         }
 
-        Ok(CertificatePool { trusted_roots })
+        // TODO: Remove once FULCIO_INTERMEDIATE_V1 is bundled in TUF metadata.
+        if intermediates.is_empty() {
+            intermediates.push(picky::x509::Cert::from_pem_str(FULCIO_INTERMEDIATE_V1)?);
+        }
+
+        Ok(CertificatePool {
+            trusted_roots,
+            intermediates,
+        })
     }
 
     /// Ensures the given certificate has been issued by one of the trusted root certificates
@@ -66,14 +99,16 @@ impl CertificatePool {
         })?;
         let cert = picky::x509::Cert::from_pem_str(&cert_pem_str)?;
 
-        let verified = self.trusted_roots.iter().any(|trusted_root| {
-            let chain = [trusted_root.clone()];
-            cert.verifier()
-                .chain(chain.iter())
-                .exact_date(&cert.valid_not_before())
-                .verify()
-                .is_ok()
-        });
+        let verified = self
+            .create_chains_for_all_certificates()
+            .iter()
+            .any(|chain| {
+                cert.verifier()
+                    .chain(chain.iter().copied())
+                    .exact_date(&cert.valid_not_before())
+                    .verify()
+                    .is_ok()
+            });
 
         if verified {
             Ok(())
@@ -82,5 +117,21 @@ impl CertificatePool {
                 "Not issued by a trusted root".to_string(),
             ))
         }
+    }
+
+    fn create_chains_for_all_certificates(&self) -> Vec<Vec<&picky::x509::Cert>> {
+        let mut chains: Vec<Vec<&picky::x509::Cert>> = vec![];
+        self.trusted_roots.iter().for_each(|trusted_root| {
+            chains.push([trusted_root].to_vec());
+        });
+        self.intermediates.iter().for_each(|intermediate| {
+            for root in self.trusted_roots.iter() {
+                if root.is_parent_of(intermediate).is_ok() {
+                    chains.push([intermediate, root].to_vec());
+                }
+            }
+        });
+
+        chains
     }
 }
