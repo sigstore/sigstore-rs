@@ -43,6 +43,6 @@ anyhow = "1.0.54"
 chrono = "0.4.19"
 clap = { version = "3.1.0", features = ["derive"] }
 openssl = "0.10.38"
-rstest = "0.14.0"
+rstest = "0.15.0"
 tempfile = "3.3.0"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
