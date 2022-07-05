@@ -14,7 +14,7 @@
 // limitations under the License.
 
 use ring::signature::{self, UnparsedPublicKey, VerificationAlgorithm};
-use x509_parser::{oid_registry::*, traits::FromDer, x509::SubjectPublicKeyInfo};
+use x509_parser::{oid_registry::*, prelude::FromDer, x509::SubjectPublicKeyInfo};
 
 use super::{Signature, SignatureDigestAlgorithm};
 use crate::errors::{Result, SigstoreError};
@@ -46,7 +46,7 @@ impl CosignVerificationKey {
         verification_algorithm: &'static dyn signature::VerificationAlgorithm,
     ) -> Result<Self> {
         let (_, public_key) = SubjectPublicKeyInfo::from_der(der_data)?;
-        let data = public_key.subject_public_key.data.to_owned();
+        let data = public_key.subject_public_key.data.into_owned();
 
         Ok(Self {
             data,
@@ -92,7 +92,7 @@ impl CosignVerificationKey {
             };
 
         let verification_algorithm = verification_algorithm?;
-        let data = public_key.subject_public_key.data.to_owned();
+        let data = public_key.subject_public_key.data.into_owned();
 
         Ok(Self {
             verification_algorithm,

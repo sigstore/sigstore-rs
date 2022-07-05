@@ -69,7 +69,7 @@ fn verify_validity(certificate: &X509Certificate) -> Result<()> {
     let now = ASN1Time::now();
     if now < validity.not_before {
         Err(SigstoreError::CertificateValidityError(
-            validity.not_before.to_rfc2822(),
+            validity.not_before.to_string(),
         ))
     } else {
         Ok(())
@@ -77,14 +77,14 @@ fn verify_validity(certificate: &X509Certificate) -> Result<()> {
 }
 
 fn verify_expiration(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
-    let it = ASN1Time::from_timestamp(integrated_time);
+    let it = ASN1Time::from_timestamp(integrated_time)?;
     let validity = certificate.validity();
 
     if it < validity.not_before {
         return Err(
             SigstoreError::CertificateExpiredBeforeSignaturesSubmittedToRekor {
-                integrated_time: it.to_rfc2822(),
-                not_before: validity.not_before.to_rfc2822(),
+                integrated_time: it.to_string(),
+                not_before: validity.not_before.to_string(),
             },
         );
     }
@@ -92,8 +92,8 @@ fn verify_expiration(certificate: &X509Certificate, integrated_time: i64) -> Res
     if it > validity.not_after {
         return Err(
             SigstoreError::CertificateIssuedAfterSignaturesSubmittedToRekor {
-                integrated_time: it.to_rfc2822(),
-                not_after: validity.not_after.to_rfc2822(),
+                integrated_time: it.to_string(),
+                not_after: validity.not_after.to_string(),
             },
         );
     }
