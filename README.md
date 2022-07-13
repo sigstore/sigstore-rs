@@ -1,6 +1,6 @@
-Continuous integration | Docs | License
- ----------------------|------|---------
- [![Continuous integration](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml/badge.svg)](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml) | [![Docs](https://img.shields.io/badge/docs-%20-blue)](https://sigstore.github.io/sigstore-rs/sigstore) |  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+Continuous integration | Docs | License | Crate version | Crate downloads
+ ----------------------|------|---------|---------------|-----------------
+ [![Continuous integration](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml/badge.svg)](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml) | [![Docs](https://img.shields.io/badge/docs-%20-blue)](https://sigstore.github.io/sigstore-rs/sigstore) |  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0) | [![Crate versions](https://img.shields.io/crates/v/sigstore?style=flat-square)](https://crates.io/crates/sigstore) | [![Crate downloads](https://img.shields.io/crates/d/sigstore?style=flat-square)](https://crates.io/crates/sigstore)
 
 
 This is an experimental crate to interact with [sigstore](https://sigstore.dev/).
