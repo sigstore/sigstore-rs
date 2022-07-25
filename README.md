@@ -19,6 +19,10 @@ The crate implements the following verification mechanisms:
 
 Signature annotations and certificate email can be provided at verification time.
 
+### OpenID Connect
+
+For use with Fulcio ephemeral key signing, an OpenID connect API is available.
+
 #### Known limitations
 
 * The crate does not handle verification of attestations yet.
