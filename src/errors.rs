@@ -150,4 +150,37 @@ pub enum SigstoreError {
 
     #[error("Failed to get id_token")]
     NoIDToken,
+
+    #[error("Pkcs8 error : {0}")]
+    PKCS8Error(String),
+
+    #[error("Pkcs8 spki error : {0}")]
+    PKCS8SpkiError(String),
+
+    #[error("Pkcs8 der encoding/decoding error : {0}")]
+    PKCS8DerError(String),
+
+    #[error(transparent)]
+    ECDSAError(#[from] ecdsa::Error),
+
+    #[error(transparent)]
+    ECError(#[from] elliptic_curve::Error),
+
+    #[error(transparent)]
+    ScryptKDFInvalidParamsError(#[from] scrypt::errors::InvalidParams),
+
+    #[error(transparent)]
+    ScryptKDFInvalidOutputLenError(#[from] scrypt::errors::InvalidOutputLen),
+
+    #[error("Failed to encrypt the private key: {0}")]
+    PrivateKeyEncryptError(String),
+
+    #[error("Failed to decrypt the private key: {0}")]
+    PrivateKeyDecryptError(String),
+
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::error::Error),
+
+    #[error(transparent)]
+    Utf8Error(#[from] std::str::Utf8Error),
 }
