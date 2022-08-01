@@ -15,3 +15,4 @@
 
 //! # RSA Key Generation and Signing
 //! This is a wrapper for Rust Crypto
+// TODO: After https://github.com/RustCrypto/RSA/pull/174 is merged.

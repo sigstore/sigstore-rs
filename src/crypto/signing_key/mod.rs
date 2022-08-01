@@ -43,7 +43,10 @@ use sha2::{Sha256, Sha384};
 
 use crate::errors::*;
 
-use self::ecdsa::{EcdsaKeys, EcdsaSigner};
+use self::{
+    ecdsa::{EcdsaKeys, EcdsaSigner},
+    ed25519::{Ed25519Keys, Ed25519Signer},
+};
 
 pub mod ecdsa;
 pub mod ed25519;
@@ -93,12 +96,16 @@ pub trait KeyPair {
 /// signatures using the P-256 curve and SHA-256.
 /// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA
 /// signatures using the P-384 curve and SHA-384.
+/// * `ED25519`: ECDSA signature using SHA2-512
+/// as the digest function and curve edwards25519. The
+/// signature format please refer
+/// to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
 #[allow(non_camel_case_types)]
 pub enum SigningScheme {
     // TODO: Support RSA
     ECDSA_P256_SHA256_ASN1,
     ECDSA_P384_SHA384_ASN1,
-    // TODO: Support ED25519
+    ED25519,
 }
 
 pub trait Signer {
@@ -132,6 +139,9 @@ impl SigStoreSigner {
                         NistP384,
                     >::new(
                     )?)?)
+                }
+                SigningScheme::ED25519 => {
+                    Box::new(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
                 }
             },
         })
@@ -212,6 +222,11 @@ mod tests {
             TestEnum {
                 signing_scheme: SigningScheme::ECDSA_P384_SHA384_ASN1,
                 verify_hash_alg: SignatureDigestAlgorithm::Sha384,
+            },
+            TestEnum {
+                signing_scheme: SigningScheme::ED25519,
+                // This hash alg is not used, just as a placeholder.
+                verify_hash_alg: SignatureDigestAlgorithm::Sha256,
             },
         ];
 
