@@ -46,3 +46,7 @@ openssl = "0.10.38"
 rstest = "0.15.0"
 tempfile = "3.3.0"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
+
+[dependencies.reqwest]
+version = "^0.11"
+features = ["json", "multipart"]
