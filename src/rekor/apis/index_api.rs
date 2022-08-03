@@ -12,7 +12,7 @@ use reqwest;
 
 use super::{configuration, Error};
 use crate::rekor::apis::ResponseContent;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// struct for typed errors of method [`search_index`]
 #[derive(Debug, Clone, Serialize, Deserialize)]

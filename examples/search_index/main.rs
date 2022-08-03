@@ -15,7 +15,9 @@
 
 use clap::{Arg, Command};
 use sigstore::rekor::apis::{configuration::Configuration, index_api};
-use sigstore::rekor::models::{search_index_public_key, search_index_public_key::Format, SearchIndex};
+use sigstore::rekor::models::{
+    search_index_public_key, search_index_public_key::Format, SearchIndex,
+};
 
 #[tokio::main]
 async fn main() {

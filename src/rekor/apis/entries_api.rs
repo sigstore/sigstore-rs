@@ -13,7 +13,7 @@ use reqwest;
 use super::{configuration, Error};
 use crate::rekor::apis::ResponseContent;
 use crate::rekor::models::log_entry::LogEntry;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// struct for typed errors of method [`create_log_entry`]
 #[derive(Debug, Clone, Serialize, Deserialize)]

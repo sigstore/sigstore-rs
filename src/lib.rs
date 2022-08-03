@@ -231,6 +231,6 @@ pub mod cosign;
 pub mod errors;
 pub mod oauth;
 pub mod registry;
+pub mod rekor;
 pub mod simple_signing;
 pub mod tuf;
-pub mod rekor;

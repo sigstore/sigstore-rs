@@ -9,8 +9,7 @@
  */
 
 /// Jar : Java Archive (JAR)
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct Jar {

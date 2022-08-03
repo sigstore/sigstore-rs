@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
