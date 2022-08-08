@@ -21,9 +21,9 @@ lazy_static! {
         Regex::new(r#"fulcio(_v\d+)?\.crt\.pem"#).expect("cannot compile regexp");
 }
 
-pub(crate) const SIGSTORE_METADATA_BASE: &str = "http://sigstore-tuf-root.storage.googleapis.com/";
+pub(crate) const SIGSTORE_METADATA_BASE: &str = "https://sigstore-tuf-root.storage.googleapis.com/";
 pub(crate) const SIGSTORE_TARGET_BASE: &str =
-    "http://sigstore-tuf-root.storage.googleapis.com/targets";
+    "https://sigstore-tuf-root.storage.googleapis.com/targets";
 
 pub(crate) const SIGSTORE_REKOR_PUB_KEY_TARGET: &str = "rekor.pub";
 
