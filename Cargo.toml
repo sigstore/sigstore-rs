@@ -22,9 +22,9 @@ lazy_static = "1.4.0"
 oci-distribution = { version = "0.9.0", default-features = false }
 olpc-cjson = "0.1.1"
 open = "3.0.1"
-openidconnect = { version = "2.2.0", default-features = false, features = [ "reqwest" ] }
+openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ] }
 pem = "1.0.2"
-picky = { version = "7.0.0-rc.2", default-features = false, features = [ "x509" ] }
+picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
 regex = "1.5.5"
 ring = "0.16.20"
 serde_json = "1.0.79"
@@ -40,7 +40,7 @@ x509-parser = { version = "0.14.0", features = ["verify"] }
 
 [dev-dependencies]
 anyhow = "1.0.54"
-chrono = "0.4.19"
+chrono = "0.4.20"
 clap = { version = "3.1.0", features = ["derive"] }
 openssl = "0.10.38"
 rstest = "0.15.0"
