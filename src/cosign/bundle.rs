@@ -20,7 +20,7 @@ use std::cmp::PartialEq;
 use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::{Result, SigstoreError};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Bundle {
     pub signed_entry_timestamp: String,
@@ -54,7 +54,7 @@ impl Bundle {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Payload {
     pub body: String,
