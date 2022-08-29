@@ -1,7 +1,7 @@
 [package]
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2018"
 authors = [
   "sigstore-rs developers",
@@ -17,14 +17,14 @@ rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls"]
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.13.0"
-cached = "0.37.0"
+cached = "0.38.0"
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9.0", default-features = false }
 olpc-cjson = "0.1.1"
 open = "3.0.1"
-openidconnect = { version = "2.2.0", default-features = false, features = [ "reqwest" ] }
+openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ] }
 pem = "1.0.2"
-picky = { version = "7.0.0-rc.2", default-features = false, features = [ "x509" ] }
+picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
 regex = "1.5.5"
 ring = "0.16.20"
 serde_json = "1.0.79"
@@ -36,11 +36,24 @@ tough = { version = "0.12.1", features = [ "http" ] }
 tracing = "0.1.31"
 url = "2.2.2"
 x509-parser = { version = "0.14.0", features = ["verify"] }
-
+zeroize = "1.5.7"
+rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
+scrypt = "0.10.0"
+xsalsa20poly1305 = "0.7.1"
+pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] }
+elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
+p256 = "0.11.1"
+p384 = "0.11.1"
+ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest" ] }
+digest = "0.10.3"
+signature = { version = "1.5.0", features = [ "digest-preview" ] }
+ed25519 = { version = "1", features = [ "alloc" ] }
+ed25519-dalek-fiat = "0.1.0"
 
 [dev-dependencies]
 anyhow = "1.0.54"
-chrono = "0.4.19"
+assert-json-diff = "2.0.2"
+chrono = "0.4.20"
 clap = { version = "3.1.0", features = ["derive"] }
 openssl = "0.10.38"
 rstest = "0.15.0"

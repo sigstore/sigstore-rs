@@ -27,6 +27,7 @@ pub static SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM:
 
 /// Describes the signature digest algorithms supported.
 /// The default one is sha256.
+#[derive(Debug, Clone)]
 pub enum SignatureDigestAlgorithm {
     Sha256,
     Sha384,
@@ -68,6 +69,8 @@ pub(crate) mod certificate_pool;
 
 pub mod verification_key;
 pub use verification_key::CosignVerificationKey;
+
+pub mod signing_key;
 
 #[cfg(test)]
 pub(crate) mod tests {
