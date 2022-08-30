@@ -151,8 +151,8 @@
 //!
 //! ```
 //! use clap::{Arg, Command};
-//! use rekor::apis::{configuration::Configuration, entries_api};
-//! use rekor::models::log_entry::LogEntry;
+//! use sigstore::rekor::apis::{configuration::Configuration, entries_api};
+//! use sigstore::rekor::models::log_entry::LogEntry;
 //! use std::str::FromStr;
 //! #[tokio::main]
 //! async fn main() {
