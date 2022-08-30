@@ -1,2 +1,0 @@
-derive-partial-eq-without-eq = false
-#![allow(clippy::derive-partial-eq-without-eq)]
