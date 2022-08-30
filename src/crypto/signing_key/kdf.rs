@@ -17,7 +17,7 @@
 
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use xsalsa20poly1305::aead::{AeadMut, NewAead};
+use xsalsa20poly1305::aead::{AeadMut, KeyInit};
 
 use crate::errors::*;
 
