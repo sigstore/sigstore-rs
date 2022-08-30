@@ -51,7 +51,7 @@ impl From<&oci_distribution::secrets::RegistryAuth> for Auth {
 }
 
 /// The protocol that the client should use to connect
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ClientProtocol {
     #[allow(missing_docs)]
     Http,
