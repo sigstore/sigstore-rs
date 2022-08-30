@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     println!("{}\n", *private_key);
 
     let pub_key = signer.public_key_to_pem()?;
-    println!("Exportd the public key of the key pair as PEM format.");
+    println!("Exported the public key of the key pair as PEM format.");
     println!("Public key in PEM format:");
     println!("{}\n", &pub_key);
 
