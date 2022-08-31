@@ -63,3 +63,59 @@ tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
 [dependencies.reqwest]
 version = "^0.11"
 features = ["json", "multipart"]
+
+# cosign example mappings
+
+[[example]]
+name = "verify"
+path = "examples/cosign/verify/main.rs"
+
+# openidconnect example mappings
+
+[[example]]
+name = "openidconnect"
+path = "examples/openidflow/openidconnect/main.rs"
+
+# key interface mappings
+
+[[example]]
+name = "ecdsa_p256"
+path = "examples/key_interface/ecdsa_p256/main.rs"
+
+# rekor example mappings
+
+[[example]]
+name = "create_log_entry"
+path = "examples/rekor/create_log_entry/main.rs"
+
+[[example]]
+name = "get_log_entry_by_index"
+path = "examples/rekor/get_log_entry_by_index/main.rs"
+
+[[example]]
+name = "get_log_entry_by_uuid"
+path = "examples/rekor/get_log_entry_by_uuid/main.rs"
+
+[[example]]
+name = "get_log_info"
+path = "examples/rekor/get_log_info/main.rs"
+
+[[example]]
+name = "get_log_proof"
+path = "examples/rekor/get_log_proof/main.rs"
+
+[[example]]
+name = "get_public_key"
+path = "examples/rekor/get_public_key/main.rs"
+
+[[example]]
+name = "get_rekor_version"
+path = "examples/rekor/get_rekor_version/main.rs"
+
+[[example]]
+name = "search_index"
+path = "examples/rekor/search_index/main.rs"
+
+[[example]]
+name = "search_log_query"
+path = "examples/rekor/search_log_query/main.rs"
