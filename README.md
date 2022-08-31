@@ -9,7 +9,7 @@ This is under high development, many features and checks are still missing.
 
 ## Features
 
-### Verification
+### CosignVerification
 
 The crate implements the following verification mechanisms:
 
@@ -23,13 +23,42 @@ Signature annotations and certificate email can be provided at verification time
 
 For use with Fulcio ephemeral key signing, an OpenID connect API is available.
 
+### Rekor Client
+
+All of the rekor client APIs can be leveraged.
+
+### Key Interface
+
+The crate implements the following key interfaces:
+  
+    * Generate a key pair
+    * Sign data
+    * Verify signature
+    * Export key pair in PEM format
+    * Import key pair from PEM format
+    * Export public key in PEM format
+    * Import public key from PEM format
+
 #### Known limitations
 
-* The crate does not handle verification of attestations yet.
+* The crate does not handle verification of attestations yet or perform OIC
+container signing operations.
 
 ## Examples
 
 The `examples` directory contains demo programs using the library.
+
+  * [`openidflow`](examples/openidflow/README.md)
+  * [`key_interface`](examples/key_interface/README.md)
+  * [`rekor`](examples/rekor/README.md)
+
+Each example can be executed with the `cargo run --example <name>` command.
+
+For example, the `openidconnect` example can be run with the following command:
+
+```bash
+cargo run --example openidconnect
+```
 
 ## Security
 
