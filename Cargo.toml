@@ -119,8 +119,3 @@ path = "examples/rekor/search_index/main.rs"
 [[example]]
 name = "search_log_query"
 path = "examples/rekor/search_log_query/main.rs"
-
-
-
-
-
