@@ -7,4 +7,7 @@ ignore = [
                        # to API breakages.
                        #
                        # This is a transitive depependency of tough
+  "RUSTSEC-2021-0139"  # ansi_term is no longer maintained, however this is a transient dependency of
+                       # the `tracing-subscriber` crate, which is a dev_dependency and so therefore
+                       # will not be included in a release build.
 ]
