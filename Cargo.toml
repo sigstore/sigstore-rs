@@ -32,7 +32,7 @@ serde = { version = "1.0.136", features = ["derive"] }
 sha2 = "0.10.2"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
-tough = { version = "0.12.1", features = [ "http" ] }
+tough = { version = "0.12.4", features = [ "http" ] }
 tracing = "0.1.31"
 url = "2.2.2"
 x509-parser = { version = "0.14.0", features = ["verify"] }
