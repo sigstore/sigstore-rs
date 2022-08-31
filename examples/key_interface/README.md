@@ -7,12 +7,15 @@ and verifying with a public key.
 The general idea is to randomly generate an `ECDSA_P256_ASN1` key pair
 and sign the given data, and verify the signature using the public key.
 
-# Run the example case
+# Run the example ecdsa_p256 case
 
-Run this example
+The following example will create a ECDSA_P256_ASN1 keypair and sign the given
+data.
 
 ```bash
-cargo run --example key_interface
+
+```bash
+cargo run --example ecdsa_p256
 ```
 
 This is a simple example to use [`signing_key`](../../src/crypto/signing_key/mod.rs) module, including the following steps:
