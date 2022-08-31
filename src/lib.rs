@@ -145,6 +145,71 @@
 //!   }
 //! }
 //! ```
+//! # Rekor integration
+//! The examples folder contains code that shows users how to make Rekor API calls.  
+//! It also provides a clean interface with step-by-step instructions that other developers can copy and paste.
+//!
+//! ```
+//! use clap::{Arg, Command};
+//! use sigstore::rekor::apis::{configuration::Configuration, entries_api};
+//! use sigstore::rekor::models::log_entry::LogEntry;
+//! use std::str::FromStr;
+//! #[tokio::main]
+//! async fn main() {
+//!     /*
+//!     Retrieves an entry and inclusion proof from the transparency log (if it exists) by index
+//!     Example command :
+//!     cargo run --example get_log_entry_by_index -- --log_index 99
+//!     */
+//!     let matches = Command::new("cmd").arg(
+//!         Arg::new("log_index")
+//!             .long("log_index")
+//!             .takes_value(true)
+//!             .help("log_index of the artifact"),
+//!     );
+//!
+//!     let flags = matches.get_matches();
+//!     let index = <i32 as FromStr>::from_str(flags.value_of("log_index").unwrap_or("1")).unwrap();
+//!
+//!     let configuration = Configuration::default();
+//!
+//!     let message: LogEntry = entries_api::get_log_entry_by_index(&configuration, index)
+//!         .await
+//!         .unwrap();
+//!     println!("{:#?}", message);
+//! }
+//! ```
+//!
+//! The following comment in the code tells the user how to provide the required values to the API calls using cli flags.
+//!
+//! In the example below, the user can retrieve different entries by inputting a different value for the log_index flag.
+//!
+//!
+//!/*
+//!Retrieves an entry and inclusion proof from the transparency log (if it exists) by index
+//!Example command :
+//!cargo run --example get_log_entry_by_index -- --log_index 99
+//!*/
+//!
+//! # The example code is provided for the following API calls:
+//!
+//!- create_log_entry
+//!- get_log_entry_by_index
+//!- get_log_entry_by_uuid
+//!- get_log_info
+//!- get_log_proof
+//!- get_public_key
+//!- get_rekor_version
+//!- get_timestamp_cert_chain
+//!- get_timestamp_response
+//!- search_index
+//!- search_log_query
+//!
+//!
+//! # Examples
+//!
+//! Additional examples can be found inside of the [`examples`](https://github.com/sigstore/sigstore-rs/tree/main/examples/)
+//! directory.
 //!
 //! ## Fulcio and Rekor integration
 //!
@@ -155,10 +220,6 @@
 //! The [`sigstore::tuf`](crate::tuf) module provides the helper structures to deal
 //! with it.
 //!
-//! # Examples
-//!
-//! Additional examples can be found inside of the [`examples`](https://github.com/sigstore/sigstore-rs/tree/main/examples/)
-//! directory.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
@@ -170,5 +231,6 @@ pub mod cosign;
 pub mod errors;
 pub mod oauth;
 pub mod registry;
+pub mod rekor;
 pub mod simple_signing;
 pub mod tuf;
