@@ -30,14 +30,12 @@ All of the rekor client APIs can be leveraged.
 ### Key Interface
 
 The crate implements the following key interfaces:
-  
-    * Generate a key pair
-    * Sign data
-    * Verify signature
-    * Export key pair in PEM format
-    * Import key pair from PEM format
-    * Export public key in PEM format
-    * Import public key from PEM format
+
+  * Generate a key pair
+  * Sign data
+  * Verify signature
+  * Export key pair in PEM / DER format
+  * Import key pair from PEM / DER format
 
 #### Known limitations
 
