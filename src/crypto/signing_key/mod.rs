@@ -48,6 +48,8 @@ use self::{
     ed25519::{Ed25519Keys, Ed25519Signer},
 };
 
+use super::{CosignVerificationKey, SignatureDigestAlgorithm};
+
 pub mod ecdsa;
 pub mod ed25519;
 pub mod kdf;
@@ -89,6 +91,13 @@ pub trait KeyPair {
 
     /// `private_key_to_der` will export the asn.1 pkcs8 private key.
     fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>>;
+
+    /// `to_verification_key` will derive the `CosignVerificationKey` from
+    /// the public key.
+    fn to_verification_key(
+        &self,
+        signature_digest_algorithm: SignatureDigestAlgorithm,
+    ) -> Result<CosignVerificationKey>;
 }
 
 /// Different digital signature algorithms.
@@ -101,6 +110,7 @@ pub trait KeyPair {
 /// signature format please refer
 /// to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
 #[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
 pub enum SigningScheme {
     // TODO: Support RSA
     ECDSA_P256_SHA256_ASN1,
@@ -121,6 +131,7 @@ pub trait Signer {
 /// signing.
 pub struct SigStoreSigner {
     signer: Box<dyn Signer>,
+    signing_scheme: SigningScheme,
 }
 
 impl SigStoreSigner {
@@ -144,6 +155,7 @@ impl SigStoreSigner {
                     Box::new(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
                 }
             },
+            signing_scheme,
         })
     }
 
@@ -179,13 +191,29 @@ impl SigStoreSigner {
     pub fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>> {
         self.signer.key_pair().private_key_to_der()
     }
+
+    /// `to_verification_key` will derive the `CosignVerificationKey` from
+    /// the `SigStoreSigner`.
+    pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
+        let digest_scheme = match self.signing_scheme {
+            SigningScheme::ECDSA_P256_SHA256_ASN1 => SignatureDigestAlgorithm::Sha256,
+            SigningScheme::ECDSA_P384_SHA384_ASN1 => SignatureDigestAlgorithm::Sha384,
+            // Here the wildcard helps to handle those do not need a
+            // digest scheme parameter.
+            _ => SignatureDigestAlgorithm::Sha256,
+        };
+
+        self.signer.key_pair().to_verification_key(digest_scheme)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use crate::crypto::{
         signing_key::{SigStoreSigner, SigningScheme},
-        CosignVerificationKey, Signature, SignatureDigestAlgorithm,
+        CosignVerificationKey, Signature,
     };
 
     /// This is a test MESSAGE used to be signed by all signing test.
@@ -202,43 +230,35 @@ mod tests {
         "optional": null
     }"#;
 
-    /// This test will do the folliwing things:
+    /// This test will do the following things:
     /// * Randomly generate a key pair due to the given signing scheme.
     /// * Signing the MESSAGE and generate a signature using
     /// the private key.
+    /// * Derive the verification key using both `from_sigstore_signer`
+    /// and `to_verification_key`.
     /// * Verify the signature with the public key.
-    #[test]
-    fn sigstore_signing() {
-        struct TestEnum {
-            signing_scheme: SigningScheme,
-            verify_hash_alg: SignatureDigestAlgorithm,
-        }
-
-        let test_items = [
-            TestEnum {
-                signing_scheme: SigningScheme::ECDSA_P256_SHA256_ASN1,
-                verify_hash_alg: SignatureDigestAlgorithm::Sha256,
-            },
-            TestEnum {
-                signing_scheme: SigningScheme::ECDSA_P384_SHA384_ASN1,
-                verify_hash_alg: SignatureDigestAlgorithm::Sha384,
-            },
-            TestEnum {
-                signing_scheme: SigningScheme::ED25519,
-                // This hash alg is not used, just as a placeholder.
-                verify_hash_alg: SignatureDigestAlgorithm::Sha256,
-            },
-        ];
-
-        for item in test_items {
-            let signer = SigStoreSigner::new(item.signing_scheme).unwrap();
-            let pubkey = signer.public_key_to_pem().unwrap();
-            let sig = signer.sign(MESSAGE.as_bytes()).unwrap();
-            let verification_key =
-                CosignVerificationKey::from_pem(&pubkey.as_bytes(), item.verify_hash_alg).unwrap();
-            let signature = Signature::Raw(&sig);
-            let verify_res = verification_key.verify_signature(signature, MESSAGE.as_bytes());
-            assert!(verify_res.is_ok());
-        }
+    #[rstest]
+    #[case(SigningScheme::ECDSA_P256_SHA256_ASN1)]
+    #[case(SigningScheme::ECDSA_P384_SHA384_ASN1)]
+    #[case(SigningScheme::ED25519)]
+    fn sigstore_signing(#[case] signing_scheme: SigningScheme) {
+        let signer = SigStoreSigner::new(signing_scheme).expect(&format!(
+            "create SigStoreSigner with {:?} failed",
+            signing_scheme
+        ));
+        let _pubkey = signer
+            .public_key_to_pem()
+            .expect("export public key in PEM format failed.");
+        let sig = signer
+            .sign(MESSAGE.as_bytes())
+            .expect("sign message failed.");
+        let _verification_key = signer
+            .to_verification_key()
+            .expect("derive signer into verification key failed.");
+        let verification_key = CosignVerificationKey::from_sigstore_signer(&signer)
+            .expect("derive verification key from signer failed.");
+        let signature = Signature::Raw(&sig);
+        let verify_res = verification_key.verify_signature(signature, MESSAGE.as_bytes());
+        assert!(verify_res.is_ok(), "can not verify the signature.");
     }
 }
