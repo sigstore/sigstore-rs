@@ -42,7 +42,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Configuration {
             base_path: "https://rekor.sigstore.dev".to_owned(),
-            user_agent: Some(format!("sigstore-rs/{}",VERSION.unwrap_or("unknown"))),
+            user_agent: Some(format!("sigstore-rs/{}", VERSION.unwrap_or("unknown"))),
             client: reqwest::Client::new(),
             basic_auth: None,
             oauth_access_token: None,
