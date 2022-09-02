@@ -78,7 +78,6 @@
 //!- get_log_info
 //!- get_log_proof
 //!- get_public_key
-//!- get_rekor_version
 //!- get_timestamp_cert_chain
 //!- get_timestamp_response
 //!- search_index

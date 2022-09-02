@@ -39,5 +39,4 @@ pub mod configuration;
 pub mod entries_api;
 pub mod index_api;
 pub mod pubkey_api;
-pub mod server_api;
 pub mod tlog_api;

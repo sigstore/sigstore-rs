@@ -109,10 +109,6 @@ name = "get_public_key"
 path = "examples/rekor/get_public_key/main.rs"
 
 [[example]]
-name = "get_rekor_version"
-path = "examples/rekor/get_rekor_version/main.rs"
-
-[[example]]
 name = "search_index"
 path = "examples/rekor/search_index/main.rs"
 
