@@ -10,6 +10,8 @@
 
 use reqwest;
 
+const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone)]
 pub struct Configuration {
     pub base_path: String,
@@ -39,8 +41,8 @@ impl Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Configuration {
-            base_path: "http://rekor.sigstore.dev".to_owned(),
-            user_agent: Some("OpenAPI-Generator/0.0.1/rust".to_owned()),
+            base_path: "https://rekor.sigstore.dev".to_owned(),
+            user_agent: Some(format!("sigstore-rs/{}",VERSION.unwrap_or("unknown")).to_owned()),
             client: reqwest::Client::new(),
             basic_auth: None,
             oauth_access_token: None,
