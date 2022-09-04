@@ -30,8 +30,6 @@ pub mod log_info;
 pub use self::log_info::LogInfo;
 pub mod proposed_entry;
 pub use self::proposed_entry::ProposedEntry;
-pub mod rekor_version;
-pub use self::rekor_version::RekorVersion;
 pub mod rekord;
 pub use self::rekord::Rekord;
 pub mod rekord_all_of;
