@@ -79,8 +79,16 @@ path = "examples/openidflow/openidconnect/main.rs"
 # key interface mappings
 
 [[example]]
-name = "ecdsa_p256"
-path = "examples/key_interface/ecdsa_p256/main.rs"
+name = "key_pair_gen_sign_verify"
+path = "examples/key_interface/key_pair_gen_sign_verify/main.rs"
+
+[[example]]
+name = "key_pair_gen_and_export"
+path = "examples/key_interface/key_pair_gen_and_export/main.rs"
+
+[[example]]
+name = "key_pair_import"
+path = "examples/key_interface/key_pair_import/main.rs"
 
 # rekor example mappings
 

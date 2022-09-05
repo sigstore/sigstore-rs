@@ -14,17 +14,12 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
-use sigstore::crypto::{
-    signing_key::{SigStoreSigner, SigningScheme},
-    CosignVerificationKey, Signature, SignatureDigestAlgorithm,
-};
-use x509_parser::nom::AsBytes;
+use sigstore::crypto::{signing_key::SigningScheme, Signature};
 
 const DATA_TO_BE_SIGNED: &str = "this is an example data to be signed";
-const PASSWORD: &str = "example password";
 
 fn main() -> Result<()> {
-    let signer = SigStoreSigner::new(SigningScheme::ECDSA_P256_SHA256_ASN1)?;
+    let signer = SigningScheme::ECDSA_P256_SHA256_ASN1.create_signer()?;
     println!("Created a new key pair for ECDSA_P256_SHA256_ASN1.\n");
 
     let signature_data = signer.sign(DATA_TO_BE_SIGNED.as_bytes())?;
@@ -32,23 +27,12 @@ fn main() -> Result<()> {
     println!("Data: {}", DATA_TO_BE_SIGNED);
     println!("Signature: {:x?}\n", &signature_data);
 
-    let private_key = signer.private_key_to_encrypted_pem(PASSWORD.as_bytes())?;
-    println!("Exported the encrypted private key in PEM.");
-    println!("Encrypted private key in PEM format:");
-    println!("{}\n", *private_key);
-
-    let pub_key = signer.public_key_to_pem()?;
-    println!("Exported the public key of the key pair as PEM format.");
-    println!("Public key in PEM format:");
-    println!("{}\n", &pub_key);
-
-    let verify_key =
-        CosignVerificationKey::from_pem(pub_key.as_bytes(), SignatureDigestAlgorithm::Sha256)?;
-    println!("Imported the public key.\n");
+    let verification_key = signer.to_verification_key()?;
+    println!("Derive verification key from the signer.\n");
 
     println!("Verifying the signature of the example data...");
-    match verify_key.verify_signature(
-        Signature::Raw(signature_data.as_bytes()),
+    match verification_key.verify_signature(
+        Signature::Raw(&signature_data),
         DATA_TO_BE_SIGNED.as_bytes(),
     ) {
         Ok(_) => {
