@@ -183,4 +183,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     Utf8Error(#[from] std::str::Utf8Error),
+
+    #[error("Failed to parse the key: {0}")]
+    KeyParseError(String),
 }

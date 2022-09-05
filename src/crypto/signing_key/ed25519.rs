@@ -13,26 +13,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # ED25519 Key Generation and Signing
-//! This is a wrapper for Rust Crypto
+//! # Ed25519 Keys
 //!
-//! # Generate Ed25519 Key Pair and Export Public & Private Key
+//! This is a wrapper for Rust Crypto. There two main types in this mod:
+//! * [`Ed25519Keys`]: provides basic key pair operaions
+//! * [`Ed25519Signer`]: provides signing operaion
 //!
+//! The `signing_key` will wrap [`Ed25519Keys`] into [`super::SigStoreKeyPair`] enum,
+//! and [`Ed25519Signer`] into [`SigStoreSigner`] enum.
+//!
+//! # Ed25519 Key Operaions
+//!
+//! We give an example for the mod
 //! ```rust
-//! use sigstore::crypto::signing_key::{ed25519::{Ed25519Keys,Ed25519Signer}, KeyPair, Signer};
+//! use sigstore::crypto::signing_key::ed25519::Ed25519Keys;
+//! use sigstore::crypto::{signing_key::KeyPair, Signature};
 //!
+//! // generate a new Ed25519 key pair
 //! let ed25519_key_pair = Ed25519Keys::new().unwrap();
 //!
-//! // export the pem encoded spki public key.
+//! // export the pem encoded public key.
 //! let pubkey = ed25519_key_pair.public_key_to_pem().unwrap();
 //!
 //! // export the private key using sigstore encryption.
 //! let privkey = ed25519_key_pair.private_key_to_encrypted_pem(b"password").unwrap();
 //!
-//! // sign with the new key.
-//! let ed25519_signer = Ed25519Signer::from_ed25519_keys(&ed25519_key_pair).unwrap();
+//! // also, we can import a Ed25519 using functions with the prefix
+//! // `Ed25519Keys::from_`. These functions will treat the given
+//! // data as Ed25519 private key in PKCS8 format. For example:
+//! // let ed25519_key_pair_import = Ed25519Keys::from_pem(PEM_CONTENT).unwrap();
 //!
-//! let signature = ed25519_signer.sign(b"some message");
+//! // convert this Ed25519 key into an [`super::SigStoreSigner`] enum to sign some data.
+//! let ed25519_signer = ed25519_key_pair.to_sigstore_signer().unwrap();
+//!
+//! // test message to be signed
+//! let message = b"some message";
+//!
+//! // sign using
+//! let signature = ed25519_signer.sign(message).unwrap();
+//!
+//! // export the [`CosignVerificationKey`] from the [`super::SigStoreSigner`], which
+//! // is used to verify the signature.
+//! let verification_key = ed25519_signer.to_verification_key().unwrap();
+//!
+//! // verify
+//! assert!(verification_key.verify_signature(Signature::Raw(&signature),message).is_ok());
 //! ```
 
 use std::convert::TryFrom;
@@ -40,6 +65,7 @@ use std::convert::TryFrom;
 use ed25519::{pkcs8::PublicKeyBytes, KeypairBytes};
 use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use signature::Signer as _;
+use x509_parser::nom::AsBytes;
 
 use crate::{
     crypto::{CosignVerificationKey, SignatureDigestAlgorithm},
@@ -47,7 +73,7 @@ use crate::{
 };
 
 use super::{
-    kdf, KeyPair, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
+    kdf, KeyPair, SigStoreSigner, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
     SIGSTORE_PRIVATE_KEY_PEM_LABEL,
 };
 
@@ -76,6 +102,12 @@ impl Ed25519Keys {
             key_pair_bytes,
             public_key_bytes,
         })
+    }
+
+    /// Create a new `Ed25519Keys` Object from given `Ed25519Keys` Object.
+    pub fn from_ed25519key(key: &Ed25519Keys) -> Result<Self> {
+        let priv_key = key.private_key_to_der()?;
+        Ed25519Keys::from_der(priv_key.as_bytes())
     }
 
     /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encided private key.
@@ -163,6 +195,14 @@ impl Ed25519Keys {
             key_pair_bytes,
         })
     }
+
+    /// `to_sigstore_signer` will create the [`SigStoreSigner`] using
+    /// this ed25519 private key.
+    pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
+        Ok(SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(
+            self,
+        )?))
+    }
 }
 
 impl KeyPair for Ed25519Keys {
@@ -178,7 +218,6 @@ impl KeyPair for Ed25519Keys {
         Ok(self
             .public_key_bytes
             .to_public_key_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
             .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?
             .to_vec())
     }
@@ -251,6 +290,11 @@ impl Ed25519Signer {
         };
 
         Ok(Self { key_pair })
+    }
+
+    /// Return the ref to the keypair inside the signer
+    pub fn ed25519_keys(&self) -> &Ed25519Keys {
+        &self.key_pair
     }
 }
 
@@ -378,10 +422,6 @@ mod tests {
             key.to_verification_key(SignatureDigestAlgorithm::Sha256)
                 .is_ok(),
             "can not create CosignVerificationKey from EcdsaKeys via `to_verification_key`.",
-        );
-        assert!(
-            CosignVerificationKey::from_key_pair(&key, SignatureDigestAlgorithm::Sha256).is_ok(),
-            "can not create CosignVerificationKey from EcdsaKeys via `from_key_pair`.",
         );
     }
 

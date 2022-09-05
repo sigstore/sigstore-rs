@@ -13,38 +13,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Keys for Signing
-//! Here are the key pair operations for signing keys.
+//! # Keys Interface
 //!
-//! # Generate keypair and Signing Data
+//! This mod includes asymmetric key pair generation, exporting/importing,
+//! signing and verification key derivation. All the above features are
+//! given by two enums:
+//! * [`SigStoreKeyPair`]: an abstraction for asymmetric encryption key pairs.
+//! * [`SigStoreSigner`]: an abstraction for digital signing algorithms.
+//!
+//! The [`SigStoreKeyPair`] now includes the key types of the following algorithms:
+//! * [`SigStoreKeyPair::ECDSA`]: Elliptic curve digital signing algorithm
+//! * [`SigStoreKeyPair::ED25519`]: Edwards curve-25519 digital signing algorithm
+//!
+//! The [`SigStoreSigner`] now includes the following signing schemes:
+//! * [`SigStoreSigner::ECDSA_P256_SHA256_ASN1`]: ASN.1 DER-encoded ECDSA
+//! signatures using the P-256 curve and SHA-256.
+//! * [`SigStoreSigner::ECDSA_P384_SHA384_ASN1`]: ASN.1 DER-encoded ECDSA
+//! signatures using the P-384 curve and SHA-384.
+//! * [`SigStoreSigner::ED25519`]: ECDSA signature using SHA2-512
+//! as the digest function and curve edwards25519.
+//!
+//! # Simple Usages
 //!
 //! ```rust
 //! use sigstore::crypto::signing_key::SigStoreSigner;
-//! use sigstore::crypto::signing_key::KeyPair;
 //! use sigstore::crypto::signing_key::SigningScheme;
+//! use sigstore::crypto::Signature;
 //!
+//! let test_data = b"test message";
 //! // generate a key pair for ECDSA_P256_SHA256_ASN1
-//! let signer = SigStoreSigner::new(SigningScheme::ECDSA_P256_SHA256_ASN1).unwrap();
+//! let signer = SigningScheme::ECDSA_P256_SHA256_ASN1.create_signer().unwrap();
 //!
 //! // signing some message and get the message
-//! let sig = signer.sign(b"test message").unwrap();
+//! let sig = signer.sign(test_data).unwrap();
 //!
 //! // get the public key to verify
-//! let pub_key = signer.public_key_to_pem().unwrap();
+//! let verification_key = signer.to_verification_key().unwrap();
 //!
-//! // also, you can export the sigstore encrypted private key
-//! let private_key = signer.private_key_to_encrypted_pem(b"password").unwrap();
+//! // do verification
+//! let res = verification_key.verify_signature(
+//!     Signature::Raw(&sig),
+//!     test_data,
+//! );
+//!
+//! assert!(res.is_ok());
 //! ```
+//!
+//! More use cases please refer to <`https://github.com/sigstore/sigstore-rs/tree/main/examples/key_interface`>
 
 use elliptic_curve::zeroize::Zeroizing;
-use p256::NistP256;
-use p384::NistP384;
 use sha2::{Sha256, Sha384};
 
 use crate::errors::*;
 
 use self::{
-    ecdsa::{EcdsaKeys, EcdsaSigner},
+    ecdsa::{
+        ec::{EcdsaKeys, EcdsaSigner},
+        ECDSAKeys,
+    },
     ed25519::{Ed25519Keys, Ed25519Signer},
 };
 
@@ -84,6 +110,8 @@ pub trait KeyPair {
     fn public_key_to_der(&self) -> Result<Vec<u8>>;
 
     /// `private_key_to_encrypted_pem` will export the encrypted asn.1 pkcs8 private key.
+    /// This encryption follows the go-lang version in
+    /// <https://github.com/sigstore/cosign/blob/main/pkg/cosign/keys.go#L139> using nacl secretbox.
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>>;
 
     /// `private_key_to_pem` will export the PEM-encoded pkcs8 private key.
@@ -98,6 +126,100 @@ pub trait KeyPair {
         &self,
         signature_digest_algorithm: SignatureDigestAlgorithm,
     ) -> Result<CosignVerificationKey>;
+}
+
+/// Wrapper for different kinds of keys.
+pub enum SigStoreKeyPair {
+    ECDSA(ECDSAKeys),
+    ED25519(Ed25519Keys),
+    // RSA,
+}
+
+/// This macro helps to reduce duplicated code.
+macro_rules! sigstore_keypair_from {
+    ($func: ident ($($args:expr),*)) => {
+        if let Ok(keys) = ECDSAKeys::$func($($args,)*) {
+            Ok(SigStoreKeyPair::ECDSA(keys))
+        } else if let Ok(keys) = Ed25519Keys::$func($($args,)*) {
+            Ok(SigStoreKeyPair::ED25519(keys))
+        } else {
+            Err(SigstoreError::KeyParseError("SigStoreKeys".to_string()))
+        }
+    }
+}
+
+/// This macro helps to reduce duplicated code.
+macro_rules! sigstore_keypair_code {
+    ($func: ident ($($args:expr),*), $obj:ident) => {
+        match $obj {
+            SigStoreKeyPair::ECDSA(keys) => keys.as_inner().$func($($args,)*),
+            SigStoreKeyPair::ED25519(keys) => keys.$func($($args,)*),
+        }
+    }
+}
+
+impl SigStoreKeyPair {
+    /// Builds a `SigStoreKeyPair` from pkcs8 PEM-encoded private key.
+    pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
+        sigstore_keypair_from!(from_pem(pem_data))
+    }
+
+    /// Builds a `SigStoreKeyPair` from pkcs8 DER-encoded private key.
+    pub fn from_der(private_key: &[u8]) -> Result<Self> {
+        sigstore_keypair_from!(from_der(private_key))
+    }
+
+    /// Builds a `SigStoreKeyPair` from encrypted pkcs8 PEM-encoded private key.
+    pub fn from_encrypted_pem(pem_data: &[u8], password: &[u8]) -> Result<Self> {
+        sigstore_keypair_from!(from_encrypted_pem(pem_data, password))
+    }
+
+    /// `public_key_to_pem` will export the PEM-encoded public key.
+    pub fn public_key_to_pem(&self) -> Result<String> {
+        sigstore_keypair_code!(public_key_to_pem(), self)
+    }
+
+    /// `public_key_to_der` will export the asn.1 PKIX public key.
+    pub fn public_key_to_der(&self) -> Result<Vec<u8>> {
+        sigstore_keypair_code!(public_key_to_der(), self)
+    }
+
+    /// `private_key_to_encrypted_pem` will export the encrypted asn.1 pkcs8 private key.
+    /// This encryption follows the go-lang version in
+    /// <https://github.com/sigstore/cosign/blob/main/pkg/cosign/keys.go#L139> using nacl secretbox.
+    pub fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>> {
+        sigstore_keypair_code!(private_key_to_encrypted_pem(password), self)
+    }
+
+    /// `private_key_to_pem` will export the PEM-encoded pkcs8 private key.
+    pub fn private_key_to_pem(&self) -> Result<Zeroizing<String>> {
+        sigstore_keypair_code!(private_key_to_pem(), self)
+    }
+
+    /// `private_key_to_der` will export the asn.1 pkcs8 private key.
+    pub fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>> {
+        sigstore_keypair_code!(private_key_to_der(), self)
+    }
+
+    /// `to_verification_key` will derive the `CosignVerificationKey` from
+    /// the public key.
+    pub fn to_verification_key(
+        &self,
+        signature_digest_algorithm: SignatureDigestAlgorithm,
+    ) -> Result<CosignVerificationKey> {
+        sigstore_keypair_code!(to_verification_key(signature_digest_algorithm), self)
+    }
+}
+
+/// `Signer` trait is an abstraction of a specific set of asymmetric
+/// private key, hash function and (if needs) padding algorithm. This
+/// trait helps to construct the `SigStoreSigner` enum.
+pub trait Signer {
+    /// Return the ref to the keypair inside the signer
+    fn key_pair(&self) -> &dyn KeyPair;
+
+    /// `sign` will sign the given data, and return the signature.
+    fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
 }
 
 /// Different digital signature algorithms.
@@ -118,92 +240,71 @@ pub enum SigningScheme {
     ED25519,
 }
 
-pub trait Signer {
-    /// `key_pair` will return the reference to the inside `KeyPair`.
-    fn key_pair(&self) -> &dyn KeyPair;
-
-    /// `sign` will sign the given data, and return the signature.
-    fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
+impl SigningScheme {
+    /// Create a key-pair due to the given signing scheme.
+    pub fn create_signer(&self) -> Result<SigStoreSigner> {
+        Ok(match self {
+            SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(
+                EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<p256::NistP256>::new()?)?,
+            ),
+            SigningScheme::ECDSA_P384_SHA384_ASN1 => SigStoreSigner::ECDSA_P384_SHA384_ASN1(
+                EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<p384::NistP384>::new()?)?,
+            ),
+            SigningScheme::ED25519 => {
+                SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
+            }
+        })
+    }
 }
 
-/// `SigStoreSigner` is an easy-to-use interface
-/// to use for non-specific generic parameter
-/// signing.
-pub struct SigStoreSigner {
-    signer: Box<dyn Signer>,
-    signing_scheme: SigningScheme,
+#[allow(non_camel_case_types)]
+pub enum SigStoreSigner {
+    ECDSA_P256_SHA256_ASN1(EcdsaSigner<p256::NistP256, sha2::Sha256>),
+    ECDSA_P384_SHA384_ASN1(EcdsaSigner<p384::NistP384, sha2::Sha384>),
+    ED25519(Ed25519Signer),
 }
 
 impl SigStoreSigner {
-    /// Create a key-pair due to the given signing scheme
-    pub fn new(signing_scheme: SigningScheme) -> Result<Self> {
-        Ok(Self {
-            signer: match signing_scheme {
-                SigningScheme::ECDSA_P256_SHA256_ASN1 => {
-                    Box::new(EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<
-                        NistP256,
-                    >::new(
-                    )?)?)
-                }
-                SigningScheme::ECDSA_P384_SHA384_ASN1 => {
-                    Box::new(EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<
-                        NistP384,
-                    >::new(
-                    )?)?)
-                }
-                SigningScheme::ED25519 => {
-                    Box::new(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
-                }
-            },
-            signing_scheme,
-        })
+    /// Return the inner `Signer` of the enum. This function
+    /// is useful in the inner interface conversion.
+    fn as_inner(&self) -> &dyn Signer {
+        match self {
+            SigStoreSigner::ECDSA_P256_SHA256_ASN1(inner) => inner,
+            SigStoreSigner::ECDSA_P384_SHA384_ASN1(inner) => inner,
+            SigStoreSigner::ED25519(inner) => inner,
+        }
     }
 
-    /// `sign` will sign the given message, output
-    /// the asn.1 encoded signature.
+    /// `sign` will sign the given data, and return the signature.
     pub fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        self.signer.sign(msg)
+        self.as_inner().sign(msg)
     }
 
-    /// `public_key_to_pem` will export the PEM-encoded public key.
-    pub fn public_key_to_pem(&self) -> Result<String> {
-        self.signer.key_pair().public_key_to_pem()
-    }
-
-    /// `public_key_to_der` will export the asn.1 PKIX public key.
-    pub fn public_key_to_der(&self) -> Result<Vec<u8>> {
-        self.signer.key_pair().public_key_to_der()
-    }
-
-    /// `private_key_to_encrypted_pem` will export the encrypted asn.1 pkcs8 private key.
-    pub fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>> {
-        self.signer
-            .key_pair()
-            .private_key_to_encrypted_pem(password)
-    }
-
-    /// `private_key_to_pem` will export the PEM-encoded pkcs8 private key.
-    pub fn private_key_to_pem(&self) -> Result<Zeroizing<String>> {
-        self.signer.key_pair().private_key_to_pem()
-    }
-
-    /// `private_key_to_der` will export the asn.1 pkcs8 private key.
-    pub fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>> {
-        self.signer.key_pair().private_key_to_der()
-    }
-
-    /// `to_verification_key` will derive the `CosignVerificationKey` from
-    /// the `SigStoreSigner`.
+    /// `to_verification_key` will derive the verification_key for the `SigStoreSigner`.
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
-        let digest_scheme = match self.signing_scheme {
-            SigningScheme::ECDSA_P256_SHA256_ASN1 => SignatureDigestAlgorithm::Sha256,
-            SigningScheme::ECDSA_P384_SHA384_ASN1 => SignatureDigestAlgorithm::Sha384,
-            // Here the wildcard helps to handle those do not need a
-            // digest scheme parameter.
+        let signature_digest_algorithm = match self {
+            SigStoreSigner::ECDSA_P256_SHA256_ASN1(_) => SignatureDigestAlgorithm::Sha256,
+            SigStoreSigner::ECDSA_P384_SHA384_ASN1(_) => SignatureDigestAlgorithm::Sha384,
             _ => SignatureDigestAlgorithm::Sha256,
         };
+        self.as_inner()
+            .key_pair()
+            .to_verification_key(signature_digest_algorithm)
+    }
 
-        self.signer.key_pair().to_verification_key(digest_scheme)
+    /// `key_pair` will return the reference of the `SigStoreKeyPair` enum due to `SigStoreSigner`.
+    pub fn to_sigstore_keypair(&self) -> Result<SigStoreKeyPair> {
+        Ok(match self {
+            SigStoreSigner::ECDSA_P256_SHA256_ASN1(inner) => {
+                SigStoreKeyPair::ECDSA(inner.ecdsa_keys().to_wrapped_ecdsa_keys()?)
+            }
+            SigStoreSigner::ECDSA_P384_SHA384_ASN1(inner) => {
+                SigStoreKeyPair::ECDSA(inner.ecdsa_keys().to_wrapped_ecdsa_keys()?)
+            }
+            SigStoreSigner::ED25519(inner) => {
+                SigStoreKeyPair::ED25519(Ed25519Keys::from_ed25519key(inner.ed25519_keys())?)
+            }
+        })
     }
 }
 
@@ -211,10 +312,7 @@ impl SigStoreSigner {
 mod tests {
     use rstest::rstest;
 
-    use crate::crypto::{
-        signing_key::{SigStoreSigner, SigningScheme},
-        CosignVerificationKey, Signature,
-    };
+    use crate::crypto::{signing_key::SigningScheme, CosignVerificationKey, Signature};
 
     /// This is a test MESSAGE used to be signed by all signing test.
     pub const MESSAGE: &str = r#"{
@@ -242,11 +340,14 @@ mod tests {
     #[case(SigningScheme::ECDSA_P384_SHA384_ASN1)]
     #[case(SigningScheme::ED25519)]
     fn sigstore_signing(#[case] signing_scheme: SigningScheme) {
-        let signer = SigStoreSigner::new(signing_scheme).expect(&format!(
+        let signer = signing_scheme.create_signer().expect(&format!(
             "create SigStoreSigner with {:?} failed",
             signing_scheme
         ));
-        let _pubkey = signer
+        let key_pair = signer
+            .to_sigstore_keypair()
+            .expect("convert SigStoreSigner to SigStoreKeypair failed.");
+        let _pubkey = key_pair
             .public_key_to_pem()
             .expect("export public key in PEM format failed.");
         let sig = signer

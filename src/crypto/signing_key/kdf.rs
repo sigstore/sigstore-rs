@@ -14,6 +14,10 @@
 // limitations under the License.
 
 //! Key Derivation Function for Sigstore
+//!
+//! This is the Rust version of KDF used in Sigstore.
+//! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
+//! for golang version.
 
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
