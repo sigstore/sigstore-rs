@@ -13,19 +13,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # ECDSA Key Generation and Signing
-//! This is a wrapper for Rust Crypto
+//! # ECDSA Keys in Generic Types
 //!
-//! # Generate EC Key Pair and Export Public & Private Key
+//! This is a wrapper for Rust Crypto. Basically it
+//! is implemented using generic types and traits. Generic types
+//! may let the user to manually include concrete crates like
+//! `p256`, `p384`, `digest`, etc. This is unfriendly to users.
+//! To make it easier for an user to use, there are two wrappers:
+//! * The [`EcdsaKeys`] generic struct is wrapped in an enum named [`ECDSAKeys`].
+//! * The [`EcdsaSigner`] generic struct is wrapped in an enum named [`super::SigStoreSigner`].
 //!
+//! The [`ECDSAKeys`] has two enums due to their underlying elliptic curves, s.t.
+//! * `P256`
+//! * `P384`
+//! To have an uniform interface for all kinds of asymmetric keys, [`ECDSAKeys`]
+//! is also wrapped in [`super::super::SigStoreKeyPair`] enum.
+//!
+//! The [`super::SigStoreSigner`] enum includes two enums for [`EcdsaSigner`]:
+//! * `ECDSA_P256_SHA256_ASN1`
+//! * `ECDSA_P384_SHA384_ASN1`
+//!
+//! # EC Key Pair Operations
+//!
+//! *Not recommend to directly use this mod. Use [`ECDSAKeys`], [`super::super::SigStoreKeyPair`] for
+//! key pair and [`super::SigStoreSigner`] for signing instead*
+//!  
 //! When to generate an EC key pair, a specific elliptic curve
 //! should be chosen. Supported elliptic curves are listed
-//! https://github.com/RustCrypto/elliptic-curves#crates.
+//! <https://github.com/RustCrypto/elliptic-curves#crates>.
 //!
-//! For example, use `P256`
+//! For example, use `P256` as elliptic curve, and `ECDSA_P256_SHA256_ASN1` as
+//! signing scheme
 //!
 //! ```rust
-//! use sigstore::crypto::signing_key::{ecdsa::{EcdsaKeys,EcdsaSigner}, KeyPair, Signer};
+//! use sigstore::crypto::signing_key::{ecdsa::ec::{EcdsaKeys,EcdsaSigner}, KeyPair, Signer};
 //!
 //! let ec_key_pair = EcdsaKeys::<p256::NistP256>::new().unwrap();
 //!
@@ -68,21 +89,24 @@ use signature::DigestSigner;
 use x509_parser::nom::AsBytes;
 
 use crate::{
-    crypto::{CosignVerificationKey, SignatureDigestAlgorithm},
+    crypto::{
+        signing_key::{
+            kdf, KeyPair, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
+            SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+        },
+        CosignVerificationKey, SignatureDigestAlgorithm,
+    },
     errors::*,
 };
 
-use super::{
-    kdf, KeyPair, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
-    SIGSTORE_PRIVATE_KEY_PEM_LABEL,
-};
+use super::ECDSAKeys;
 
 /// The generic parameter for `C` can be chosen from the following:
 /// * `p256::NistP256`: `P-256`, also known as `secp256r1` or `prime256v1`.
 /// * `p384::NistP384`: `P-384`, also known as `secp384r1`.
 ///
 /// More elliptic curves, please refer to
-/// https://github.com/RustCrypto/elliptic-curves#crates.
+/// <https://github.com/RustCrypto/elliptic-curves#crates>.
 #[derive(Clone)]
 pub struct EcdsaKeys<C>
 where
@@ -94,13 +118,13 @@ where
 
 impl<C> EcdsaKeys<C>
 where
-    C: Curve + AssociatedOid + ProjectiveArithmetic,
+    C: Curve + AssociatedOid + ProjectiveArithmetic + PrimeCurve,
     AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
     FieldSize<C>: ModulusSize,
 {
     /// Create a new `EcdsaKeys` Object, the generic parameter indicates
     /// the elliptic curve. Please refer to
-    /// https://github.com/RustCrypto/elliptic-curves#crates for curves.
+    /// <https://github.com/RustCrypto/elliptic-curves#crates> for curves.
     /// The secret key (private key) will be randomly
     /// generated.
     pub fn new() -> Result<Self> {
@@ -176,6 +200,12 @@ where
             ec_seckey,
             public_key,
         })
+    }
+
+    /// Convert the [`EcdsaKeys`] into [`ECDSAKeys`].
+    pub fn to_wrapped_ecdsa_keys(&self) -> Result<ECDSAKeys> {
+        let priv_key = self.private_key_to_der()?;
+        ECDSAKeys::from_der((*priv_key).as_bytes())
     }
 }
 
@@ -253,12 +283,12 @@ where
 /// * `p384::NistP384`: `P-384`, also known as `secp384r1`.
 ///
 /// More elliptic curves, please refer to
-/// https://github.com/RustCrypto/elliptic-curves#crates.
+/// <https://github.com/RustCrypto/elliptic-curves#crates>.
 ///
 /// And the parameter `D` indicates the digest algorithm.
 ///
 /// For concrete digest algorithms, please refer to
-/// https://github.com/RustCrypto/hashes#supported-algorithms.
+/// <https://github.com/RustCrypto/hashes#supported-algorithms>.
 #[derive(Clone)]
 pub struct EcdsaSigner<C, D>
 where
@@ -299,6 +329,11 @@ where
             ecdsa_keys: ecdsa_keys.clone(),
             _marker: PhantomData,
         })
+    }
+
+    /// Return the ref to the keypair inside the signer
+    pub fn ecdsa_keys(&self) -> &EcdsaKeys<C> {
+        &self.ecdsa_keys
     }
 }
 
@@ -455,10 +490,6 @@ mod tests {
             key.to_verification_key(SignatureDigestAlgorithm::Sha256)
                 .is_ok(),
             "can not create CosignVerificationKey from EcdsaKeys via `to_verification_key`."
-        );
-        assert!(
-            CosignVerificationKey::from_key_pair(&key, SignatureDigestAlgorithm::Sha256).is_ok(),
-            "can not create CosignVerificationKey from EcdsaKeys via `from_key_pair`."
         );
     }
 
