@@ -68,7 +68,7 @@ use signature::Signer as _;
 use x509_parser::nom::AsBytes;
 
 use crate::{
-    crypto::{CosignVerificationKey, SignatureDigestAlgorithm},
+    crypto::{verification_key::CosignVerificationKey, SigningScheme},
     errors::*,
 };
 
@@ -258,10 +258,10 @@ impl KeyPair for Ed25519Keys {
     /// Derive the relative [`CosignVerificationKey`].
     fn to_verification_key(
         &self,
-        _signature_digest_algorithm: SignatureDigestAlgorithm,
+        _signature_digest_algorithm: &SigningScheme,
     ) -> Result<CosignVerificationKey> {
         let der = self.public_key_to_der()?;
-        let res = CosignVerificationKey::from_der(&der, &ring::signature::ED25519)?;
+        let res = CosignVerificationKey::from_der(&der, &SigningScheme::ED25519)?;
         Ok(res)
     }
 }
@@ -315,11 +315,10 @@ impl Signer for Ed25519Signer {
 mod tests {
     use std::fs;
 
-    use ring::signature::ED25519;
-
     use crate::crypto::{
         signing_key::{tests::MESSAGE, KeyPair, Signer},
-        CosignVerificationKey, Signature, SignatureDigestAlgorithm,
+        verification_key::CosignVerificationKey,
+        Signature, SigningScheme,
     };
 
     use super::{Ed25519Keys, Ed25519Signer};
@@ -400,15 +399,14 @@ mod tests {
             .public_key_to_pem()
             .expect("export private key to PEM format failed.");
         assert!(
-            CosignVerificationKey::from_pem(pubkey.as_bytes(), SignatureDigestAlgorithm::Sha256)
-                .is_ok(),
+            CosignVerificationKey::from_pem(pubkey.as_bytes(), &SigningScheme::ED25519).is_ok(),
             "can not convert public key in PEM format into CosignVerificationKey.",
         );
         let pubkey = key
             .public_key_to_der()
             .expect("export private key to DER format failed.");
         assert!(
-            CosignVerificationKey::from_der(&pubkey, &ED25519).is_ok(),
+            CosignVerificationKey::from_der(&pubkey, &SigningScheme::ED25519).is_ok(),
             "can not create CosignVerificationKey from der bytes."
         );
     }
@@ -419,8 +417,7 @@ mod tests {
     fn ecdsa_derive_verification_key() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
         assert!(
-            key.to_verification_key(SignatureDigestAlgorithm::Sha256)
-                .is_ok(),
+            key.to_verification_key(&SigningScheme::ED25519).is_ok(),
             "can not create CosignVerificationKey from EcdsaKeys via `to_verification_key`.",
         );
     }
@@ -442,7 +439,7 @@ mod tests {
             .sign(MESSAGE.as_bytes())
             .expect("signing message failed.");
         let verification_key =
-            CosignVerificationKey::from_pem(pubkey.as_bytes(), SignatureDigestAlgorithm::Sha256)
+            CosignVerificationKey::from_pem(pubkey.as_bytes(), &SigningScheme::ED25519)
                 .expect("convert CosignVerificationKey from public key failed.");
         let signature = Signature::Raw(&sig);
         assert!(

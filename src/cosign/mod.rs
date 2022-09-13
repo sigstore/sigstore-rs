@@ -150,7 +150,7 @@ mod tests {
         AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
     };
     use crate::crypto::certificate_pool::CertificatePool;
-    use crate::crypto::{CosignVerificationKey, SignatureDigestAlgorithm};
+    use crate::crypto::{CosignVerificationKey, SigningScheme};
     use crate::simple_signing::Optional;
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
@@ -201,11 +201,8 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     }
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
-        CosignVerificationKey::from_pem(
-            REKOR_PUB_KEY.as_bytes(),
-            SignatureDigestAlgorithm::default(),
-        )
-        .expect("Cannot create test REKOR_PUB_KEY")
+        CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
+            .expect("Cannot create test REKOR_PUB_KEY")
     }
 
     #[test]

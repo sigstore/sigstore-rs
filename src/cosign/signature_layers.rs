@@ -31,9 +31,7 @@ use super::constants::{
 };
 use crate::crypto::certificate_pool::CertificatePool;
 use crate::{
-    crypto::{
-        self, CosignVerificationKey, Signature, SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
-    },
+    crypto::{self, CosignVerificationKey, Signature, SigningScheme},
     errors::{Result, SigstoreError},
     simple_signing::SimpleSigning,
 };
@@ -366,10 +364,8 @@ impl CertificateSignature {
         crypto::certificate::is_trusted(&cert, integrated_time)?;
 
         let subject = CertificateSubject::from_certificate(&cert)?;
-        let verification_key = CosignVerificationKey::from_der(
-            cert.public_key().raw,
-            SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM,
-        )?;
+        let verification_key =
+            CosignVerificationKey::from_der(cert.public_key().raw, &SigningScheme::default())?;
 
         let issuer = get_cert_extension_by_oid(&cert, SIGSTORE_ISSUER_OID, "Issuer")?;
 
@@ -464,7 +460,6 @@ pub(crate) mod tests {
     use std::convert::TryFrom;
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
-    use crate::crypto::SignatureDigestAlgorithm;
 
     pub(crate) fn build_correct_signature_layer_without_bundle(
     ) -> (SignatureLayer, CosignVerificationKey) {
@@ -474,11 +469,9 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
         let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
-        let verification_key = CosignVerificationKey::from_pem(
-            public_key.as_bytes(),
-            SignatureDigestAlgorithm::default(),
-        )
-        .expect("Cannot create CosignVerificationKey");
+        let verification_key =
+            CosignVerificationKey::from_pem(public_key.as_bytes(), &SigningScheme::default())
+                .expect("Cannot create CosignVerificationKey");
         let ss_value = json!({
             "critical": {
                 "identity": {
@@ -576,7 +569,7 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
 JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 -----END PUBLIC KEY-----"#
                 .as_bytes(),
-            SignatureDigestAlgorithm::default(),
+            &SigningScheme::default(),
         )
         .expect("Cannot create CosignVerificationKey");
 
@@ -789,7 +782,7 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETJP9cqpUQsn2ggmJniWGjHdlsHzD
 JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 -----END PUBLIC KEY-----"#
                 .as_bytes(),
-            SignatureDigestAlgorithm::default(),
+            &SigningScheme::default(),
         )
         .expect("Cannot create CosignVerificationKey");
         assert!(!sl.is_signed_by_key(&verification_key));

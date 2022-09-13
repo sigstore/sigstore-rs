@@ -70,7 +70,7 @@ mod tests {
     use serde_json::json;
 
     use crate::cosign::tests::get_rekor_public_key;
-    use crate::crypto::SignatureDigestAlgorithm;
+    use crate::crypto::SigningScheme;
 
     fn build_correct_bundle() -> String {
         let bundle_json = json!({
@@ -101,11 +101,9 @@ mod tests {
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
-        let not_rekor_pub_key = CosignVerificationKey::from_pem(
-            public_key.as_bytes(),
-            SignatureDigestAlgorithm::default(),
-        )
-        .expect("Cannot create CosignVerificationKey");
+        let not_rekor_pub_key =
+            CosignVerificationKey::from_pem(public_key.as_bytes(), &SigningScheme::default())
+                .expect("Cannot create CosignVerificationKey");
 
         let bundle_json = build_correct_bundle();
         let bundle = Bundle::new_verified(&bundle_json, &not_rekor_pub_key);

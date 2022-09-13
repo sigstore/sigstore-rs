@@ -19,7 +19,7 @@ use sigstore::cosign::verification_constraint::{
     VerificationConstraintVec,
 };
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
-use sigstore::crypto::SignatureDigestAlgorithm;
+use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
@@ -47,9 +47,9 @@ struct Cli {
     #[clap(short, long, required(false))]
     key: Option<String>,
 
-    /// Digest algorithm to use when processing a signature
-    #[clap(long, default_value = "sha256")]
-    signature_digest_algorithm: String,
+    /// Signing scheme when signing and verifying
+    #[clap(long, required(false))]
+    signing_scheme: Option<String>,
 
     /// Fetch Rekor and Fulcio data from Sigstore's TUF repository"
     #[clap(long)]
@@ -149,11 +149,18 @@ async fn run_app(
     }
     if let Some(path_to_key) = cli.key.as_ref() {
         let key = fs::read(path_to_key).map_err(|e| anyhow!("Cannot read key: {:?}", e))?;
-        let signature_digest_algorithm =
-            SignatureDigestAlgorithm::try_from(cli.signature_digest_algorithm.as_str())
-                .map_err(anyhow::Error::msg)?;
-        let verifier = PublicKeyVerifier::new(&key, signature_digest_algorithm)
-            .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?;
+
+        let verifier = match &cli.signing_scheme {
+            Some(scheme) => {
+                let signing_scheme =
+                    SigningScheme::try_from(&scheme[..]).map_err(anyhow::Error::msg)?;
+                PublicKeyVerifier::new(&key, &signing_scheme)
+                    .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?
+            }
+            None => PublicKeyVerifier::try_from(&key)
+                .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?,
+        };
+
         verification_constraints.push(Box::new(verifier));
     }
 

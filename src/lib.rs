@@ -68,7 +68,7 @@
 //!     PublicKeyVerifier,
 //!     VerificationConstraintVec,
 //! };
-//! use crate::sigstore::crypto::SignatureDigestAlgorithm;
+//! use crate::sigstore::crypto::SigningScheme;
 //! use crate::sigstore::errors::SigstoreError;
 //! use sigstore::errors::SigstoreVerifyConstraintsError;
 //!
@@ -117,7 +117,7 @@
 //!     .expect("Cannot read contents of cosign public key");
 //!   let pub_key_verifier = PublicKeyVerifier::new(
 //!     &verification_key,
-//!     SignatureDigestAlgorithm::default(),
+//!     &SigningScheme::default(),
 //!   ).expect("Could not create verifier");
 //!
 //!   let verification_constraints: VerificationConstraintVec = vec![
