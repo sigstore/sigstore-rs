@@ -71,7 +71,7 @@ fn main() -> Result<()> {
             inner.to_sigstore_signer()?;
             println!("Converted SigStoreKeyPair to SigStoreSigner.");
         }
-        SigStoreKeyPair::ED25519(_) => bail!("Wrong key pair type."),
+        _ => bail!("Wrong key pair type."),
     }
 
     Ok(())

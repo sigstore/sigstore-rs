@@ -22,10 +22,17 @@
 //! * [`SigStoreSigner`]: an abstraction for digital signing algorithms.
 //!
 //! The [`SigStoreKeyPair`] now includes the key types of the following algorithms:
-//! * [`SigStoreKeyPair::ECDSA`]: Elliptic curve digital signing algorithm
-//! * [`SigStoreKeyPair::ED25519`]: Edwards curve-25519 digital signing algorithm
+//! * [`SigStoreKeyPair::RSA`]: RSA key pair
+//! * [`SigStoreKeyPair::ECDSA`]: Elliptic curve key pair
+//! * [`SigStoreKeyPair::ED25519`]: Edwards curve-25519 key pair
 //!
 //! The [`SigStoreSigner`] now includes the following signing schemes:
+//! * [`SigStoreSigner::RSA_PSS_SHA256`]: RSA signatures using PSS padding and SHA-256.
+//! * [`SigStoreSigner::RSA_PSS_SHA384`]: RSA signatures using PSS padding and SHA-384.
+//! * [`SigStoreSigner::RSA_PSS_SHA512`]: RSA signatures using PSS padding and SHA-512.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA256`]: RSA signatures using PKCS#1v1.5 padding and SHA-256.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA384`]: RSA signatures using PKCS#1v1.5 padding and SHA-384.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA512`]: RSA signatures using PKCS#1v1.5 padding and SHA-512.
 //! * [`SigStoreSigner::ECDSA_P256_SHA256_ASN1`]: ASN.1 DER-encoded ECDSA
 //! signatures using the P-256 curve and SHA-256.
 //! * [`SigStoreSigner::ECDSA_P384_SHA384_ASN1`]: ASN.1 DER-encoded ECDSA
@@ -68,6 +75,7 @@ use crate::errors::*;
 use self::{
     ecdsa::{ec::EcdsaSigner, ECDSAKeys},
     ed25519::{Ed25519Keys, Ed25519Signer},
+    rsa::{keypair::RSAKeys, RSASigner},
 };
 
 use super::{verification_key::CosignVerificationKey, SigningScheme};
@@ -88,6 +96,9 @@ pub const SIGSTORE_PRIVATE_KEY_PEM_LABEL: &str = "ENCRYPTED SIGSTORE PRIVATE KEY
 
 /// The label for pem of private keys.
 pub const PRIVATE_KEY_PEM_LABEL: &str = "PRIVATE KEY";
+
+/// The label for pem of RSA private keys.
+pub const RSA_PRIVATE_KEY_PEM_LABEL: &str = "RSA PRIVATE KEY";
 
 /// Every signing scheme must implement this interface.
 /// All private export methods using the wrapper `Zeroizing`.
@@ -125,7 +136,7 @@ pub trait KeyPair {
 pub enum SigStoreKeyPair {
     ECDSA(ECDSAKeys),
     ED25519(Ed25519Keys),
-    // RSA,
+    RSA(RSAKeys),
 }
 
 /// This macro helps to reduce duplicated code.
@@ -147,6 +158,7 @@ macro_rules! sigstore_keypair_code {
         match $obj {
             SigStoreKeyPair::ECDSA(keys) => keys.as_inner().$func($($args,)*),
             SigStoreKeyPair::ED25519(keys) => keys.$func($($args,)*),
+            SigStoreKeyPair::RSA(keys) => keys.$func($($args,)*),
         }
     }
 }
@@ -217,6 +229,12 @@ pub trait Signer {
 
 #[allow(non_camel_case_types)]
 pub enum SigStoreSigner {
+    RSA_PSS_SHA256(RSASigner),
+    RSA_PSS_SHA384(RSASigner),
+    RSA_PSS_SHA512(RSASigner),
+    RSA_PKCS1_SHA256(RSASigner),
+    RSA_PKCS1_SHA384(RSASigner),
+    RSA_PKCS1_SHA512(RSASigner),
     ECDSA_P256_SHA256_ASN1(EcdsaSigner<p256::NistP256, sha2::Sha256>),
     ECDSA_P384_SHA384_ASN1(EcdsaSigner<p384::NistP384, sha2::Sha384>),
     ED25519(Ed25519Signer),
@@ -230,6 +248,12 @@ impl SigStoreSigner {
             SigStoreSigner::ECDSA_P256_SHA256_ASN1(inner) => inner,
             SigStoreSigner::ECDSA_P384_SHA384_ASN1(inner) => inner,
             SigStoreSigner::ED25519(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA256(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA384(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA512(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA256(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA384(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA512(inner) => inner,
         }
     }
 
@@ -244,6 +268,12 @@ impl SigStoreSigner {
             SigStoreSigner::ECDSA_P256_SHA256_ASN1(_) => SigningScheme::ECDSA_P256_SHA256_ASN1,
             SigStoreSigner::ECDSA_P384_SHA384_ASN1(_) => SigningScheme::ECDSA_P384_SHA384_ASN1,
             SigStoreSigner::ED25519(_) => SigningScheme::ED25519,
+            SigStoreSigner::RSA_PSS_SHA256(_) => SigningScheme::RSA_PSS_SHA256(0),
+            SigStoreSigner::RSA_PSS_SHA384(_) => SigningScheme::RSA_PSS_SHA384(0),
+            SigStoreSigner::RSA_PSS_SHA512(_) => SigningScheme::RSA_PSS_SHA512(0),
+            SigStoreSigner::RSA_PKCS1_SHA256(_) => SigningScheme::RSA_PKCS1_SHA256(0),
+            SigStoreSigner::RSA_PKCS1_SHA384(_) => SigningScheme::RSA_PKCS1_SHA384(0),
+            SigStoreSigner::RSA_PKCS1_SHA512(_) => SigningScheme::RSA_PKCS1_SHA512(0),
         };
         self.as_inner()
             .key_pair()
@@ -261,6 +291,18 @@ impl SigStoreSigner {
             }
             SigStoreSigner::ED25519(inner) => {
                 SigStoreKeyPair::ED25519(Ed25519Keys::from_ed25519key(inner.ed25519_keys())?)
+            }
+            SigStoreSigner::RSA_PSS_SHA256(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PSS_SHA384(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PSS_SHA512(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PKCS1_SHA256(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
+            }
+            SigStoreSigner::RSA_PKCS1_SHA384(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
+            }
+            SigStoreSigner::RSA_PKCS1_SHA512(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
             }
         })
     }

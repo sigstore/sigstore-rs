@@ -28,7 +28,7 @@ picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509",
 regex = "1.5.5"
 serde_json = "1.0.79"
 serde = { version = "1.0.136", features = ["derive"] }
-sha2 = "0.10.2"
+sha2 = { version = "0.10.6", features = ["oid"] }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tough = { version = "0.12", features = [ "http" ] }
@@ -48,6 +48,8 @@ digest = "0.10.3"
 signature = { version = "1.5.0", features = [ "digest-preview" ] }
 ed25519 = { version = "1", features = [ "alloc" ] }
 ed25519-dalek-fiat = "0.1.0"
+rsa = "0.7.0-rc.1"
+pkcs1 = "0.4.0"
 
 [dev-dependencies]
 anyhow = "1.0.54"

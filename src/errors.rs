@@ -186,4 +186,10 @@ pub enum SigstoreError {
 
     #[error("Failed to parse the key: {0}")]
     KeyParseError(String),
+
+    #[error(transparent)]
+    RSAError(#[from] rsa::errors::Error),
+
+    #[error(transparent)]
+    PKCS1Error(#[from] pkcs1::Error),
 }
