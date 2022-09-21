@@ -1,25 +1,24 @@
+pub mod oauth;
+
 use crate::crypto::signing_key::{SigStoreSigner, SigningScheme};
 use crate::errors::{Result, SigstoreError};
+use crate::fulcio::oauth::OauthTokenProvider;
 use openidconnect::core::CoreIdToken;
-use openidconnect::reqwest::async_http_client;
 use reqwest::header::HeaderName;
 use reqwest::Body;
 use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{Debug, Display, Formatter, Write};
-use std::io::Read;
-use std::str::from_utf8;
+use std::fmt::{Debug, Display, Formatter};
 use url::Url;
-use x509_parser::nom::AsBytes;
 
 /// Default public Fulcio server root.
-pub const FULCIO_ROOT: &'static str = "https://fulcio.sigstore.dev/";
+pub const FULCIO_ROOT: &str = "https://fulcio.sigstore.dev/";
 
 /// Path within Fulcio to obtain a signing certificate.
 pub const SIGNING_CERT_PATH: &str = "api/v1/signingCert";
 
-const CONTENT_TYPE: HeaderName = HeaderName::from_static("content-type");
+const CONTENT_TYPE_HEADER_NAME: HeaderName = HeaderName::from_static("content-type");
 
 /// Fulcio certificate signing request
 ///
@@ -64,7 +63,8 @@ impl Serialize for PublicKey {
     }
 }
 
-pub struct FulcioCert(pub String);
+/// The PEM-encoded certificate chain returned by Fulcio.
+pub struct FulcioCert(String);
 
 impl AsRef<[u8]> for FulcioCert {
     fn as_ref(&self) -> &[u8] {
@@ -78,67 +78,75 @@ impl Display for FulcioCert {
     }
 }
 
-/// Client for creating and holding ephemeral key pairs, and easily
-/// getting a Fulcio-signed certificate chain.
-pub struct FulcioClient<'c> {
-    root_url: Url,
-    token: &'c CoreIdToken,
-    challenge: &'c str,
-    signer: SigStoreSigner,
-    signing_scheme: SigningScheme,
+/// Provider for Fulcio token.
+#[allow(clippy::large_enum_variant)]
+pub enum TokenProvider {
+    Static((CoreIdToken, String)),
+    Oauth(OauthTokenProvider),
 }
 
-impl<'c> FulcioClient<'c> {
+impl TokenProvider {
+    /// Retrieve a token and the challenge-to-sign from the provider.
+    pub async fn get_token(&self) -> Result<(CoreIdToken, String)> {
+        match self {
+            TokenProvider::Static(inner) => Ok(inner.clone()),
+            TokenProvider::Oauth(auth) => auth.get_token().await,
+        }
+    }
+}
+
+/// Client for creating and holding ephemeral key pairs, and easily
+/// getting a Fulcio-signed certificate chain.
+pub struct FulcioClient {
+    root_url: Url,
+    token_provider: TokenProvider,
+}
+
+impl FulcioClient {
     /// Create a new Fulcio client.
     ///
     /// * root_url: The root Fulcio server URL.
-    /// * token: The id_token JWT authenticating to Fulcio
-    /// * challenge: The cleartext challenge to sign to prove key ownership to Fulcio. Currently the user's email address.
-    /// * signing_scheme: The signing scheme to use.
+    /// * token_provider: Provider capable of providing a CoreIdToken and the challenge to sign.
     ///
-    /// Returns either a configured Fulcio client or an error.
-    pub fn new(
-        root_url: Url,
-        token: &'c CoreIdToken,
-        challenge: &'c str,
-        signing_scheme: SigningScheme,
-    ) -> Result<Self> {
-        let mut signer = signing_scheme.create_signer().unwrap();
-
-        Ok(Self {
+    /// Returns a configured Fulcio client.
+    pub fn new(root_url: Url, token_provider: TokenProvider) -> Self {
+        Self {
             root_url,
-            token,
-            challenge,
-            signer,
-            signing_scheme,
-        })
+            token_provider,
+        }
     }
 
     /// Request a certificate from Fulcio
     ///
+    /// * signing_scheme: The signing scheme to use.
+    ///
     /// Returns a tuple of the appropriately-configured sigstore signer and the Fulcio-issued certificate chain.
-    pub async fn request_cert(mut self) -> Result<(SigStoreSigner, FulcioCert)> {
-        let signature = self.signer.sign(self.challenge.as_bytes()).unwrap();
+    pub async fn request_cert(
+        self,
+        signing_scheme: SigningScheme,
+    ) -> Result<(SigStoreSigner, FulcioCert)> {
+        let (token, challenge) = self.token_provider.get_token().await?;
+
+        let signer = signing_scheme.create_signer()?;
+        let signature = signer.sign(challenge.as_bytes())?;
         let signature = base64::encode(signature);
 
-        let key_pair = self.signer.to_sigstore_keypair().unwrap();
-        let public_key = key_pair.public_key_to_der().unwrap();
+        let key_pair = signer.to_sigstore_keypair()?;
+        let public_key = key_pair.public_key_to_der()?;
         let public_key = base64::encode(public_key);
 
         let csr = Csr {
-            public_key: Some(PublicKey(public_key, self.signing_scheme)),
+            public_key: Some(PublicKey(public_key, signing_scheme)),
             signed_email_address: Some(signature),
         };
 
-        let csr: Body = csr
-            .try_into()
-            .map_err(|err| SigstoreError::SerdeJsonError(err))?;
+        let csr: Body = csr.try_into()?;
 
         let client = reqwest::Client::new();
         let response = client
             .post(self.root_url.join(SIGNING_CERT_PATH)?)
-            .header(CONTENT_TYPE, "application/json")
-            .bearer_auth(self.token.to_string())
+            .header(CONTENT_TYPE_HEADER_NAME, "application/json")
+            .bearer_auth(token.to_string())
             .body(csr)
             .send()
             .await
@@ -149,6 +157,6 @@ impl<'c> FulcioClient<'c> {
             .await
             .map_err(|_| SigstoreError::SigstoreFulcioCertificatesNotProvidedError)?;
 
-        Ok((self.signer, FulcioCert(cert)))
+        Ok((signer, FulcioCert(cert)))
     }
 }

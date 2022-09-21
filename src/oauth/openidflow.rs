@@ -84,13 +84,16 @@ use crate::errors::{Result, SigstoreError};
 use tracing::error;
 
 use openidconnect::core::{
-    CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata,
-    CoreResponseType,
+    CoreAuthDisplay, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier,
+    CoreJsonWebKey, CoreJsonWebKeyType, CoreJsonWebKeyUse, CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm, CoreProviderMetadata, CoreResponseType,
 };
 use openidconnect::reqwest::{async_http_client, http_client};
 use openidconnect::{
-    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+    AdditionalProviderMetadata, AuthenticationFlow, AuthorizationCode, ClaimName, ClaimType,
+    ClientAuthMethod, ClientId, ClientSecret, CsrfToken, GrantType, IssuerUrl,
+    JweKeyManagementAlgorithm, Nonce, PkceCodeChallenge, PkceCodeVerifier, ProviderMetadata,
+    RedirectUrl, ResponseMode, ResponseType, Scope, SubjectIdentifierType,
 };
 
 use std::io::{BufRead, BufReader, Write};
@@ -129,17 +132,42 @@ impl OpenIDAuthorize {
             redirect_url: redirect_url.to_string(),
         }
     }
-    pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
+
+    fn auth_url_internal<A, CA, CN, CT, G, JK, RM, RT, S>(
+        &self,
+        provider_metadata: ProviderMetadata<
+            A,
+            CoreAuthDisplay,
+            CA,
+            CN,
+            CT,
+            G,
+            CoreJweContentEncryptionAlgorithm,
+            JK,
+            CoreJwsSigningAlgorithm,
+            CoreJsonWebKeyType,
+            CoreJsonWebKeyUse,
+            CoreJsonWebKey,
+            RM,
+            RT,
+            S,
+        >,
+    ) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)>
+    where
+        A: AdditionalProviderMetadata,
+        CA: ClientAuthMethod,
+        CN: ClaimName,
+        CT: ClaimType,
+        G: GrantType,
+        JK: JweKeyManagementAlgorithm,
+        RM: ResponseMode,
+        RT: ResponseType,
+        S: SubjectIdentifierType,
+    {
         let client_id = ClientId::new(self.oidc_cliend_id.to_owned());
         let client_secret = ClientSecret::new(self.oidc_client_secret.to_owned());
-        let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-        let provider_metadata =
-            CoreProviderMetadata::discover(&issuer, http_client).map_err(|err| {
-                error!("Error is: {:?}", err);
-                SigstoreError::ClaimsVerificationError
-            })?;
 
         let client =
             CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
@@ -159,32 +187,26 @@ impl OpenIDAuthorize {
         Ok((authorize_url, client, nonce, pkce_verifier))
     }
 
-    pub async fn auth_url_async(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
-        let client_id = ClientId::new(self.oidc_cliend_id.to_owned());
-        let client_secret = ClientSecret::new(self.oidc_client_secret.to_owned());
+    pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
         let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
-        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+        let provider_metadata =
+            CoreProviderMetadata::discover(&issuer, http_client).map_err(|err| {
+                error!("Error is: {:?}", err);
+                SigstoreError::ClaimsVerificationError
+            })?;
+
+        self.auth_url_internal(provider_metadata)
+    }
+
+    pub async fn auth_url_async(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
+        let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
+
         let provider_metadata = CoreProviderMetadata::discover_async(issuer, async_http_client)
             .await
-            .map_err(|err| SigstoreError::ClaimsVerificationError)?;
+            .map_err(|_| SigstoreError::ClaimsVerificationError)?;
 
-        let client =
-            CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
-                .set_redirect_uri(
-                    RedirectUrl::new(self.redirect_url.to_owned()).expect("Invalid redirect URL"),
-                );
-
-        let (authorize_url, _, nonce) = client
-            .authorize_url(
-                AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
-                CsrfToken::new_random,
-                Nonce::new_random,
-            )
-            .add_scope(Scope::new("email".to_string()))
-            .set_pkce_challenge(pkce_challenge)
-            .url();
-        Ok((authorize_url, client, nonce, pkce_verifier))
+        self.auth_url_internal(provider_metadata)
     }
 }
 
@@ -224,7 +246,8 @@ impl RedirectListener {
             pkce_verifier,
         }
     }
-    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+
+    fn redirect_listener_internal(&self) -> Result<AuthorizationCode> {
         let listener = TcpListener::bind(self.client_redirect_host.clone())?;
         #[allow(clippy::manual_flatten)]
         for stream in listener.incoming() {
@@ -269,105 +292,66 @@ impl RedirectListener {
                 );
                 stream.write_all(response.as_bytes())?;
 
-                let token_response = self
-                    .client
-                    .exchange_code(code)
-                    .set_pkce_verifier(self.pkce_verifier)
-                    .request(http_client)
-                    .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
-
-                let id_token = token_response
-                    .extra_fields()
-                    .id_token()
-                    .ok_or(SigstoreError::NoIDToken)?;
-
-                let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
-
-                let id_token_claims: &CoreIdTokenClaims = token_response
-                    .extra_fields()
-                    .id_token()
-                    .expect("Server did not return an ID token")
-                    .claims(&id_token_verifier, &self.nonce)
-                    .map_err(|err| {
-                        error!("Error is: {:?}", err);
-                        SigstoreError::ClaimsVerificationError
-                    })?;
-                return Ok((id_token_claims.clone(), id_token.clone()));
+                return Ok(code);
             }
         }
-        unreachable!()
+        Err(SigstoreError::CodePairError)
+    }
+
+    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+        let code = self.redirect_listener_internal()?;
+
+        let token_response = self
+            .client
+            .exchange_code(code)
+            .set_pkce_verifier(self.pkce_verifier)
+            .request(http_client)
+            .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
+
+        let id_token = token_response
+            .extra_fields()
+            .id_token()
+            .ok_or(SigstoreError::NoIDToken)?;
+
+        let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
+
+        let id_token_claims: &CoreIdTokenClaims = token_response
+            .extra_fields()
+            .id_token()
+            .expect("Server did not return an ID token")
+            .claims(&id_token_verifier, &self.nonce)
+            .map_err(|err| {
+                error!("Error is: {:?}", err);
+                SigstoreError::ClaimsVerificationError
+            })?;
+        Ok((id_token_claims.clone(), id_token.clone()))
     }
 
     pub async fn redirect_listener_async(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
-        let listener = TcpListener::bind(self.client_redirect_host.clone())?;
-        #[allow(clippy::manual_flatten)]
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let code;
-                {
-                    let mut reader = BufReader::new(&stream);
+        let code = self.redirect_listener_internal()?;
 
-                    let mut request_line = String::new();
-                    reader.read_line(&mut request_line)?;
+        let token_response = self
+            .client
+            .exchange_code(code)
+            .set_pkce_verifier(self.pkce_verifier)
+            .request_async(async_http_client)
+            .await
+            .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
 
-                    let client_redirect_host = request_line
-                        .split_whitespace()
-                        .nth(1)
-                        .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
-                    let url =
-                        Url::parse(format!("http://localhost{}", client_redirect_host).as_str())?;
+        let id_token = token_response
+            .extra_fields()
+            .id_token()
+            .ok_or(SigstoreError::NoIDToken)?;
 
-                    let code_pair = url
-                        .query_pairs()
-                        .find(|pair| {
-                            let &(ref key, _) = pair;
-                            key == "code"
-                        })
-                        .ok_or(SigstoreError::CodePairError)?;
+        let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
 
-                    let (_, value) = code_pair;
-                    code = AuthorizationCode::new(value.into_owned());
-                }
-
-                let html_page = r#"<html>
-                <title>Sigstore Auth</title>
-                <body>
-                <h1>Sigstore Auth Successful</h1>
-                <p>You may now close this page.</p>
-                </body>
-                </html>"#;
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
-                    html_page.len(),
-                    html_page
-                );
-                stream.write_all(response.as_bytes())?;
-
-                let token_response = self
-                    .client
-                    .exchange_code(code)
-                    .set_pkce_verifier(self.pkce_verifier)
-                    .request_async(async_http_client)
-                    .await
-                    .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
-
-                let id_token = token_response
-                    .extra_fields()
-                    .id_token()
-                    .ok_or(SigstoreError::NoIDToken)?;
-
-                let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
-
-                let id_token_claims: &CoreIdTokenClaims = token_response
-                    .extra_fields()
-                    .id_token()
-                    .expect("Server did not return an ID token")
-                    .claims(&id_token_verifier, &self.nonce)
-                    .map_err(|err| SigstoreError::ClaimsVerificationError)?;
-                return Ok((id_token_claims.clone(), id_token.clone()));
-            }
-        }
-        unreachable!()
+        let id_token_claims: &CoreIdTokenClaims = token_response
+            .extra_fields()
+            .id_token()
+            .expect("Server did not return an ID token")
+            .claims(&id_token_verifier, &self.nonce)
+            .map_err(|_| SigstoreError::ClaimsVerificationError)?;
+        Ok((id_token_claims.clone(), id_token.clone()))
     }
 }
 
