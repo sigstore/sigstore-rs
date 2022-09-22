@@ -84,16 +84,13 @@ use crate::errors::{Result, SigstoreError};
 use tracing::error;
 
 use openidconnect::core::{
-    CoreAuthDisplay, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier,
-    CoreJsonWebKey, CoreJsonWebKeyType, CoreJsonWebKeyUse, CoreJweContentEncryptionAlgorithm,
-    CoreJwsSigningAlgorithm, CoreProviderMetadata, CoreResponseType,
+    CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata,
+    CoreResponseType,
 };
 use openidconnect::reqwest::{async_http_client, http_client};
 use openidconnect::{
-    AdditionalProviderMetadata, AuthenticationFlow, AuthorizationCode, ClaimName, ClaimType,
-    ClientAuthMethod, ClientId, ClientSecret, CsrfToken, GrantType, IssuerUrl,
-    JweKeyManagementAlgorithm, Nonce, PkceCodeChallenge, PkceCodeVerifier, ProviderMetadata,
-    RedirectUrl, ResponseMode, ResponseType, Scope, SubjectIdentifierType,
+    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
 };
 
 use std::io::{BufRead, BufReader, Write};
@@ -133,37 +130,10 @@ impl OpenIDAuthorize {
         }
     }
 
-    fn auth_url_internal<A, CA, CN, CT, G, JK, RM, RT, S>(
+    fn auth_url_internal(
         &self,
-        provider_metadata: ProviderMetadata<
-            A,
-            CoreAuthDisplay,
-            CA,
-            CN,
-            CT,
-            G,
-            CoreJweContentEncryptionAlgorithm,
-            JK,
-            CoreJwsSigningAlgorithm,
-            CoreJsonWebKeyType,
-            CoreJsonWebKeyUse,
-            CoreJsonWebKey,
-            RM,
-            RT,
-            S,
-        >,
-    ) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)>
-    where
-        A: AdditionalProviderMetadata,
-        CA: ClientAuthMethod,
-        CN: ClaimName,
-        CT: ClaimType,
-        G: GrantType,
-        JK: JweKeyManagementAlgorithm,
-        RM: ResponseMode,
-        RT: ResponseType,
-        S: SubjectIdentifierType,
-    {
+        provider_metadata: CoreProviderMetadata,
+    ) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
         let client_id = ClientId::new(self.oidc_cliend_id.to_owned());
         let client_secret = ClientSecret::new(self.oidc_client_secret.to_owned());
 
