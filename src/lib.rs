@@ -149,7 +149,7 @@
 //! The examples folder contains code that shows users how to make Rekor API calls.  
 //! It also provides a clean interface with step-by-step instructions that other developers can copy and paste.
 //!
-//! ```
+//! ```rust,no_run
 //! use clap::{Arg, Command};
 //! use sigstore::rekor::apis::{configuration::Configuration, entries_api};
 //! use sigstore::rekor::models::log_entry::LogEntry;
