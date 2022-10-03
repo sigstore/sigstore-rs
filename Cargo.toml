@@ -54,7 +54,7 @@ ed25519-dalek-fiat = "0.1.0"
 anyhow = "1.0.54"
 assert-json-diff = "2.0.2"
 chrono = "0.4.20"
-clap = { version = "3.1.0", features = ["derive"] }
+clap = { version = "4.0.8", features = ["derive"] }
 openssl = "0.10.38"
 rstest = "0.15.0"
 tempfile = "3.3.0"
