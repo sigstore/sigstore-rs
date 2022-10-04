@@ -70,27 +70,27 @@ async fn main() {
     let matches = Command::new("cmd")
     .arg(Arg::new("hash")
              .long("hash")
-             .takes_value(true)
+             .value_name("HASH")
              .help("hash of the artifact"))
     .arg(Arg::new("url")
              .long("url")
-             .takes_value(true)
+             .value_name("URL")
              .help("url containing the contents of the artifact (raw github url)"))
     .arg(Arg::new("public_key")
              .long("public_key")
-             .takes_value(true)
+             .value_name("PUBLIC_KEY")
              .help("base64 encoded public_key. Look at https://raw.githubusercontent.com/jyotsna-penumaka/rekor-rs/rekor-functionality/test_data/create_log_entry.md for more details on generating keys."))
     .arg(Arg::new("key_format")
              .long("key_format")
-             .takes_value(true)
+             .value_name("KEY_FORMAT")
              .help("Accepted formats are : pgp / x509 / minsign / ssh / tuf"))  
     .arg(Arg::new("signature")
              .long("signature")
-             .takes_value(true)
+             .value_name("SIGNATURE")
              .help("base64 encoded signature of the artifact. Look at https://raw.githubusercontent.com/jyotsna-penumaka/rekor-rs/rekor-functionality/test_data/create_log_entry.md for more details on generating keys."))
     .arg(Arg::new("api_version")
              .long("api_version")
-             .takes_value(true)
+             .value_name("API_VERSION")
              .help("Rekor-rs open api version"));
 
     let flags = matches.get_matches();
@@ -107,33 +107,39 @@ async fn main() {
 
     let hash = Hash::new(
         AlgorithmKind::sha256,
-        flags.value_of("hash").unwrap_or(HASH).to_string(),
+        flags
+            .get_one::<String>("hash")
+            .unwrap_or(&HASH.to_string())
+            .to_owned(),
     );
     let data = Data::new(
         hash,
-        Url::parse(flags.value_of("url").unwrap_or(URL)).unwrap(),
+        Url::parse(flags.get_one::<String>("url").unwrap_or(&URL.to_string())).unwrap(),
     );
     let public_key = PublicKey::new(
         flags
-            .value_of("public_key")
-            .unwrap_or(PUBLIC_KEY)
-            .to_string(),
+            .get_one::<String>("public_key")
+            .unwrap_or(&PUBLIC_KEY.to_string())
+            .to_owned(),
     );
     let signature = Signature::new(
         flags
-            .value_of("key_format")
-            .unwrap_or(KEY_FORMAT)
-            .to_string(),
-        flags.value_of("signature").unwrap_or(SIGNATURE).to_string(),
+            .get_one::<String>("key_format")
+            .unwrap_or(&KEY_FORMAT.to_string())
+            .to_owned(),
+        flags
+            .get_one("signature")
+            .unwrap_or(&SIGNATURE.to_string())
+            .to_owned(),
         public_key,
     );
     let spec = Spec::new(signature, data);
     let proposed_entry = ProposedEntry::Hashedrekord {
         api_version: flags
-            .value_of("api_version")
-            .unwrap_or(API_VERSION)
-            .to_string(),
-        spec: spec,
+            .get_one::<String>("api_version")
+            .unwrap_or(&API_VERSION.to_string())
+            .to_owned(),
+        spec,
     };
 
     let log_entry = entries_api::create_log_entry(&configuration, proposed_entry).await;

@@ -33,15 +33,15 @@ async fn main() {
     let matches = Command::new("cmd")
     .arg(Arg::new("last_size")
              .long("last_size")
-             .takes_value(true)
+             .value_name("LAST_SIZE")
              .help("The size of the tree that you wish to prove consistency to"))
     .arg(Arg::new("first_size")
              .long("first_size")
-             .takes_value(true)
+             .value_name("FIRST_SIZE")
              .help("The size of the tree that you wish to prove consistency from (1 means the beginning of the log). Defaults to 1. To use the default value, do not input any value"))
     .arg(Arg::new("tree_id")
              .long("tree_id")
-             .takes_value(true)
+             .value_name("TREE_ID")
              .help("The tree ID of the tree that you wish to prove consistency for. To use the default value, do not input any value."));
 
     let configuration = Configuration::default();
@@ -52,9 +52,14 @@ async fn main() {
 
     let log_proof: ConsistencyProof = tlog_api::get_log_proof(
         &configuration,
-        i32::from_str(flags.value_of("last_size").unwrap_or(LAST_SIZE)).unwrap(),
-        flags.value_of("first_size"),
-        flags.value_of("tree_id"),
+        i32::from_str(
+            flags
+                .get_one::<String>("last_size")
+                .unwrap_or(&LAST_SIZE.to_string()),
+        )
+        .unwrap(),
+        flags.get_one::<String>("first_size").map(|s| s.as_str()),
+        flags.get_one::<String>("tree_id").map(|s| s.as_str()),
     )
     .await
     .unwrap();

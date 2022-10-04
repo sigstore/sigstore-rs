@@ -31,7 +31,7 @@ async fn main() {
     let matches = Command::new("cmd").arg(
         Arg::new("log_index")
             .long("log_index")
-            .takes_value(true)
+            .value_name("LOG_INDEX")
             .help("log_index of the artifact"),
     );
 
@@ -39,7 +39,12 @@ async fn main() {
     const LOG_INDEX: &str = "1";
 
     let flags = matches.get_matches();
-    let index = i32::from_str(flags.value_of("log_index").unwrap_or(LOG_INDEX)).unwrap();
+    let index = i32::from_str(
+        flags
+            .get_one::<String>("log_index")
+            .unwrap_or(&LOG_INDEX.to_string()),
+    )
+    .unwrap();
 
     let configuration = Configuration::default();
 

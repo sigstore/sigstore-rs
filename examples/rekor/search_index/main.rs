@@ -45,23 +45,23 @@ async fn main() {
     let matches = Command::new("cmd")
     .arg(Arg::new("hash")
              .long("hash")
-             .takes_value(true)
+             .value_name("HASH")
              .help("hash of the artifact"))
     .arg(Arg::new("url")
              .long("url")
-             .takes_value(true)
+             .value_name("URL")
              .help("url containing the contents of the artifact (raw github url)"))
     .arg(Arg::new("public_key")
              .long("public_key")
-             .takes_value(true)
+             .value_name("PUBLIC_KEY")
              .help("base64 encoded public_key. Look at https://raw.githubusercontent.com/jyotsna-penumaka/rekor-rs/rekor-functionality/test_data/create_log_entry.md for more details on generating keys."))
     .arg(Arg::new("key_format")
              .long("key_format")
-             .takes_value(true)
+             .value_name("KEY_FORMAT")
              .help("Accepted formats are : pgp / x509 / minsign / ssh / tuf"))  
      .arg(Arg::new("email")
              .long("email")
-             .takes_value(true)
+             .value_name("EMAIL")
              .help("Author's email"));
 
     let flags = matches.get_matches();
@@ -72,7 +72,11 @@ async fn main() {
     const KEY_FORMAT: &str = "x509";
     const EMAIL: &str = "jpenumak@redhat.com";
 
-    let key_format = match flags.value_of("key_format").unwrap_or(KEY_FORMAT) {
+    let key_format = match flags
+        .get_one::<String>("key_format")
+        .unwrap_or(&KEY_FORMAT.to_string())
+        .as_str()
+    {
         "pgp" => Format::Pgp,
         "x509" => Format::X509,
         "minisign" => Format::Minisign,
@@ -84,17 +88,27 @@ async fn main() {
         format: key_format,
         content: Some(
             flags
-                .value_of("public_key")
-                .unwrap_or(PUBLIC_KEY)
-                .to_string(),
+                .get_one::<String>("public_key")
+                .unwrap_or(&PUBLIC_KEY.to_string())
+                .to_owned(),
         ),
         url: None,
     };
 
     let query = SearchIndex {
-        email: Some(flags.value_of("email").unwrap_or(EMAIL).to_string()),
+        email: Some(
+            flags
+                .get_one::<String>("email")
+                .unwrap_or(&EMAIL.to_string())
+                .to_owned(),
+        ),
         public_key: Some(public_key),
-        hash: Some(flags.value_of("hash").unwrap_or(HASH).to_string()),
+        hash: Some(
+            flags
+                .get_one("hash")
+                .unwrap_or(&HASH.to_string())
+                .to_owned(),
+        ),
     };
     let configuration = Configuration::default();
 
