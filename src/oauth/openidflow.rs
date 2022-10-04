@@ -271,26 +271,36 @@ impl RedirectListener {
     pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let code = self.redirect_listener_internal()?;
 
-        let token_response = self.client
+        let token_response = self
+            .client
             .exchange_code(code)
             .set_pkce_verifier(self.pkce_verifier)
             .request(http_client)
             .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
 
-        Self::extract_token_and_claims(&token_response, &self.client.id_token_verifier(), self.nonce)
+        Self::extract_token_and_claims(
+            &token_response,
+            &self.client.id_token_verifier(),
+            self.nonce,
+        )
     }
 
     pub async fn redirect_listener_async(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let code = self.redirect_listener_internal()?;
 
-        let token_response = self.client
+        let token_response = self
+            .client
             .exchange_code(code)
             .set_pkce_verifier(self.pkce_verifier)
             .request_async(async_http_client)
             .await
             .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
 
-        Self::extract_token_and_claims(&token_response, &self.client.id_token_verifier(), self.nonce)
+        Self::extract_token_and_claims(
+            &token_response,
+            &self.client.id_token_verifier(),
+            self.nonce,
+        )
     }
 
     fn extract_token_and_claims(
