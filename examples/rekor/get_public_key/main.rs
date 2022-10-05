@@ -28,11 +28,15 @@ async fn main() {
     let matches = Command::new("cmd")
     .arg(Arg::new("tree_id")
              .long("tree_id")
-             .takes_value(true)
+             .value_name("TREE_ID")
              .help("The tree ID of the tree that you wish to prove consistency for. To use the default value, do not input any value."));
 
     let flags = matches.get_matches();
     let configuration = Configuration::default();
-    let pubkey = pubkey_api::get_public_key(&configuration, flags.value_of("tree_id")).await;
+    let pubkey = pubkey_api::get_public_key(
+        &configuration,
+        flags.get_one::<String>("tree_id").map(|s| s.as_str()),
+    )
+    .await;
     println!("{:#?}", pubkey.unwrap());
 }

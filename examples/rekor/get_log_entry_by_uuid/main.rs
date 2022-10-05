@@ -30,7 +30,7 @@ async fn main() {
     let matches = Command::new("cmd").arg(
         Arg::new("uuid")
             .long("uuid")
-            .takes_value(true)
+            .value_name("UUID")
             .help("uuid of the artifact"),
     );
 
@@ -38,7 +38,10 @@ async fn main() {
     const UUID: &str = "073970a07c978b7a9ff15b69fe15d87dfb58fd5756086e3d1fb671c2d0bd95c0";
 
     let flags = matches.get_matches();
-    let uuid = flags.value_of("uuid").unwrap_or(UUID).to_string();
+    let uuid = flags
+        .get_one::<String>("uuid")
+        .unwrap_or(&UUID.to_string())
+        .to_owned();
     let configuration = Configuration::default();
     let message: LogEntry = entries_api::get_log_entry_by_uuid(&configuration, &uuid)
         .await

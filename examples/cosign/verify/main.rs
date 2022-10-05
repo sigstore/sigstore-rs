@@ -76,14 +76,7 @@ struct Cli {
     cert_url: Option<String>,
 
     /// Annotations that have to be satisfied
-    #[clap(
-        short,
-        long,
-        parse(from_str),
-        takes_value(true),
-        required(false),
-        multiple_occurrences(true)
-    )]
+    #[clap(short, long, required(false))]
     annotations: Vec<String>,
 
     /// Enable verbose mode
