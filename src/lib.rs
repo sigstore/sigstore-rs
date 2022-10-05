@@ -228,6 +228,7 @@ mod mock_client;
 
 pub mod cosign;
 pub mod errors;
+pub mod fulcio;
 pub mod oauth;
 pub mod registry;
 pub mod rekor;

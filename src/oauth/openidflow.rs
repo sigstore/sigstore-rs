@@ -85,9 +85,9 @@ use tracing::error;
 
 use openidconnect::core::{
     CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata,
-    CoreResponseType,
+    CoreResponseType, CoreTokenResponse,
 };
-use openidconnect::reqwest::http_client;
+use openidconnect::reqwest::{async_http_client, http_client};
 use openidconnect::{
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
@@ -129,17 +129,15 @@ impl OpenIDAuthorize {
             redirect_url: redirect_url.to_string(),
         }
     }
-    pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
+
+    fn auth_url_internal(
+        &self,
+        provider_metadata: CoreProviderMetadata,
+    ) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
         let client_id = ClientId::new(self.oidc_cliend_id.to_owned());
         let client_secret = ClientSecret::new(self.oidc_client_secret.to_owned());
-        let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-        let provider_metadata =
-            CoreProviderMetadata::discover(&issuer, http_client).map_err(|err| {
-                error!("Error is: {:?}", err);
-                SigstoreError::ClaimsVerificationError
-            })?;
 
         let client =
             CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
@@ -157,6 +155,28 @@ impl OpenIDAuthorize {
             .set_pkce_challenge(pkce_challenge)
             .url();
         Ok((authorize_url, client, nonce, pkce_verifier))
+    }
+
+    pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
+        let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
+
+        let provider_metadata =
+            CoreProviderMetadata::discover(&issuer, http_client).map_err(|err| {
+                error!("Error is: {:?}", err);
+                SigstoreError::ClaimsVerificationError
+            })?;
+
+        self.auth_url_internal(provider_metadata)
+    }
+
+    pub async fn auth_url_async(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
+        let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
+
+        let provider_metadata = CoreProviderMetadata::discover_async(issuer, async_http_client)
+            .await
+            .map_err(|_| SigstoreError::ClaimsVerificationError)?;
+
+        self.auth_url_internal(provider_metadata)
     }
 }
 
@@ -196,7 +216,8 @@ impl RedirectListener {
             pkce_verifier,
         }
     }
-    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+
+    fn redirect_listener_internal(&self) -> Result<AuthorizationCode> {
         let listener = TcpListener::bind(self.client_redirect_host.clone())?;
         #[allow(clippy::manual_flatten)]
         for stream in listener.incoming() {
@@ -241,33 +262,64 @@ impl RedirectListener {
                 );
                 stream.write_all(response.as_bytes())?;
 
-                let token_response = self
-                    .client
-                    .exchange_code(code)
-                    .set_pkce_verifier(self.pkce_verifier)
-                    .request(http_client)
-                    .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
-
-                let id_token = token_response
-                    .extra_fields()
-                    .id_token()
-                    .ok_or(SigstoreError::NoIDToken)?;
-
-                let id_token_verifier: CoreIdTokenVerifier = self.client.id_token_verifier();
-
-                let id_token_claims: &CoreIdTokenClaims = token_response
-                    .extra_fields()
-                    .id_token()
-                    .expect("Server did not return an ID token")
-                    .claims(&id_token_verifier, &self.nonce)
-                    .map_err(|err| {
-                        error!("Error is: {:?}", err);
-                        SigstoreError::ClaimsVerificationError
-                    })?;
-                return Ok((id_token_claims.clone(), id_token.clone()));
+                return Ok(code);
             }
         }
-        unreachable!()
+        Err(SigstoreError::CodePairError)
+    }
+
+    pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+        let code = self.redirect_listener_internal()?;
+
+        let token_response = self
+            .client
+            .exchange_code(code)
+            .set_pkce_verifier(self.pkce_verifier)
+            .request(http_client)
+            .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
+
+        Self::extract_token_and_claims(
+            &token_response,
+            &self.client.id_token_verifier(),
+            self.nonce,
+        )
+    }
+
+    pub async fn redirect_listener_async(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+        let code = self.redirect_listener_internal()?;
+
+        let token_response = self
+            .client
+            .exchange_code(code)
+            .set_pkce_verifier(self.pkce_verifier)
+            .request_async(async_http_client)
+            .await
+            .map_err(|_| SigstoreError::ClaimsAccessPointError)?;
+
+        Self::extract_token_and_claims(
+            &token_response,
+            &self.client.id_token_verifier(),
+            self.nonce,
+        )
+    }
+
+    fn extract_token_and_claims(
+        token_response: &CoreTokenResponse,
+        id_token_verifier: &CoreIdTokenVerifier,
+        nonce: Nonce,
+    ) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
+        let id_token = token_response
+            .extra_fields()
+            .id_token()
+            .ok_or(SigstoreError::NoIDToken)?;
+
+        let id_token_claims: &CoreIdTokenClaims = token_response
+            .extra_fields()
+            .id_token()
+            .expect("Server did not return an ID token")
+            .claims(id_token_verifier, &nonce)
+            .map_err(|_| SigstoreError::ClaimsVerificationError)?;
+        Ok((id_token_claims.clone(), id_token.clone()))
     }
 }
 
