@@ -14,7 +14,7 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
-use sigstore::crypto::{signing_key::SigningScheme, Signature};
+use sigstore::crypto::{Signature, SigningScheme};
 
 const DATA_TO_BE_SIGNED: &str = "this is an example data to be signed";
 

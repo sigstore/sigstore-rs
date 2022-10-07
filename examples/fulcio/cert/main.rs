@@ -1,4 +1,4 @@
-use sigstore::crypto::signing_key::SigningScheme;
+use sigstore::crypto::SigningScheme;
 use sigstore::fulcio::oauth::OauthTokenProvider;
 use sigstore::fulcio::{FulcioClient, TokenProvider, FULCIO_ROOT};
 use url::Url;

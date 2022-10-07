@@ -14,7 +14,7 @@
 // limitations under the License.
 
 use anyhow::Result;
-use sigstore::crypto::signing_key::SigningScheme;
+use sigstore::crypto::SigningScheme;
 
 const PASSWORD: &str = "example password";
 

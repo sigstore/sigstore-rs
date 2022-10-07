@@ -22,10 +22,17 @@
 //! * [`SigStoreSigner`]: an abstraction for digital signing algorithms.
 //!
 //! The [`SigStoreKeyPair`] now includes the key types of the following algorithms:
-//! * [`SigStoreKeyPair::ECDSA`]: Elliptic curve digital signing algorithm
-//! * [`SigStoreKeyPair::ED25519`]: Edwards curve-25519 digital signing algorithm
+//! * [`SigStoreKeyPair::RSA`]: RSA key pair
+//! * [`SigStoreKeyPair::ECDSA`]: Elliptic curve key pair
+//! * [`SigStoreKeyPair::ED25519`]: Edwards curve-25519 key pair
 //!
 //! The [`SigStoreSigner`] now includes the following signing schemes:
+//! * [`SigStoreSigner::RSA_PSS_SHA256`]: RSA signatures using PSS padding and SHA-256.
+//! * [`SigStoreSigner::RSA_PSS_SHA384`]: RSA signatures using PSS padding and SHA-384.
+//! * [`SigStoreSigner::RSA_PSS_SHA512`]: RSA signatures using PSS padding and SHA-512.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA256`]: RSA signatures using PKCS#1v1.5 padding and SHA-256.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA384`]: RSA signatures using PKCS#1v1.5 padding and SHA-384.
+//! * [`SigStoreSigner::RSA_PKCS1_SHA512`]: RSA signatures using PKCS#1v1.5 padding and SHA-512.
 //! * [`SigStoreSigner::ECDSA_P256_SHA256_ASN1`]: ASN.1 DER-encoded ECDSA
 //! signatures using the P-256 curve and SHA-256.
 //! * [`SigStoreSigner::ECDSA_P384_SHA384_ASN1`]: ASN.1 DER-encoded ECDSA
@@ -37,7 +44,7 @@
 //!
 //! ```rust
 //! use sigstore::crypto::signing_key::SigStoreSigner;
-//! use sigstore::crypto::signing_key::SigningScheme;
+//! use sigstore::crypto::SigningScheme;
 //! use sigstore::crypto::Signature;
 //!
 //! let test_data = b"test message";
@@ -62,27 +69,21 @@
 //! More use cases please refer to <`https://github.com/sigstore/sigstore-rs/tree/main/examples/key_interface`>
 
 use elliptic_curve::zeroize::Zeroizing;
-use sha2::{Sha256, Sha384};
 
 use crate::errors::*;
 
 use self::{
-    ecdsa::{
-        ec::{EcdsaKeys, EcdsaSigner},
-        ECDSAKeys,
-    },
+    ecdsa::{ec::EcdsaSigner, ECDSAKeys},
     ed25519::{Ed25519Keys, Ed25519Signer},
+    rsa::{keypair::RSAKeys, RSASigner},
 };
 
-use super::{CosignVerificationKey, SignatureDigestAlgorithm};
+use super::{verification_key::CosignVerificationKey, SigningScheme};
 
 pub mod ecdsa;
 pub mod ed25519;
 pub mod kdf;
 pub mod rsa;
-
-/// Defatult signing algorithm used in sigstore.
-pub const SIGSTORE_DEFAULT_SIGNING_ALGORITHM: SigningScheme = SigningScheme::ECDSA_P256_SHA256_ASN1;
 
 /// The label for pem of cosign generated encrypted private keys.
 pub const COSIGN_PRIVATE_KEY_PEM_LABEL: &str = "ENCRYPTED COSIGN PRIVATE KEY";
@@ -95,6 +96,9 @@ pub const SIGSTORE_PRIVATE_KEY_PEM_LABEL: &str = "ENCRYPTED SIGSTORE PRIVATE KEY
 
 /// The label for pem of private keys.
 pub const PRIVATE_KEY_PEM_LABEL: &str = "PRIVATE KEY";
+
+/// The label for pem of RSA private keys.
+pub const RSA_PRIVATE_KEY_PEM_LABEL: &str = "RSA PRIVATE KEY";
 
 /// Every signing scheme must implement this interface.
 /// All private export methods using the wrapper `Zeroizing`.
@@ -124,7 +128,7 @@ pub trait KeyPair {
     /// the public key.
     fn to_verification_key(
         &self,
-        signature_digest_algorithm: SignatureDigestAlgorithm,
+        signature_digest_algorithm: &SigningScheme,
     ) -> Result<CosignVerificationKey>;
 }
 
@@ -132,7 +136,7 @@ pub trait KeyPair {
 pub enum SigStoreKeyPair {
     ECDSA(ECDSAKeys),
     ED25519(Ed25519Keys),
-    // RSA,
+    RSA(RSAKeys),
 }
 
 /// This macro helps to reduce duplicated code.
@@ -154,6 +158,7 @@ macro_rules! sigstore_keypair_code {
         match $obj {
             SigStoreKeyPair::ECDSA(keys) => keys.as_inner().$func($($args,)*),
             SigStoreKeyPair::ED25519(keys) => keys.$func($($args,)*),
+            SigStoreKeyPair::RSA(keys) => keys.$func($($args,)*),
         }
     }
 }
@@ -205,9 +210,9 @@ impl SigStoreKeyPair {
     /// the public key.
     pub fn to_verification_key(
         &self,
-        signature_digest_algorithm: SignatureDigestAlgorithm,
+        signing_scheme: &SigningScheme,
     ) -> Result<CosignVerificationKey> {
-        sigstore_keypair_code!(to_verification_key(signature_digest_algorithm), self)
+        sigstore_keypair_code!(to_verification_key(signing_scheme), self)
     }
 }
 
@@ -222,43 +227,14 @@ pub trait Signer {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
 }
 
-/// Different digital signature algorithms.
-/// * `ECDSA_P256_SHA256_ASN1`: ASN.1 DER-encoded ECDSA
-/// signatures using the P-256 curve and SHA-256.
-/// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA
-/// signatures using the P-384 curve and SHA-384.
-/// * `ED25519`: ECDSA signature using SHA2-512
-/// as the digest function and curve edwards25519. The
-/// signature format please refer
-/// to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy)]
-pub enum SigningScheme {
-    // TODO: Support RSA
-    ECDSA_P256_SHA256_ASN1,
-    ECDSA_P384_SHA384_ASN1,
-    ED25519,
-}
-
-impl SigningScheme {
-    /// Create a key-pair due to the given signing scheme.
-    pub fn create_signer(&self) -> Result<SigStoreSigner> {
-        Ok(match self {
-            SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(
-                EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<p256::NistP256>::new()?)?,
-            ),
-            SigningScheme::ECDSA_P384_SHA384_ASN1 => SigStoreSigner::ECDSA_P384_SHA384_ASN1(
-                EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<p384::NistP384>::new()?)?,
-            ),
-            SigningScheme::ED25519 => {
-                SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
-            }
-        })
-    }
-}
-
 #[allow(non_camel_case_types)]
 pub enum SigStoreSigner {
+    RSA_PSS_SHA256(RSASigner),
+    RSA_PSS_SHA384(RSASigner),
+    RSA_PSS_SHA512(RSASigner),
+    RSA_PKCS1_SHA256(RSASigner),
+    RSA_PKCS1_SHA384(RSASigner),
+    RSA_PKCS1_SHA512(RSASigner),
     ECDSA_P256_SHA256_ASN1(EcdsaSigner<p256::NistP256, sha2::Sha256>),
     ECDSA_P384_SHA384_ASN1(EcdsaSigner<p384::NistP384, sha2::Sha384>),
     ED25519(Ed25519Signer),
@@ -272,6 +248,12 @@ impl SigStoreSigner {
             SigStoreSigner::ECDSA_P256_SHA256_ASN1(inner) => inner,
             SigStoreSigner::ECDSA_P384_SHA384_ASN1(inner) => inner,
             SigStoreSigner::ED25519(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA256(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA384(inner) => inner,
+            SigStoreSigner::RSA_PSS_SHA512(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA256(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA384(inner) => inner,
+            SigStoreSigner::RSA_PKCS1_SHA512(inner) => inner,
         }
     }
 
@@ -282,14 +264,20 @@ impl SigStoreSigner {
 
     /// `to_verification_key` will derive the verification_key for the `SigStoreSigner`.
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
-        let signature_digest_algorithm = match self {
-            SigStoreSigner::ECDSA_P256_SHA256_ASN1(_) => SignatureDigestAlgorithm::Sha256,
-            SigStoreSigner::ECDSA_P384_SHA384_ASN1(_) => SignatureDigestAlgorithm::Sha384,
-            _ => SignatureDigestAlgorithm::Sha256,
+        let signing_scheme = match self {
+            SigStoreSigner::ECDSA_P256_SHA256_ASN1(_) => SigningScheme::ECDSA_P256_SHA256_ASN1,
+            SigStoreSigner::ECDSA_P384_SHA384_ASN1(_) => SigningScheme::ECDSA_P384_SHA384_ASN1,
+            SigStoreSigner::ED25519(_) => SigningScheme::ED25519,
+            SigStoreSigner::RSA_PSS_SHA256(_) => SigningScheme::RSA_PSS_SHA256(0),
+            SigStoreSigner::RSA_PSS_SHA384(_) => SigningScheme::RSA_PSS_SHA384(0),
+            SigStoreSigner::RSA_PSS_SHA512(_) => SigningScheme::RSA_PSS_SHA512(0),
+            SigStoreSigner::RSA_PKCS1_SHA256(_) => SigningScheme::RSA_PKCS1_SHA256(0),
+            SigStoreSigner::RSA_PKCS1_SHA384(_) => SigningScheme::RSA_PKCS1_SHA384(0),
+            SigStoreSigner::RSA_PKCS1_SHA512(_) => SigningScheme::RSA_PKCS1_SHA512(0),
         };
         self.as_inner()
             .key_pair()
-            .to_verification_key(signature_digest_algorithm)
+            .to_verification_key(&signing_scheme)
     }
 
     /// `key_pair` will return the reference of the `SigStoreKeyPair` enum due to `SigStoreSigner`.
@@ -304,6 +292,18 @@ impl SigStoreSigner {
             SigStoreSigner::ED25519(inner) => {
                 SigStoreKeyPair::ED25519(Ed25519Keys::from_ed25519key(inner.ed25519_keys())?)
             }
+            SigStoreSigner::RSA_PSS_SHA256(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PSS_SHA384(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PSS_SHA512(inner) => SigStoreKeyPair::RSA(inner.rsa_keys().clone()),
+            SigStoreSigner::RSA_PKCS1_SHA256(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
+            }
+            SigStoreSigner::RSA_PKCS1_SHA384(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
+            }
+            SigStoreSigner::RSA_PKCS1_SHA512(inner) => {
+                SigStoreKeyPair::RSA(inner.rsa_keys().clone())
+            }
         })
     }
 }
@@ -312,7 +312,7 @@ impl SigStoreSigner {
 mod tests {
     use rstest::rstest;
 
-    use crate::crypto::{signing_key::SigningScheme, CosignVerificationKey, Signature};
+    use crate::crypto::{verification_key::CosignVerificationKey, Signature, SigningScheme};
 
     /// This is a test MESSAGE used to be signed by all signing test.
     pub const MESSAGE: &str = r#"{

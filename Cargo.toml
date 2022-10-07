@@ -26,10 +26,9 @@ openidconnect = { version = "2.3", default-features = false, features = [ "reqwe
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
 regex = "1.5.5"
-ring = "0.16.20"
 serde_json = "1.0.79"
 serde = { version = "1.0.136", features = ["derive"] }
-sha2 = "0.10.2"
+sha2 = { version = "0.10.6", features = ["oid"] }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tough = { version = "0.12", features = [ "http" ] }
@@ -44,11 +43,13 @@ pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] 
 elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
 p256 = "0.11.1"
 p384 = "0.11.1"
-ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest" ] }
+ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
 digest = "0.10.3"
 signature = { version = "1.5.0", features = [ "digest-preview" ] }
 ed25519 = { version = "1", features = [ "alloc" ] }
 ed25519-dalek-fiat = "0.1.0"
+rsa = "0.7.0-rc.1"
+pkcs1 = "0.4.0"
 
 [dev-dependencies]
 anyhow = "1.0.54"

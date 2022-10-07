@@ -1,6 +1,7 @@
 pub mod oauth;
 
-use crate::crypto::signing_key::{SigStoreSigner, SigningScheme};
+use crate::crypto::signing_key::SigStoreSigner;
+use crate::crypto::SigningScheme;
 use crate::errors::{Result, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use openidconnect::core::CoreIdToken;
@@ -57,6 +58,12 @@ impl Serialize for PublicKey {
                     "ecdsa"
                 }
                 SigningScheme::ED25519 => "ed25519",
+                SigningScheme::RSA_PSS_SHA256(_)
+                | SigningScheme::RSA_PSS_SHA384(_)
+                | SigningScheme::RSA_PSS_SHA512(_)
+                | SigningScheme::RSA_PKCS1_SHA256(_)
+                | SigningScheme::RSA_PKCS1_SHA384(_)
+                | SigningScheme::RSA_PKCS1_SHA512(_) => "rsa",
             },
         )?;
         pk.end()

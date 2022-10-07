@@ -14,10 +14,9 @@
 // limitations under the License.
 
 use anyhow::{bail, Result};
-use ring::signature::ECDSA_P256_SHA256_ASN1;
 use sigstore::crypto::{
     signing_key::{ecdsa::ECDSAKeys, SigStoreKeyPair},
-    CosignVerificationKey, SignatureDigestAlgorithm,
+    CosignVerificationKey, SigningScheme,
 };
 
 const PASSWORD: &str = "password";
@@ -30,13 +29,16 @@ const ECDSA_P256_ASN1_ENCRYPTED_PRIVATE_PEM: &[u8] =
     include_bytes!("./ECDSA_P256_ASN1_ENCRYPTED_PRIVATE_PEM.key");
 
 fn main() -> Result<()> {
-    let _ = CosignVerificationKey::from_pem(
-        ECDSA_P256_ASN1_PUBLIC_PEM,
-        SignatureDigestAlgorithm::Sha256,
-    )?;
+    let _ = CosignVerificationKey::from_pem(ECDSA_P256_ASN1_PUBLIC_PEM, &SigningScheme::default())?;
+    println!("Imported PEM encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm.");
+
+    let _ = CosignVerificationKey::from_der(ECDSA_P256_ASN1_PUBLIC_DER, &SigningScheme::default())?;
+    println!("Imported DER encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm.");
+
+    let _ = CosignVerificationKey::try_from_pem(ECDSA_P256_ASN1_PUBLIC_PEM)?;
     println!("Imported PEM encoded public key as CosignVerificationKey.");
 
-    let _ = CosignVerificationKey::from_der(ECDSA_P256_ASN1_PUBLIC_DER, &ECDSA_P256_SHA256_ASN1)?;
+    let _ = CosignVerificationKey::try_from_der(ECDSA_P256_ASN1_PUBLIC_DER)?;
     println!("Imported DER encoded public key as CosignVerificationKey.");
 
     let _ = SigStoreKeyPair::from_pem(ECDSA_P256_ASN1_PRIVATE_PEM)?;
@@ -69,7 +71,7 @@ fn main() -> Result<()> {
             inner.to_sigstore_signer()?;
             println!("Converted SigStoreKeyPair to SigStoreSigner.");
         }
-        SigStoreKeyPair::ED25519(_) => bail!("Wrong key pair type."),
+        _ => bail!("Wrong key pair type."),
     }
 
     Ok(())

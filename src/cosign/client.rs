@@ -137,14 +137,13 @@ impl Client {
 mod tests {
     use super::*;
     use crate::cosign::tests::{get_fulcio_cert_pool, REKOR_PUB_KEY};
-    use crate::{crypto::SignatureDigestAlgorithm, mock_client::test::MockOciClient};
+    use crate::crypto::SigningScheme;
+    use crate::mock_client::test::MockOciClient;
 
     fn build_test_client(mock_client: MockOciClient) -> Client {
-        let rekor_pub_key = CosignVerificationKey::from_pem(
-            REKOR_PUB_KEY.as_bytes(),
-            SignatureDigestAlgorithm::default(),
-        )
-        .expect("Cannot create CosignVerificationKey");
+        let rekor_pub_key =
+            CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
+                .expect("Cannot create CosignVerificationKey");
 
         Client {
             registry_client: Box::new(mock_client),

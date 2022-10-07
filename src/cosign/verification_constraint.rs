@@ -31,7 +31,7 @@
 use std::collections::HashMap;
 
 use super::signature_layers::{CertificateSubject, SignatureLayer};
-use crate::crypto::{CosignVerificationKey, SignatureDigestAlgorithm};
+use crate::crypto::{CosignVerificationKey, SigningScheme};
 use crate::errors::Result;
 
 /// A list of objects implementing the [`VerificationConstraint`] trait
@@ -79,11 +79,21 @@ impl PublicKeyVerifier {
     /// Create a new instance of `PublicKeyVerifier`.
     /// The `key_raw` variable holds a PEM encoded rapresentation of the
     /// public key to be used at verification time.
-    pub fn new(
-        key_raw: &[u8],
-        signature_digest_algorithm: SignatureDigestAlgorithm,
-    ) -> Result<Self> {
-        let key = CosignVerificationKey::from_pem(key_raw, signature_digest_algorithm)?;
+    pub fn new(key_raw: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
+        let key = CosignVerificationKey::from_pem(key_raw, signing_scheme)?;
+        Ok(PublicKeyVerifier { key })
+    }
+
+    /// Create a new instance of `PublicKeyVerifier`.
+    /// The `key_raw` variable holds a PEM encoded rapresentation of the
+    /// public key to be used at verification time. The verification
+    /// algorithm will be derived from the public key type:
+    /// * `RSA public key`: `RSA_PSS_SHA256`
+    /// * `EC public key with P-256 curve`: `ECDSA_P256_SHA256_ASN1`
+    /// * `EC public key with P-384 curve`: `ECDSA_P384_SHA384_ASN1`
+    /// * `Ed25519 public key`: `Ed25519`
+    pub fn try_from(key_raw: &[u8]) -> Result<Self> {
+        let key = CosignVerificationKey::try_from_pem(key_raw)?;
         Ok(PublicKeyVerifier { key })
     }
 }

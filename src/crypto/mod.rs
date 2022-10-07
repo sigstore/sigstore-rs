@@ -15,44 +15,136 @@
 
 //! Structures and constants required to perform cryptographic operations.
 
-use ring::signature;
+use sha2::{Sha256, Sha384};
 use std::convert::TryFrom;
+
+use crate::errors::*;
+
+pub use signing_key::SigStoreSigner;
+pub use verification_key::CosignVerificationKey;
+
+/// Different digital signature algorithms.
+/// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256
+/// for RSA signatures. All the `usize` member inside
+/// an RSA enum represents the key size of the RSA key.
+/// * `RSA_PSS_SHA384`: RSA PSS padding using SHA-384
+/// for RSA signatures.
+/// * `RSA_PSS_SHA512`: RSA PSS padding using SHA-512
+/// for RSA signatures.
+/// * `RSA_PKCS1_SHA256`: PKCS#1 1.5 padding using
+/// SHA-256 for RSA signatures.
+/// * `RSA_PKCS1_SHA384`: PKCS#1 1.5 padding using
+/// SHA-384 for RSA signatures.
+/// * `RSA_PKCS1_SHA512`: PKCS#1 1.5 padding using
+/// SHA-512 for RSA signatures.
+/// * `ECDSA_P256_SHA256_ASN1`: ASN.1 DER-encoded ECDSA
+/// signatures using the P-256 curve and SHA-256. It
+/// is the default signing scheme.
+/// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA
+/// signatures using the P-384 curve and SHA-384.
+/// * `ED25519`: ECDSA signature using SHA2-512
+/// as the digest function and curve edwards25519. The
+/// signature format please refer
+/// to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+pub enum SigningScheme {
+    RSA_PSS_SHA256(usize),
+    RSA_PSS_SHA384(usize),
+    RSA_PSS_SHA512(usize),
+    RSA_PKCS1_SHA256(usize),
+    RSA_PKCS1_SHA384(usize),
+    RSA_PKCS1_SHA512(usize),
+    ECDSA_P256_SHA256_ASN1,
+    ECDSA_P384_SHA384_ASN1,
+    ED25519,
+}
+
+impl TryFrom<&str> for SigningScheme {
+    type Error = String;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        match value {
+            "ECDSA_P256_SHA256_ASN1" => Ok(Self::ECDSA_P256_SHA256_ASN1),
+            "ECDSA_P384_SHA384_ASN1" => Ok(Self::ECDSA_P384_SHA384_ASN1),
+            "ED25519" => Ok(Self::ED25519),
+            "RSA_PSS_SHA256" => Ok(Self::RSA_PSS_SHA256(DEFAULT_KEY_SIZE)),
+            "RSA_PSS_SHA384" => Ok(Self::RSA_PSS_SHA384(DEFAULT_KEY_SIZE)),
+            "RSA_PSS_SHA512" => Ok(Self::RSA_PSS_SHA512(DEFAULT_KEY_SIZE)),
+            "RSA_PKCS1_SHA256" => Ok(Self::RSA_PKCS1_SHA256(DEFAULT_KEY_SIZE)),
+            "RSA_PKCS1_SHA384" => Ok(Self::RSA_PKCS1_SHA384(DEFAULT_KEY_SIZE)),
+            "RSA_PKCS1_SHA512" => Ok(Self::RSA_PKCS1_SHA512(DEFAULT_KEY_SIZE)),
+            unknown => Err(format!("Unsupported signing algorithm: {}", unknown)),
+        }
+    }
+}
+
+impl SigningScheme {
+    /// Create a key-pair due to the given signing scheme.
+    pub fn create_signer(&self) -> Result<SigStoreSigner> {
+        Ok(match self {
+            SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(
+                EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<p256::NistP256>::new()?)?,
+            ),
+            SigningScheme::ECDSA_P384_SHA384_ASN1 => SigStoreSigner::ECDSA_P384_SHA384_ASN1(
+                EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<p384::NistP384>::new()?)?,
+            ),
+            SigningScheme::ED25519 => {
+                SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
+            }
+            SigningScheme::RSA_PSS_SHA256(bit_size) => {
+                SigStoreSigner::RSA_PSS_SHA256(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha256,
+                    PaddingScheme::PSS,
+                ))
+            }
+            SigningScheme::RSA_PSS_SHA384(bit_size) => {
+                SigStoreSigner::RSA_PSS_SHA384(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha384,
+                    PaddingScheme::PSS,
+                ))
+            }
+            SigningScheme::RSA_PSS_SHA512(bit_size) => {
+                SigStoreSigner::RSA_PSS_SHA512(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha512,
+                    PaddingScheme::PSS,
+                ))
+            }
+            SigningScheme::RSA_PKCS1_SHA256(bit_size) => {
+                SigStoreSigner::RSA_PKCS1_SHA256(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha256,
+                    PaddingScheme::PKCS1v15,
+                ))
+            }
+            SigningScheme::RSA_PKCS1_SHA384(bit_size) => {
+                SigStoreSigner::RSA_PKCS1_SHA384(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha384,
+                    PaddingScheme::PKCS1v15,
+                ))
+            }
+            SigningScheme::RSA_PKCS1_SHA512(bit_size) => {
+                SigStoreSigner::RSA_PKCS1_SHA512(RSASigner::from_rsa_keys(
+                    &RSAKeys::new(*bit_size)?,
+                    DigestAlgorithm::Sha512,
+                    PaddingScheme::PKCS1v15,
+                ))
+            }
+        })
+    }
+}
 
 /// The default signature verification algorithm used by Sigstore.
 /// Sigstore relies on NIST P-256
 /// NIST P-256 is a Weierstrass curve specified in [FIPS 186-4: Digital Signature Standard (DSS)](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf).
 /// Also known as prime256v1 (ANSI X9.62) and secp256r1 (SECG)
-pub static SIGSTORE_DEFAULT_SIGNATURE_VERIFICATION_ALGORITHM:
-    &signature::EcdsaVerificationAlgorithm = &signature::ECDSA_P256_SHA256_ASN1;
-
-/// Describes the signature digest algorithms supported.
-/// The default one is sha256.
-#[derive(Debug, Clone)]
-pub enum SignatureDigestAlgorithm {
-    Sha256,
-    Sha384,
-    Sha512,
-}
-
-impl TryFrom<&str> for SignatureDigestAlgorithm {
-    type Error = String;
-
-    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
-        match value {
-            "sha256" => Ok(Self::Sha256),
-            "sha384" => Ok(Self::Sha384),
-            "sha512" => Ok(Self::Sha512),
-            unknown => Err(format!(
-                "Unsupported signature digest algorithm: {}",
-                unknown
-            )),
-        }
-    }
-}
-
-impl Default for SignatureDigestAlgorithm {
+impl Default for SigningScheme {
     fn default() -> Self {
-        Self::Sha256
+        SigningScheme::ECDSA_P256_SHA256_ASN1
     }
 }
 
@@ -68,7 +160,12 @@ pub(crate) mod certificate;
 pub(crate) mod certificate_pool;
 
 pub mod verification_key;
-pub use verification_key::CosignVerificationKey;
+
+use self::signing_key::{
+    ecdsa::ec::{EcdsaKeys, EcdsaSigner},
+    ed25519::{Ed25519Keys, Ed25519Signer},
+    rsa::{keypair::RSAKeys, DigestAlgorithm, PaddingScheme, RSASigner, DEFAULT_KEY_SIZE},
+};
 
 pub mod signing_key;
 

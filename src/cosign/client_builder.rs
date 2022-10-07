@@ -16,9 +16,8 @@
 use tracing::info;
 
 use super::client::Client;
-use crate::crypto::{
-    certificate_pool::CertificatePool, CosignVerificationKey, SignatureDigestAlgorithm,
-};
+use crate::crypto::SigningScheme;
+use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
 use crate::errors::Result;
 use crate::registry::{Certificate, ClientConfig};
 
@@ -125,7 +124,7 @@ impl ClientBuilder {
             }
             Some(data) => Some(CosignVerificationKey::from_pem(
                 data.as_bytes(),
-                SignatureDigestAlgorithm::default(),
+                &SigningScheme::default(),
             )?),
         };
 
