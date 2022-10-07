@@ -1,3 +1,24 @@
+# v0.5.0
+
+## Enhancements
+* update user-agent value to be specific to sigstore-rs (https://github.com/sigstore/sigstore-rs/pull/122)
+* remove /api/v1/version from client by (https://github.com/sigstore/sigstore-rs/pull/121)
+* crate async fulcio client (https://github.com/sigstore/sigstore-rs/pull/132)
+* Removed ring dependency (https://github.com/sigstore/sigstore-rs/pull/127)
+
+## Others
+
+* Update dependencies
+* Refactoring and examples for key interface (https://github.com/sigstore/sigstore-rs/pull/123)
+* Fix doc test failures (https://github.com/sigstore/sigstore-rs/pull/136)
+
+## Contributors
+* Bob Callaway (@bobcallaway)
+* Bob McWhirter (@bobmcwhirter)
+* Flavio Castelli (@flavio)
+* Luke Hinds (@lukehinds)
+* Xynnn (@Xynnn007)
+
 # v0.4.0
 
 ## Enhancements
