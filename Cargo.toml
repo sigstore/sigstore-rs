@@ -48,7 +48,7 @@ digest = "0.10.3"
 signature = { version = "1.5.0", features = [ "digest-preview" ] }
 ed25519 = { version = "1", features = [ "alloc" ] }
 ed25519-dalek-fiat = "0.1.0"
-rsa = "0.7.0-rc.1"
+rsa = "0.7.0"
 pkcs1 = "0.4.0"
 
 [dev-dependencies]
