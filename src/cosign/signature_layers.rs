@@ -173,8 +173,6 @@ impl SignatureLayer {
     ///     entries
     ///   * `fulcio_pub_key`: the public key provided by Fulcio's certificate.
     ///     Used to verify the `certificate` entries
-    ///   * `cert_email`: optional, the SAN to look for inside of trusted
-    ///     certificates issued by Fulcio
     ///
     /// **Note well:** the certificate and bundle added to the final SignatureLayer
     /// object are to be considered **trusted** and **verified**, according to
