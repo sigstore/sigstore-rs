@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Rpm : RPM package
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Rpm {
     #[serde(rename = "kind")]
     pub kind: String,

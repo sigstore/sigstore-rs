@@ -278,7 +278,7 @@ mod tests {
                             .join("targets")
                             .join(filename),
                     )
-                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    .unwrap_or_else(|_| panic!("cannot read {} from test data", filename));
                     crate::registry::Certificate {
                         data,
                         encoding: crate::registry::CertificateEncoding::Pem,
@@ -329,7 +329,7 @@ mod tests {
                             .join("targets")
                             .join(filename),
                     )
-                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    .unwrap_or_else(|_| panic!("cannot read {} from test data", filename));
                     crate::registry::Certificate {
                         data,
                         encoding: crate::registry::CertificateEncoding::Pem,
@@ -358,7 +358,7 @@ mod tests {
         let cache_dir = TempDir::new().expect("Cannot create temp cache dir");
 
         // put some outdated files inside of the cache
-        for filename in vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"] {
+        for filename in &["fulcio.crt.pem", "fulcio_v1.crt.pem"] {
             fs::write(cache_dir.path().join(filename), b"fake fulcio")
                 .expect("Cannot write file to cache dir");
         }
@@ -386,7 +386,7 @@ mod tests {
                             .join("targets")
                             .join(filename),
                     )
-                    .expect(format!("cannot read {} from test data", filename).as_str());
+                    .unwrap_or_else(|_| panic!("cannot read {} from test data", filename));
                     crate::registry::Certificate {
                         data,
                         encoding: crate::registry::CertificateEncoding::Pem,

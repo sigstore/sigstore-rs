@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SearchIndex {
     #[serde(rename = "email", skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,

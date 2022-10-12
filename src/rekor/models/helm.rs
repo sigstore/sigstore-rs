@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Helm : Helm chart
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Helm {
     #[serde(rename = "kind")]
     pub kind: String,

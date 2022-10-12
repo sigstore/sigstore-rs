@@ -238,7 +238,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         let public_key = private_key.public_key();
 
         let ec_pub_key =
-            EcKey::from_public_key(&group, &public_key).expect("Cannot create ec pub key");
+            EcKey::from_public_key(&group, public_key).expect("Cannot create ec pub key");
         let pkey = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
 
         let mut x509_name_builder = X509NameBuilder::new()?;
@@ -369,7 +369,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         // set issuer
         if let Some(issuer_data) = issuer {
             let issuer_name = issuer_data.cert.subject_name();
-            x509_builder.set_issuer_name(&issuer_name)?;
+            x509_builder.set_issuer_name(issuer_name)?;
         } else {
             // self signed cert
             x509_builder.set_issuer_name(&x509_name)?;

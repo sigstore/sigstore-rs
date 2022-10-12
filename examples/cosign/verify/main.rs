@@ -111,7 +111,7 @@ async fn run_app(
     let mut client_builder = sigstore::cosign::ClientBuilder::default();
 
     if let Some(key) = frd.rekor_pub_key.as_ref() {
-        client_builder = client_builder.with_rekor_pub_key(&key);
+        client_builder = client_builder.with_rekor_pub_key(key);
     }
 
     if !frd.fulcio_certs.is_empty() {

@@ -340,10 +340,9 @@ mod tests {
     #[case(SigningScheme::ECDSA_P384_SHA384_ASN1)]
     #[case(SigningScheme::ED25519)]
     fn sigstore_signing(#[case] signing_scheme: SigningScheme) {
-        let signer = signing_scheme.create_signer().expect(&format!(
-            "create SigStoreSigner with {:?} failed",
-            signing_scheme
-        ));
+        let signer = signing_scheme
+            .create_signer()
+            .unwrap_or_else(|_| panic!("create SigStoreSigner with {:?} failed", signing_scheme));
         let key_pair = signer
             .to_sigstore_keypair()
             .expect("convert SigStoreSigner to SigStoreKeypair failed.");

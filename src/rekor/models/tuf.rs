@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Tuf : TUF metadata
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Tuf {
     #[serde(rename = "kind")]
     pub kind: String,

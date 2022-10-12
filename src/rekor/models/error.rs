@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Error {
     #[serde(rename = "code", skip_serializing_if = "Option::is_none")]
     pub code: Option<i32>,

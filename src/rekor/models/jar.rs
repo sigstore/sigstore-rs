@@ -11,7 +11,7 @@
 /// Jar : Java Archive (JAR)
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Jar {
     #[serde(rename = "kind")]
     pub kind: String,

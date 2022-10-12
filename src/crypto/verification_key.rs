@@ -288,7 +288,7 @@ mod tests {
                 .expect("Cannot create CosignVerificationKey");
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
-        let outcome = verification_key.verify_signature(signature, &msg.as_bytes());
+        let outcome = verification_key.verify_signature(signature, msg.as_bytes());
         assert!(outcome.is_ok());
     }
 
@@ -301,7 +301,7 @@ mod tests {
         let msg = "hello world";
 
         let err = verification_key
-            .verify_signature(signature, &msg.as_bytes())
+            .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
         let found = match err {
             SigstoreError::PublicKeyVerificationError => true,
@@ -319,7 +319,7 @@ mod tests {
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
         let err = verification_key
-            .verify_signature(signature, &msg.as_bytes())
+            .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
         let found = match err {
             SigstoreError::Base64DecodeError(_) => true,
@@ -344,7 +344,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
 
         let err = verification_key
-            .verify_signature(signature, &msg.as_bytes())
+            .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
         let found = match err {
             SigstoreError::PublicKeyVerificationError => true,
@@ -374,7 +374,7 @@ DwIDAQAB
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry.suse.com/suse/sle-micro/5.0/toolbox"},"image":{"docker-manifest-digest":"sha256:356631f7603526a0af827741f5fe005acf19b7ef7705a34241a91c2d47a6db5e"},"type":"cosign container image signature"},"optional":{"creator":"OBS"}}"#;
 
         assert!(verification_key
-            .verify_signature(signature, &msg.as_bytes())
+            .verify_signature(signature, msg.as_bytes())
             .is_ok());
     }
 }

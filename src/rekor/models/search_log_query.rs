@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize)]
 pub struct SearchLogQuery {
     #[serde(rename = "entryUUIDs", skip_serializing_if = "Option::is_none")]
     pub entry_uuids: Option<Vec<String>>,
