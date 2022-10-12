@@ -116,7 +116,24 @@ pub struct SignatureLayer {
     /// The digest of the layer
     pub oci_digest: String,
     /// The certificate holding the identity of the signer, plus his
-    /// verification key. This exists for signature done with keyless mode.
+    /// verification key. This exists for signature done with keyless mode or
+    /// when a PKCS11 token was used.
+    ///
+    /// The value of `CertificateSignature` is `None`
+    /// when no certificate was embedded into the
+    /// layer, or when the embedded certificate could not be verified.
+    ///
+    /// Having a `None` value will rightfully cause the
+    /// keyless verifiers like
+    /// [`CertSubjectEmailVerifier`](crate::cosign::verification_constraint::CertSubjectEmailVerifier)
+    /// or
+    /// [`CertSubjectUrlVerifier`](crate::cosign::verification_constraint::CertSubjectUrlVerifier)
+    /// to fail verification.
+    /// However, it will still be possible to use the
+    /// [`PublicKeyVerifier`](crate::cosign::verification_constraint::PublicKeyVerifier)
+    /// to verify the layer. This can be useful to verify signatures produced
+    /// with a PKCS11 token, but with Rekor's integration disabled at
+    /// signature time.
     pub certificate_signature: Option<CertificateSignature>,
     /// The bundle produced by Rekor.
     pub bundle: Option<Bundle>,
@@ -218,7 +235,7 @@ impl SignatureLayer {
             &annotations,
             fulcio_cert_pool,
             bundle.as_ref(),
-        )?;
+        );
 
         Ok(SignatureLayer {
             oci_digest: descriptor.digest.clone(),
@@ -259,29 +276,42 @@ impl SignatureLayer {
         annotations: &HashMap<String, String>,
         fulcio_cert_pool: Option<&CertificatePool>,
         bundle: Option<&Bundle>,
-    ) -> Result<Option<CertificateSignature>> {
+    ) -> Option<CertificateSignature> {
         let cert_raw = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
             Some(value) => value,
-            None => return Ok(None),
+            None => return None,
         };
 
         let fulcio_cert_pool = match fulcio_cert_pool {
             Some(cp) => cp,
             None => {
-                return Err(SigstoreError::SigstoreFulcioCertificatesNotProvidedError);
+                info!(
+                    reason = "fulcio certificates not provided",
+                    "Ignoring certificate annotation"
+                );
+                return None;
             }
         };
 
         let bundle = match bundle {
             Some(b) => b,
             None => {
-                return Err(SigstoreError::SigstoreRekorBundleNotFoundError);
+                info!(
+                    reason = "rekor bundle not found",
+                    "Ignoring certificate annotation"
+                );
+                return None;
             }
         };
 
-        let certificate_signature =
-            CertificateSignature::from_certificate(cert_raw.as_bytes(), fulcio_cert_pool, bundle)?;
-        Ok(Some(certificate_signature))
+        match CertificateSignature::from_certificate(cert_raw.as_bytes(), fulcio_cert_pool, bundle)
+        {
+            Ok(certificate_signature) => Some(certificate_signature),
+            Err(e) => {
+                info!(reason=?e, "Ignoring certificate annotation");
+                None
+            }
+        }
     }
 
     /// Given a Cosign public key, check whether this Signature Layer has been
@@ -717,7 +747,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             None,
         );
 
-        assert!(actual.unwrap().is_none());
+        assert!(actual.is_none());
     }
 
     #[test]
@@ -729,17 +759,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
-        let error = SignatureLayer::get_certificate_signature_from_annotations(
+        let cert = SignatureLayer::get_certificate_signature_from_annotations(
             &annotations,
             Some(&fulcio_cert_pool),
             None,
-        )
-        .expect_err("Didn't get an error");
-
-        assert!(matches!(
-            error,
-            SigstoreError::SigstoreRekorBundleNotFoundError
-        ));
+        );
+        assert!(cert.is_none());
     }
 
     #[test]
@@ -751,17 +776,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let bundle = build_bundle();
 
-        let error = SignatureLayer::get_certificate_signature_from_annotations(
+        let cert = SignatureLayer::get_certificate_signature_from_annotations(
             &annotations,
             None,
             Some(&bundle),
-        )
-        .expect_err("Didn't get an error");
-
-        assert!(matches!(
-            error,
-            SigstoreError::SigstoreFulcioCertificatesNotProvidedError
-        ));
+        );
+        assert!(cert.is_none());
     }
 
     #[test]
