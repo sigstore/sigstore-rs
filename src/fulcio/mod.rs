@@ -5,7 +5,6 @@ use crate::crypto::SigningScheme;
 use crate::errors::{Result, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use openidconnect::core::CoreIdToken;
-use reqwest::header::HeaderName;
 use reqwest::Body;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
@@ -19,7 +18,7 @@ pub const FULCIO_ROOT: &str = "https://fulcio.sigstore.dev/";
 /// Path within Fulcio to obtain a signing certificate.
 pub const SIGNING_CERT_PATH: &str = "api/v1/signingCert";
 
-const CONTENT_TYPE_HEADER_NAME: HeaderName = HeaderName::from_static("content-type");
+const CONTENT_TYPE_HEADER_NAME: &str = "content-type";
 
 /// Fulcio certificate signing request
 ///
