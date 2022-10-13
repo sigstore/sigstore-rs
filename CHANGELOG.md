@@ -1,3 +1,18 @@
+# v0.5.1
+
+## Fixes
+
+* fix verification of signatures produced with PKI11 (https://github.com/sigstore/sigstore-rs/pull/142)
+
+## Others
+
+* Update rsa dependency to stable version 0.7.0 (https://github.com/sigstore/sigstore-rs/pull/141)
+* Bump actions/checkout from 3.0.2 to 3.1.0 (https://github.com/sigstore/sigstore-rs/pull/140)
+
+## Contributors
+* Flavio Castelli (@flavio)
+* Xynnn (@Xynnn007)
+
 # v0.5.0
 
 ## Enhancements
