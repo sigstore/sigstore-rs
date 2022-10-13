@@ -1,3 +1,12 @@
+# v0.5.2
+
+## Fixes
+
+* Address compilation error (https://github.com/sigstore/sigstore-rs/pull/143)
+
+## Contributors
+* Flavio Castelli (@flavio)
+
 # v0.5.1
 
 ## Fixes
