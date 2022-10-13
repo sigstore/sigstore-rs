@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Alpine : Alpine package
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Alpine {
     #[serde(rename = "kind")]
     pub kind: String,

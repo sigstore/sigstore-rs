@@ -30,7 +30,7 @@ fn main() -> Result<(), anyhow::Error> {
             open::that(url.0.to_string())?;
             println!(
                 "Open this URL in a browser if it does not automatically open for you:\n{}\n",
-                url.0.to_string()
+                url.0
             );
         }
         Err(e) => println!("{}", e),

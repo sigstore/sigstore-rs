@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Stores the response returned by Rekor after making a new entry
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     uuid: String,
@@ -14,7 +14,7 @@ pub struct LogEntry {
     verification: Verification,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attestation {
     // This field is just a place holder
@@ -24,7 +24,7 @@ pub struct Attestation {
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Verification {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,7 +33,7 @@ pub struct Verification {
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InclusionProof {
     hashes: Vec<String>,

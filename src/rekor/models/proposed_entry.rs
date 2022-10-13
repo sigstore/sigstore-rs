@@ -9,7 +9,7 @@
 */
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ProposedEntry {
     #[serde(rename = "alpine")]

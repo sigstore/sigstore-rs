@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ConsistencyProof {
     /// The hash value stored at the root of the merkle tree at the time the proof was generated
     #[serde(rename = "rootHash")]

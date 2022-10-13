@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Intoto : Intoto object
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Intoto {
     #[serde(rename = "kind")]
     pub kind: String,

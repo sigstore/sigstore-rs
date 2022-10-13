@@ -67,14 +67,31 @@ pub trait CosignCapabilities {
     /// Returns the list of [`SignatureLayer`](crate::cosign::signature_layers::SignatureLayer)
     /// objects that are associated with the given signature object.
     ///
-    /// When Fulcio's integration has been enabled, the returned `SignatureLayer`
-    /// objects have been verified using the certificates bundled inside of the
-    /// signature image. All these certificates have been issues by Fulcio's CA.
+    /// Each layer is verified, to ensure it contains legitimate data.
     ///
-    /// When Rekor's integration is enabled, the [`SignatureLayer`] objects have
-    /// been successfully verified using the Bundle object found inside of the
-    /// signature image. All the Bundled objects have been verified using Rekor's
-    /// signature.
+    /// ## Layers with embedded certificate
+    ///
+    /// A signature can contain a certificate, this happens when signatures
+    /// are produced in keyless mode or when a PKCS11 tokens are used.
+    ///
+    /// The certificate is added to [`SignatureLayer::certificate_signature`]
+    /// only when it can be trusted.
+    ///
+    /// In order to trust an embedded certificate, the following prerequisites
+    /// must be satisfied:
+    ///
+    /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
+    ///   have been created with Rekor integration enabled (see
+    ///   [`sigstore::cosign::ClientBuilder::with_rekor_pub_key`](crate::cosign::ClientBuilder::with_rekor_pub_key))
+    /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
+    ///   have been created with Fulcio integration enabled (see
+    ///   [`sigstore::cosign::ClientBuilder::with_fulcio_certs`](crate::cosign::ClientBuilder::with_fulcio_certs))
+    /// * The layer must include a bundle produced by Rekor
+    ///
+    /// When the embedded certificate cannot be verified, [`SignatureLayer::certificate_signature`]
+    /// is going to be `None`.
+    ///
+    /// ## Usage
     ///
     /// These returned objects can then be verified against
     /// [`VerificationConstraints`](crate::cosign::verification_constraint::VerificationConstraint)

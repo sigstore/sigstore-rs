@@ -13,7 +13,7 @@ use url::Url;
 
 /// Hashedrekord : Hashed Rekord object
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Hashedrekord {
     #[serde(rename = "kind")]
     pub kind: String,
@@ -35,7 +35,7 @@ impl Hashedrekord {
 }
 
 /// Stores the Signature and Data struct
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Spec {
     signature: Signature,
@@ -50,7 +50,7 @@ impl Spec {
 }
 
 /// Stores the signature format, signature of the artifact and the PublicKey struct
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Signature {
     format: String,
@@ -69,7 +69,7 @@ impl Signature {
 }
 
 /// Stores the public key used to sign the artifact
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKey {
     content: String,
@@ -81,7 +81,7 @@ impl PublicKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
     hash: Hash,
@@ -94,7 +94,7 @@ impl Data {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum AlgorithmKind {
     sha256,
@@ -102,7 +102,7 @@ pub enum AlgorithmKind {
 }
 
 /// Stores the algorithm used to hash the artifact and the value of the hash
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hash {
     algorithm: AlgorithmKind,

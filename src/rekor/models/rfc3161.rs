@@ -11,7 +11,7 @@
 /// Rfc3161 : RFC3161 Timestamp
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Rfc3161 {
     #[serde(rename = "kind")]
     pub kind: String,
