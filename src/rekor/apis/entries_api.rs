@@ -58,11 +58,14 @@ pub struct LogEntries {
     entries: Vec<LogEntry>,
 }
 
-// Formats the returned response such that it can be read into a struct
+// TEMPORARY: Formats the returned response such that it can be read into a struct
+// TODO: Remove once upstream issue around dynamic top level key is resolved:
+// https://github.com/sigstore/rekor/issues/808
 pub fn parse_response(local_var_content: String) -> String {
-    let uuid: &str = &local_var_content[1..67];
-    let rest: &str = &local_var_content[69..local_var_content.len() - 2];
-    "{\"uuid\": ".to_string() + uuid + "," + rest
+    let uuid: &str = &local_var_content[1..82];
+    let rest: &str = &local_var_content[85..local_var_content.len() - 2];
+
+    "{\"uuid\":".to_string() + uuid + "\"," + rest
 }
 
 /// Creates an entry in the transparency log for a detached signature, public key, and content. Items can be included in the request or fetched by the server when URLs are specified.
