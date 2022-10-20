@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
-    uuid: String,
+    pub uuid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    attestation: Option<Attestation>,
-    body: String,
-    integrated_time: i64,
-    log_i_d: String,
-    log_index: i64,
-    verification: Verification,
+    pub attestation: Option<Attestation>,
+    pub body: String,
+    pub integrated_time: i64,
+    pub log_i_d: String,
+    pub log_index: i64,
+    pub verification: Verification,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
