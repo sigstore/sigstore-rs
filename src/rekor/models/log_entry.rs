@@ -1,3 +1,4 @@
+use crate::rekor::TreeSize;
 use serde::{Deserialize, Serialize};
 
 /// Stores the response returned by Rekor after making a new entry
@@ -39,5 +40,5 @@ pub struct InclusionProof {
     hashes: Vec<String>,
     log_index: i64,
     root_hash: String,
-    tree_size: i64,
+    tree_size: TreeSize,
 }
