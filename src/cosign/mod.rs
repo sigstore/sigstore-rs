@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Strucs providing cosign verification capabilities
+//! Structs providing cosign verification capabilities
 //!
 //! The focus of this crate is to provide the verification capabilities of cosign,
 //! not the signing one.
