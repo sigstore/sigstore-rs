@@ -1,3 +1,16 @@
+# v0.5.3
+
+## Fixes
+
+* rustls should not require openssl by (https://github.com/sigstore/sigstore-rs/pull/146)
+
+## Others
+* Rework Rekor module structure and enable doc tests (https://github.com/sigstore/sigstore-rs/pull/145)
+
+## Contributors
+* Flavio Castelli (@flavio)
+* Lily Sturmann (@lkatalin)
+
 # v0.5.2
 
 ## Fixes
