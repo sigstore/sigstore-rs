@@ -104,7 +104,7 @@ pub const RSA_PRIVATE_KEY_PEM_LABEL: &str = "RSA PRIVATE KEY";
 /// All private export methods using the wrapper `Zeroizing`.
 /// It will tell the compiler when the
 /// result der object is dropped, the relative memory will
-/// be flushed to zero to avoid leavint the private key in
+/// be flushed to zero to avoid leaving the private key in
 /// the ram.
 pub trait KeyPair {
     /// `public_key_to_pem` will export the PEM-encoded public key.
