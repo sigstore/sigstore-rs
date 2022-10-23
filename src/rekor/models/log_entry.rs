@@ -1,5 +1,9 @@
-use crate::rekor::TreeSize;
+use base64::decode;
 use serde::{Deserialize, Serialize};
+
+use crate::errors::SigstoreError;
+use crate::rekor::models::hashedrekord::Spec;
+use crate::rekor::TreeSize;
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -13,6 +17,23 @@ pub struct LogEntry {
     pub log_i_d: String,
     pub log_index: i64,
     pub verification: Verification,
+}
+
+impl LogEntry {
+    pub fn decode_body(&self) -> Result<Body, SigstoreError> {
+        let decoded = decode(&self.body)?;
+        serde_json::from_slice(&decoded).map_err(SigstoreError::from)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Body {
+    #[serde(rename = "kind")]
+    pub kind: String,
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    #[serde(rename = "spec")]
+    pub spec: Spec,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
