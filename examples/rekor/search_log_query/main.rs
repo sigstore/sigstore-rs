@@ -93,10 +93,7 @@ async fn main() {
             .unwrap_or(&HASH.to_string())
             .to_owned(),
     );
-    let data = Data::new(
-        hash,
-        Url::parse(flags.get_one::<String>("url").unwrap_or(&URL.to_string())).unwrap(),
-    );
+    let data = Data::new(hash);
     let public_key = PublicKey::new(
         flags
             .get_one::<String>("public_key")

@@ -9,7 +9,6 @@
  */
 
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 /// Hashedrekord : Hashed Rekord object
 
@@ -84,13 +83,12 @@ impl PublicKey {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
-    hash: Hash,
-    url: Url,
+    pub hash: Hash,
 }
 
 impl Data {
-    pub fn new(hash: Hash, url: Url) -> Data {
-        Data { hash, url }
+    pub fn new(hash: Hash) -> Data {
+        Data { hash }
     }
 }
 
