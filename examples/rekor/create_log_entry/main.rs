@@ -112,10 +112,7 @@ async fn main() {
             .unwrap_or(&HASH.to_string())
             .to_owned(),
     );
-    let data = Data::new(
-        hash,
-        Url::parse(flags.get_one::<String>("url").unwrap_or(&URL.to_string())).unwrap(),
-    );
+    let data = Data::new(hash);
     let public_key = PublicKey::new(
         flags
             .get_one::<String>("public_key")
@@ -123,10 +120,6 @@ async fn main() {
             .to_owned(),
     );
     let signature = Signature::new(
-        flags
-            .get_one::<String>("key_format")
-            .unwrap_or(&KEY_FORMAT.to_string())
-            .to_owned(),
         flags
             .get_one("signature")
             .unwrap_or(&SIGNATURE.to_string())
