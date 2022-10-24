@@ -102,10 +102,6 @@ async fn main() {
     );
     let signature = Signature::new(
         flags
-            .get_one::<String>("key_format")
-            .unwrap_or(&KEY_FORMAT.to_string())
-            .to_owned(),
-        flags
             .get_one::<String>("signature")
             .unwrap_or(&SIGNATURE.to_string())
             .to_owned(),

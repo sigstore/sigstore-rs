@@ -52,15 +52,13 @@ impl Spec {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Signature {
-    format: String,
-    content: String,
-    public_key: PublicKey,
+    pub content: String,
+    pub public_key: PublicKey,
 }
 
 impl Signature {
-    pub fn new(format: String, content: String, public_key: PublicKey) -> Signature {
+    pub fn new(content: String, public_key: PublicKey) -> Signature {
         Signature {
-            format,
             content,
             public_key,
         }
