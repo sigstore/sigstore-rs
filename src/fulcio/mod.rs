@@ -5,6 +5,7 @@ use crate::crypto::SigningScheme;
 use crate::errors::{Result, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use openidconnect::core::CoreIdToken;
+use openssl::x509::X509;
 use reqwest::Body;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
@@ -75,6 +76,27 @@ pub struct FulcioCert(String);
 impl AsRef<[u8]> for FulcioCert {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl FulcioCert {
+    pub fn new(s: &str) -> FulcioCert {
+        FulcioCert(String::from(s))
+    }
+
+    pub fn to_inner(&self) -> &str {
+        &self.0
+    }
+
+    pub fn to_x509(&self) -> Result<X509> {
+        let x509 = X509::from_pem(self.to_inner().as_bytes())?;
+        Ok(x509)
+    }
+
+    pub fn extract_pubkey_string(&self) -> Result<String> {
+        let certificate = self.to_x509()?;
+        let pub_key_pem = certificate.public_key()?.public_key_to_pem()?;
+        String::from_utf8(pub_key_pem).map_err(|e| SigstoreError::from(e.utf8_error()))
     }
 }
 

@@ -49,11 +49,15 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
+
     #[error(transparent)]
     X509Error(#[from] x509_parser::error::X509Error),
 
     #[error(transparent)]
     CertError(#[from] picky::x509::certificate::CertError),
+
+    #[error(transparent)]
+    ErrorStack(#[from] openssl::error::ErrorStack),
 
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
