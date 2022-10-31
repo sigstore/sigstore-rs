@@ -77,7 +77,7 @@ pub struct PublicKeyVerifier {
 
 impl PublicKeyVerifier {
     /// Create a new instance of `PublicKeyVerifier`.
-    /// The `key_raw` variable holds a PEM encoded rapresentation of the
+    /// The `key_raw` variable holds a PEM encoded representation of the
     /// public key to be used at verification time.
     pub fn new(key_raw: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
         let key = CosignVerificationKey::from_pem(key_raw, signing_scheme)?;
@@ -85,7 +85,7 @@ impl PublicKeyVerifier {
     }
 
     /// Create a new instance of `PublicKeyVerifier`.
-    /// The `key_raw` variable holds a PEM encoded rapresentation of the
+    /// The `key_raw` variable holds a PEM encoded representation of the
     /// public key to be used at verification time. The verification
     /// algorithm will be derived from the public key type:
     /// * `RSA public key`: `RSA_PSS_SHA256`
