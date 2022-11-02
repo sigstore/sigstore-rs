@@ -20,8 +20,8 @@ Sign a container image:
 cosign sign -key cosign.key registry-testing.svc.lan/busybox
 ```
 
-Verify the image signature using the example program defined under
-[`examples/verify`](https://github.com/flavio/sigstore-rs/tree/main/examples/verify):
+Verify the image signature using the example program defined in
+[main.rs](./main.rs):
 
 ```console
 cargo run --example verify -- \
