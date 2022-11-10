@@ -32,7 +32,7 @@ pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) ->
     Ok(())
 }
 
-fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
+pub(crate) fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
     let key_usage = certificate
         .tbs_certificate
         .key_usage()?
@@ -52,7 +52,7 @@ fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
     Ok(())
 }
 
-fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
+pub(crate) fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
     let _subject_alternative_name = certificate
         .tbs_certificate
         .subject_alternative_name()?
@@ -60,7 +60,7 @@ fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
     Ok(())
 }
 
-fn verify_validity(certificate: &X509Certificate) -> Result<()> {
+pub(crate) fn verify_validity(certificate: &X509Certificate) -> Result<()> {
     // Comment taken from cosign verification code:
     // THIS IS IMPORTANT: WE DO NOT CHECK TIMES HERE
     // THE CERTIFICATE IS TREATED AS TRUSTED FOREVER
