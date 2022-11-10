@@ -93,12 +93,28 @@ impl CertificatePool {
     /// Because of that the validity checks performed by this method are more
     /// relaxed. The validity checks are done inside of
     /// [`crate::crypto::verify_validity`] and [`crate::crypto::verify_expiration`].
-    pub(crate) fn verify(&self, cert_pem: &[u8]) -> Result<()> {
-        let cert_pem_str = String::from_utf8(cert_pem.to_vec()).map_err(|_| {
+    pub(crate) fn verify_pem_cert(&self, cert_pem: &[u8]) -> Result<()> {
+        let cert_pem_str = std::str::from_utf8(cert_pem).map_err(|_| {
             SigstoreError::UnexpectedError("Cannot convert cert back to string".to_string())
         })?;
-        let cert = picky::x509::Cert::from_pem_str(&cert_pem_str)?;
+        let cert = picky::x509::Cert::from_pem_str(cert_pem_str)?;
+        self.verify(&cert)
+    }
 
+    /// Ensures the given certificate has been issued by one of the trusted root certificates
+    /// An `Err` is returned when the verification fails.
+    ///
+    /// **Note well:** certificates issued by Fulciuo are, by design, valid only
+    /// for a really limited amount of time.
+    /// Because of that the validity checks performed by this method are more
+    /// relaxed. The validity checks are done inside of
+    /// [`crate::crypto::verify_validity`] and [`crate::crypto::verify_expiration`].
+    pub(crate) fn verify_der_cert(&self, bytes: &[u8]) -> Result<()> {
+        let cert = picky::x509::Cert::from_der(bytes)?;
+        self.verify(&cert)
+    }
+
+    fn verify(&self, cert: &picky::x509::Cert) -> Result<()> {
         let verified = self
             .create_chains_for_all_certificates()
             .iter()
