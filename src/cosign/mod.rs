@@ -36,11 +36,13 @@
 //! In case you want to mock sigstore interactions inside of your own code, you
 //! can implement the [`CosignCapabilities`] trait inside of your test suite.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use tracing::warn;
 
-use crate::errors::{Result, SigstoreVerifyConstraintsError};
-use crate::registry::Auth;
+use crate::errors::{Result, SigstoreApplicationConstraintsError, SigstoreVerifyConstraintsError};
+use crate::registry::{Auth, PushResponse};
 
 mod bundle;
 pub(crate) mod constants;
@@ -54,11 +56,13 @@ pub mod client_builder;
 pub use self::client_builder::ClientBuilder;
 
 pub mod verification_constraint;
+pub use self::constraint::{Constraint, SignConstraintRefVec};
 use self::verification_constraint::{VerificationConstraint, VerificationConstraintRefVec};
 
 pub mod payload;
 pub use payload::simple_signing;
 
+pub mod constraint;
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
 /// Cosign client
@@ -105,6 +109,34 @@ pub trait CosignCapabilities {
         source_image_digest: &str,
         cosign_image: &str,
     ) -> Result<Vec<SignatureLayer>>;
+
+    /// Push [`SignatureLayer`] objects to the registry. This function will do
+    /// the following steps:
+    /// * Generate a series of [`oci_distribution::client::ImageLayer`]s due to
+    /// the given [`Vec<SignatureLayer>`].
+    /// * Generate a `OciImageManifest` of [`oci_distribution::manifest::OciManifest`]
+    /// due to the given `source_image_digest` and `signature_layers`. It supports
+    /// to be extended when newly published
+    /// [Referrers API of OCI Registry v1.1.0](https://github.com/opencontainers/distribution-spec/blob/v1.1.0-rc1/spec.md#listing-referrers),
+    /// is prepared. At that time,
+    /// [an artifact manifest](https://github.com/opencontainers/image-spec/blob/v1.1.0-rc2/artifact.md)
+    /// will be created instead of [an image manifest](https://github.com/opencontainers/image-spec/blob/v1.1.0-rc2/manifest.md).
+    /// * Push the generated manifest together with the layers
+    /// to the `target_reference`. `target_reference` contains information
+    /// about the registry, repository and tag.
+    ///
+    /// The parameters:
+    /// - `annotations`: annotations of the generated manifest
+    /// - `auth`: Credential used to access the registry
+    /// - `target_reference`: target reference to push the manifest
+    /// - `signature_layers`: [`SignatureLayer`] objects containing signature information
+    async fn push_signature(
+        &mut self,
+        annotations: Option<HashMap<String, String>>,
+        auth: &Auth,
+        target_reference: &str,
+        signature_layers: Vec<SignatureLayer>,
+    ) -> Result<PushResponse>;
 }
 
 /// Given a list of trusted `SignatureLayer`, find all the constraints that
@@ -158,20 +190,67 @@ where
     }
 }
 
+/// Given a [`SignatureLayer`], apply all the constraints to that.
+///
+/// If there's any constraints that fails to apply, it means the
+/// application process fails.
+/// If all constraints succeed applying, it means that this layer
+/// passes applying constraints process.
+///
+/// Returns a `Result` with either `Ok()` for success or
+/// [`SigstoreApplicationConstraintsError`](crate::errors::SigstoreApplicationConstraintsError),
+/// which contains a vector of references to unapplied constraints.
+///
+/// See the documentation of the [`cosign::sign_constraint`](crate::cosign::sign_constraint) module for more
+/// details about how to define constraints.
+pub fn apply_constraints<'a, 'b, I>(
+    signature_layer: &'a mut SignatureLayer,
+    constraints: I,
+) -> std::result::Result<(), SigstoreApplicationConstraintsError<'b>>
+where
+    I: Iterator<Item = &'b Box<dyn Constraint>>,
+{
+    let unapplied_constraints: SignConstraintRefVec = constraints
+        .filter(|c| match c.add_constraint(signature_layer) {
+            Ok(is_applied) => !is_applied,
+            Err(e) => {
+                warn!(error = ?e, constraint = ?c, "Applying constraint failed due to error");
+                true
+            }
+        })
+        .collect();
+
+    if unapplied_constraints.is_empty() {
+        Ok(())
+    } else {
+        Err(SigstoreApplicationConstraintsError {
+            unapplied_constraints,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
     use std::collections::HashMap;
 
+    use super::constraint::{AnnotationMarker, PrivateKeySigner};
     use super::*;
     use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
+    use crate::cosign::simple_signing::Optional;
     use crate::cosign::verification_constraint::{
         AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
     };
     use crate::crypto::certificate_pool::CertificatePool;
     use crate::crypto::{CosignVerificationKey, SigningScheme};
-    use crate::simple_signing::Optional;
+
+    #[cfg(feature = "test-registry")]
+    use testcontainers::{
+        clients,
+        core::WaitFor,
+        images::{self, generic::GenericImage},
+    };
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -205,6 +284,9 @@ KsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCM
 WP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9
 TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 -----END CERTIFICATE-----"#;
+
+    #[cfg(feature = "test-registry")]
+    const SIGNED_IMAGE: &str = "busybox:1.34";
 
     pub(crate) fn get_fulcio_cert_pool() -> CertificatePool {
         let certificates = vec![
@@ -374,5 +456,174 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
         let err =
             verify_constraints(&layers, constraints.iter()).expect_err("we should have an err");
         assert_eq!(err.unsatisfied_constraints.len(), 1);
+    }
+
+    #[test]
+    fn add_constrains_all_succeed() {
+        let mut signature_layer = SignatureLayer::new_unsigned(
+            "test_image",
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        )
+        .expect("create SignatureLayer failed");
+
+        let signer = SigningScheme::ECDSA_P256_SHA256_ASN1
+            .create_signer()
+            .expect("create signer failed");
+        let signer = PrivateKeySigner::new_with_signer(signer);
+
+        let annotations = [(String::from("key"), String::from("value"))].into();
+        let annotations = AnnotationMarker::new(annotations);
+
+        let constrains: Vec<Box<dyn Constraint>> = vec![Box::new(signer), Box::new(annotations)];
+        apply_constraints(&mut signature_layer, constrains.iter()).expect("no error should occur");
+    }
+
+    #[test]
+    fn add_constrain_some_failed() {
+        let mut signature_layer = SignatureLayer::new_unsigned(
+            "test_image",
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        )
+        .expect("create SignatureLayer failed");
+
+        let signer = SigningScheme::ECDSA_P256_SHA256_ASN1
+            .create_signer()
+            .expect("create signer failed");
+        let signer = PrivateKeySigner::new_with_signer(signer);
+        let another_signer_of_same_layer = SigningScheme::ECDSA_P256_SHA256_ASN1
+            .create_signer()
+            .expect("create signer failed");
+        let another_signer_of_same_layer =
+            PrivateKeySigner::new_with_signer(another_signer_of_same_layer);
+
+        let annotations = [(String::from("key"), String::from("value"))].into();
+        let annotations = AnnotationMarker::new(annotations);
+
+        let constrains: Vec<Box<dyn Constraint>> = vec![
+            Box::new(signer),
+            Box::new(annotations),
+            Box::new(another_signer_of_same_layer),
+        ];
+        apply_constraints(&mut signature_layer, constrains.iter())
+            .expect_err("no error should occur");
+    }
+
+    #[cfg(feature = "test-registry")]
+    #[rstest::rstest]
+    #[case(SigningScheme::RSA_PSS_SHA256(2048))]
+    #[case(SigningScheme::RSA_PSS_SHA384(2048))]
+    #[case(SigningScheme::RSA_PSS_SHA512(2048))]
+    #[case(SigningScheme::RSA_PKCS1_SHA256(2048))]
+    #[case(SigningScheme::RSA_PKCS1_SHA384(2048))]
+    #[case(SigningScheme::RSA_PKCS1_SHA512(2048))]
+    #[case(SigningScheme::ECDSA_P256_SHA256_ASN1)]
+    #[case(SigningScheme::ECDSA_P384_SHA384_ASN1)]
+    #[case(SigningScheme::ED25519)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn sign_verify_image(#[case] signing_scheme: SigningScheme) {
+        let docker = clients::Cli::default();
+        let image = registry_image();
+        let test_container = docker.run(image);
+        let port = test_container.get_host_port_ipv4(5000);
+
+        let mut client = ClientBuilder::default()
+            .enable_registry_caching()
+            .with_oci_client_config(crate::registry::ClientConfig {
+                protocol: crate::registry::ClientProtocol::HttpsExcept(vec![format!(
+                    "localhost:{}",
+                    port
+                )]),
+                ..Default::default()
+            })
+            .build()
+            .expect("failed to create oci client");
+
+        let image_ref = format!("localhost:{}/{}", port, SIGNED_IMAGE);
+        prepare_image_to_be_signed(&mut client, &image_ref).await;
+
+        let (cosign_signature_image, source_image_digest) = client
+            .triangulate(&image_ref, &crate::registry::Auth::Anonymous)
+            .await
+            .expect("get manifest failed");
+        let mut signature_layer = SignatureLayer::new_unsigned(&image_ref, &source_image_digest)
+            .expect("create SignatureLayer failed");
+        let signer = signing_scheme
+            .create_signer()
+            .expect("create signer failed");
+        let pubkey = signer
+            .to_sigstore_keypair()
+            .expect("to keypair failed")
+            .public_key_to_pem()
+            .expect("derive public key failed");
+
+        let signer = PrivateKeySigner::new_with_signer(signer);
+        if !signer
+            .add_constraint(&mut signature_layer)
+            .expect("sign SignatureLayer failed")
+        {
+            panic!("failed to sign SignatureLayer");
+        };
+
+        client
+            .push_signature(
+                None,
+                &Auth::Anonymous,
+                &cosign_signature_image,
+                vec![signature_layer],
+            )
+            .await
+            .expect("push signature failed");
+
+        dbg!("start to verify");
+
+        let (cosign_image, manifest_digest) = client
+            .triangulate(&image_ref, &Auth::Anonymous)
+            .await
+            .expect("triangulate failed");
+        let signature_layers = client
+            .trusted_signature_layers(&Auth::Anonymous, &manifest_digest, &cosign_image)
+            .await
+            .expect("get trusted signature layers failed");
+        let pk_verifier =
+            verification_constraint::PublicKeyVerifier::new(pubkey.as_bytes(), &signing_scheme)
+                .expect("create PublicKeyVerifier failed");
+        assert_eq!(signature_layers.len(), 1);
+        let res = pk_verifier
+            .verify(&signature_layers[0])
+            .expect("failed to verify");
+        assert!(res);
+    }
+
+    #[cfg(feature = "test-registry")]
+    async fn prepare_image_to_be_signed(client: &mut Client, image_ref: &str) {
+        let image_ref = image_ref.parse().expect("failed to parse image reference");
+        let data = client
+            .registry_client
+            .pull(
+                &SIGNED_IMAGE.parse().expect("failed to parse image ref"),
+                &oci_distribution::secrets::RegistryAuth::Anonymous,
+                vec![oci_distribution::manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE],
+            )
+            .await
+            .expect("pull test image failed");
+
+        client
+            .registry_client
+            .push(
+                &image_ref,
+                &data.layers[..],
+                data.config.clone(),
+                &oci_distribution::secrets::RegistryAuth::Anonymous,
+                None,
+            )
+            .await
+            .expect("push test image failed");
+    }
+
+    #[cfg(feature = "test-registry")]
+    fn registry_image() -> GenericImage {
+        images::generic::GenericImage::new("docker.io/library/registry", "2")
+            .with_wait_for(WaitFor::message_on_stderr("listening on "))
     }
 }

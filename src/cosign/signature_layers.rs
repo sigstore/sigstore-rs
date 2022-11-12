@@ -13,10 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use digest::Digest;
 use oci_distribution::client::ImageLayer;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use x509_parser::{
     certificate::X509Certificate, der_parser::oid::Oid, extensions::GeneralName,
     parse_x509_certificate, pem::parse_x509_pem,
@@ -31,9 +32,9 @@ use super::constants::{
 };
 use crate::crypto::certificate_pool::CertificatePool;
 use crate::{
+    cosign::simple_signing::SimpleSigning,
     crypto::{self, CosignVerificationKey, Signature, SigningScheme},
     errors::{Result, SigstoreError},
-    simple_signing::SimpleSigning,
 };
 
 /// Describe the details of a certificate produced when signing artifacts
@@ -138,7 +139,7 @@ pub struct SignatureLayer {
     /// The bundle produced by Rekor.
     pub bundle: Option<Bundle>,
     #[serde(skip_serializing)]
-    pub signature: String,
+    pub signature: Option<String>,
     #[serde(skip_serializing)]
     pub raw_data: Vec<u8>,
 }
@@ -178,6 +179,45 @@ impl fmt::Display for SignatureLayer {
 }
 
 impl SignatureLayer {
+    /// Create a [`SignatureLayer`], this function will generate a [`SimpleSigning`]
+    /// payload due to the given reference of image and the digest of the manifest.
+    /// However, the resulted [`SignatureLayer`] does not have a signature, and it
+    /// should be manually generated.
+    ///
+    /// ## Usage
+    /// ```rust,no_run
+    /// use sigstore::cosign::{SignatureLayer, constraint::PrivateKeySigner, Constraint};
+    /// use sigstore::crypto::SigningScheme;
+    ///
+    /// async fn func() {
+    ///     let mut signature_layer = SignatureLayer::new_unsigned("example/test", "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").expect("create SignatureLayer failed");
+    ///     // Now the SignatureLayer does not have a signature, we need
+    ///     // to generate one
+    ///     let signer = SigningScheme::ECDSA_P256_SHA256_ASN1.create_signer().expect("create signer failed");
+    ///     let pk_signer = PrivateKeySigner::new_with_signer(signer);
+    ///     if pk_signer.add_constraint(&mut signature_layer).expect("unexpected error") {
+    ///         println!("sign succeed!");
+    ///     } else {
+    ///         println!("sign failed!");
+    ///     }
+    /// }
+    ///
+    /// ```
+    pub fn new_unsigned(image_ref: &str, manifest_digest: &str) -> Result<Self> {
+        let simple_signing = SimpleSigning::new(image_ref, manifest_digest);
+
+        let payload = serde_json::to_vec(&simple_signing)?;
+        let digest = format!("sha256:{:x}", sha2::Sha256::digest(&payload));
+        Ok(SignatureLayer {
+            simple_signing,
+            oci_digest: digest,
+            certificate_signature: None,
+            bundle: None,
+            signature: None,
+            raw_data: payload,
+        })
+    }
+
     /// Create a SignatureLayer that can be considered trusted.
     ///
     /// Params:
@@ -241,7 +281,7 @@ impl SignatureLayer {
             oci_digest: descriptor.digest.clone(),
             raw_data: layer.data.clone(),
             simple_signing,
-            signature,
+            signature: Some(signature),
             bundle,
             certificate_signature,
         })
@@ -317,13 +357,20 @@ impl SignatureLayer {
     /// Given a Cosign public key, check whether this Signature Layer has been
     /// signed by it
     pub(crate) fn is_signed_by_key(&self, verification_key: &CosignVerificationKey) -> bool {
+        let signature = match &self.signature {
+            Some(sig) => sig,
+            None => {
+                warn!(signature_layer = ?self, "signature not found in the SignatureLayer");
+                return false;
+            }
+        };
         match verification_key.verify_signature(
-            Signature::Base64Encoded(self.signature.as_bytes()),
+            Signature::Base64Encoded(signature.as_bytes()),
             &self.raw_data,
         ) {
             Ok(_) => true,
             Err(e) => {
-                debug!(signature=self.signature.as_str(), reason=?e, "Cannot verify signature with the given key");
+                debug!(signature=signature.as_str(), reason=?e, "Cannot verify signature with the given key");
                 false
             }
         }
@@ -517,7 +564,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             SignatureLayer {
                 simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
                 oci_digest: String::from("digest"),
-                signature,
+                signature: Some(signature),
                 bundle: None,
                 certificate_signature: None,
                 raw_data: serde_json::to_vec(&ss_value).unwrap(),
@@ -581,7 +628,7 @@ oXqqo/C9QnOHTto=
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
             oci_digest: String::from("sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e"),
-            signature: String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA="),
+            signature: Some(String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=")),
             bundle: Some(bundle),
             certificate_signature: Some(certificate_signature),
             raw_data: serde_json::to_vec(&ss_value).unwrap(),

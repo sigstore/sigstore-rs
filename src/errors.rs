@@ -17,12 +17,20 @@
 
 use thiserror::Error;
 
-use crate::cosign::verification_constraint::VerificationConstraintRefVec;
+use crate::cosign::{
+    constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
+};
 
 #[derive(Error, Debug)]
 #[error("Several Signature Layers failed verification")]
 pub struct SigstoreVerifyConstraintsError<'a> {
     pub unsatisfied_constraints: VerificationConstraintRefVec<'a>,
+}
+
+#[derive(Error, Debug)]
+#[error("Several Constraints failed to apply on the SignatureLayer")]
+pub struct SigstoreApplicationConstraintsError<'a> {
+    pub unapplied_constraints: SignConstraintRefVec<'a>,
 }
 
 pub type Result<T> = std::result::Result<T, SigstoreError>;
@@ -52,6 +60,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
+
     #[error(transparent)]
     X509Error(#[from] x509_parser::error::X509Error),
 
@@ -147,6 +156,9 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     VerificationConstraintError(String),
+
+    #[error("{0}")]
+    ApplyConstraintError(String),
 
     #[error("Verification of OIDC claims received from OpenIdProvider failed")]
     ClaimsVerificationError,
