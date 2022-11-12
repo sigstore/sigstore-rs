@@ -21,6 +21,7 @@ use sigstore::cosign::verification_constraint::{
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
+use sigstore::registry::{ClientConfig, ClientProtocol};
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
 use std::convert::TryFrom;
@@ -101,6 +102,10 @@ struct Cli {
 
     /// Name of the image to verify
     image: String,
+
+    /// Whether the registry uses HTTP
+    #[clap(long)]
+    http: bool,
 }
 
 async fn run_app(
@@ -120,7 +125,14 @@ async fn run_app(
 
     let auth = &sigstore::registry::Auth::Anonymous;
 
-    let mut client_builder = sigstore::cosign::ClientBuilder::default();
+    let mut oci_client_config = ClientConfig::default();
+    match cli.http {
+        false => oci_client_config.protocol = ClientProtocol::Https,
+        true => oci_client_config.protocol = ClientProtocol::Http,
+    }
+
+    let mut client_builder =
+        sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
 
     if let Some(key) = frd.rekor_pub_key.as_ref() {
         client_builder = client_builder.with_rekor_pub_key(key);
