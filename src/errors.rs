@@ -41,6 +41,9 @@ pub enum SigstoreError {
     #[error("invalid key format: {error}")]
     InvalidKeyFormat { error: String },
 
+    #[error("unmatched key type {key_typ} and signing scheme {scheme}")]
+    UnmatchedKeyAndSigningScheme { key_typ: String, scheme: String },
+
     #[error(transparent)]
     PEMParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
 
