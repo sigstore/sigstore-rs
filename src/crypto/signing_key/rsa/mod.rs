@@ -89,6 +89,7 @@ pub enum PaddingScheme {
 /// * `Sha256`
 /// * `Sha384`
 /// * `Sha512`
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum RSASigner {
     RSA_PSS_SHA256(BlindedSigningKey<sha2::Sha256>, RSAKeys),

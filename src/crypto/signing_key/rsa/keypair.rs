@@ -59,7 +59,7 @@ use crate::crypto::signing_key::{
 
 use super::{DigestAlgorithm, PaddingScheme, RSASigner};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RSAKeys {
     pub(crate) private_key: RsaPrivateKey,
     public_key: RsaPublicKey,

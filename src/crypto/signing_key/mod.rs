@@ -139,6 +139,16 @@ pub enum SigStoreKeyPair {
     RSA(RSAKeys),
 }
 
+impl ToString for SigStoreKeyPair {
+    fn to_string(&self) -> String {
+        match self {
+            SigStoreKeyPair::ECDSA(_) => String::from("EC Key"),
+            SigStoreKeyPair::ED25519(_) => String::from("Ed25519 Key"),
+            SigStoreKeyPair::RSA(_) => String::from("RSA Key"),
+        }
+    }
+}
+
 /// This macro helps to reduce duplicated code.
 macro_rules! sigstore_keypair_from {
     ($func: ident ($($args:expr),*)) => {
@@ -297,6 +307,7 @@ pub trait Signer {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
 }
 
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum SigStoreSigner {
     RSA_PSS_SHA256(RSASigner),

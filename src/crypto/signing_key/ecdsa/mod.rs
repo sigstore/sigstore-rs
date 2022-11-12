@@ -88,6 +88,16 @@ pub enum ECDSAKeys {
     P384(EcdsaKeys<p384::NistP384>),
 }
 
+impl ToString for ECDSAKeys {
+    fn to_string(&self) -> String {
+        let str = match self {
+            ECDSAKeys::P256(_) => "ECDSA P256",
+            ECDSAKeys::P384(_) => "ECDSA P384",
+        };
+        String::from(str)
+    }
+}
+
 /// The types of supported elliptic curves:
 /// * `P256`: `P-256`, also known as `secp256r1` or `prime256v1`.
 /// * `P384`: `P-384`, also known as `secp384r1`.
