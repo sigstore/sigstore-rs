@@ -146,8 +146,10 @@ macro_rules! sigstore_keypair_from {
             Ok(SigStoreKeyPair::ECDSA(keys))
         } else if let Ok(keys) = Ed25519Keys::$func($($args,)*) {
             Ok(SigStoreKeyPair::ED25519(keys))
+        } else if let Ok(keys) = RSAKeys::$func($($args,)*) {
+            Ok(SigStoreKeyPair::RSA(keys))
         } else {
-            Err(SigstoreError::KeyParseError("SigStoreKeys".to_string()))
+            Err(SigstoreError::KeyParseError("Unsupported key type".to_string()))
         }
     }
 }
