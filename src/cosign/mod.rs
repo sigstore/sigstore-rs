@@ -56,6 +56,9 @@ pub use self::client_builder::ClientBuilder;
 pub mod verification_constraint;
 use self::verification_constraint::{VerificationConstraint, VerificationConstraintRefVec};
 
+pub mod payload;
+pub use payload::simple_signing;
+
 #[async_trait]
 /// Cosign Abilities that have to be implemented by a
 /// Cosign client

@@ -1,5 +1,5 @@
 //
-// Copyright 2021 The Sigstore Authors.
+// Copyright 2022 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,9 @@ use serde_json::Value;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error, info};
 
+/// Default type name of [`Critical`] when doing cosign signing
+pub const CRITICAL_TYPE_NAME: &str = "cosign container image signature";
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SimpleSigning {
     pub critical: Critical,
@@ -42,6 +45,23 @@ impl fmt::Display for SimpleSigning {
 }
 
 impl SimpleSigning {
+    /// Create a new simple signing payload due to the given image reference
+    /// and manifefst_digest
+    pub fn new(image_ref: &str, manifest_digest: &str) -> Self {
+        Self {
+            critical: Critical {
+                type_name: CRITICAL_TYPE_NAME.to_string(),
+                image: Image {
+                    docker_manifest_digest: manifest_digest.to_string(),
+                },
+                identity: Identity {
+                    docker_reference: image_ref.to_string(),
+                },
+            },
+            optional: None,
+        }
+    }
+
     /// Checks whether all the provided `annotations` are satisfied
     pub fn satisfies_annotations(&self, annotations: &HashMap<String, String>) -> bool {
         if annotations.is_empty() {
@@ -79,11 +99,11 @@ impl SimpleSigning {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Critical {
-    #[serde(rename = "type")]
     //TODO: should we validate the contents of this attribute to ensure it's "cosign container image signature"?
-    pub type_name: String,
-    pub image: Image,
     pub identity: Identity,
+    pub image: Image,
+    #[serde(rename = "type")]
+    pub type_name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -98,9 +118,11 @@ pub struct Identity {
     pub docker_reference: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Optional {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<i64>,
 
     #[serde(flatten)]
