@@ -161,7 +161,7 @@ impl Default for ClientConfig {
 impl From<ClientConfig> for oci_distribution::client::ClientConfig {
     fn from(config: ClientConfig) -> Self {
         oci_distribution::client::ClientConfig {
-            protocol: oci_distribution::client::ClientProtocol::Https,
+            protocol: config.protocol.into(),
             accept_invalid_certificates: config.accept_invalid_certificates,
             #[cfg(feature = "native-tls")]
             accept_invalid_hostnames: config.accept_invalid_hostnames,
