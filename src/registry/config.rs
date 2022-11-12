@@ -174,3 +174,30 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
         }
     }
 }
+
+/// A client configuration
+#[derive(Debug, Clone)]
+pub struct PushResponse {
+    /// Pullable url for the config.
+    pub config_url: String,
+    /// Pullable url for the manifest.
+    pub manifest_url: String,
+}
+
+impl From<PushResponse> for oci_distribution::client::PushResponse {
+    fn from(pr: PushResponse) -> Self {
+        oci_distribution::client::PushResponse {
+            config_url: pr.config_url,
+            manifest_url: pr.manifest_url,
+        }
+    }
+}
+
+impl From<oci_distribution::client::PushResponse> for PushResponse {
+    fn from(pr: oci_distribution::client::PushResponse) -> Self {
+        PushResponse {
+            config_url: pr.config_url,
+            manifest_url: pr.manifest_url,
+        }
+    }
+}

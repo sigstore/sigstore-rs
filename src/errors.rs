@@ -109,6 +109,9 @@ pub enum SigstoreError {
     #[error("Cannot pull {image}: {error}")]
     RegistryPullError { image: String, error: String },
 
+    #[error("Cannot push {image}: {error}")]
+    RegistryPushError { image: String, error: String },
+
     #[error("OCI reference not valid: {reference}")]
     OciReferenceNotValidError { reference: String },
 

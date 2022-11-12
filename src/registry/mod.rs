@@ -47,4 +47,13 @@ pub(crate) trait ClientCapabilities: Send + Sync {
         image: &oci_distribution::Reference,
         auth: &oci_distribution::secrets::RegistryAuth,
     ) -> Result<(oci_distribution::manifest::OciManifest, String)>;
+
+    async fn push(
+        &mut self,
+        image_ref: &oci_distribution::Reference,
+        layers: &[oci_distribution::client::ImageLayer],
+        config: oci_distribution::client::Config,
+        auth: &oci_distribution::secrets::RegistryAuth,
+        manifest: Option<oci_distribution::manifest::OciImageManifest>,
+    ) -> Result<oci_distribution::client::PushResponse>;
 }

@@ -71,4 +71,21 @@ impl ClientCapabilities for OciClient {
                 error: e.to_string(),
             })
     }
+
+    async fn push(
+        &mut self,
+        image_ref: &oci_distribution::Reference,
+        layers: &[oci_distribution::client::ImageLayer],
+        config: oci_distribution::client::Config,
+        auth: &oci_distribution::secrets::RegistryAuth,
+        manifest: Option<oci_distribution::manifest::OciImageManifest>,
+    ) -> Result<oci_distribution::client::PushResponse> {
+        self.registry_client
+            .push(image_ref, layers, config, auth, manifest)
+            .await
+            .map_err(|e| SigstoreError::RegistryPushError {
+                image: image_ref.whole(),
+                error: e.to_string(),
+            })
+    }
 }
