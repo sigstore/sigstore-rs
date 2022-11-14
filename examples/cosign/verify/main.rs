@@ -15,8 +15,8 @@
 
 extern crate sigstore;
 use sigstore::cosign::verification_constraint::{
-    AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, PublicKeyVerifier,
-    VerificationConstraintVec,
+    AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, CertificateVerifier,
+    PublicKeyVerifier, VerificationConstraintVec,
 };
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
@@ -27,7 +27,7 @@ use std::convert::TryFrom;
 use std::time::Instant;
 
 extern crate anyhow;
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 
 extern crate clap;
 use clap::Parser;
@@ -36,7 +36,7 @@ use std::{collections::HashMap, fs};
 use tokio::task::spawn_blocking;
 
 extern crate tracing_subscriber;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -46,6 +46,14 @@ struct Cli {
     /// Verification key
     #[clap(short, long, required(false))]
     key: Option<String>,
+
+    /// Path to verification certificate
+    #[clap(long, required(false))]
+    cert: Option<String>,
+
+    /// Path to certificate chain bundle file
+    #[clap(long, required(false))]
+    cert_chain: Option<String>,
 
     /// Signing scheme when signing and verifying
     #[clap(long, required(false))]
@@ -106,6 +114,10 @@ async fn run_app(
         ));
     }
 
+    if cli.key.is_some() && cli.cert.is_some() {
+        return Err(anyhow!("'key' and 'cert' cannot be used at the same time"));
+    }
+
     let auth = &sigstore::registry::Auth::Anonymous;
 
     let mut client_builder = sigstore::cosign::ClientBuilder::default();
@@ -113,6 +125,11 @@ async fn run_app(
     if let Some(key) = frd.rekor_pub_key.as_ref() {
         client_builder = client_builder.with_rekor_pub_key(key);
     }
+
+    let cert_chain: Option<Vec<sigstore::registry::Certificate>> = match cli.cert_chain.as_ref() {
+        None => None,
+        Some(cert_chain_path) => Some(parse_cert_bundle(&cert_chain_path)?),
+    };
 
     if !frd.fulcio_certs.is_empty() {
         client_builder = client_builder.with_fulcio_certs(&frd.fulcio_certs);
@@ -160,6 +177,24 @@ async fn run_app(
             None => PublicKeyVerifier::try_from(&key)
                 .map_err(|e| anyhow!("Cannot create public key verifier: {}", e))?,
         };
+
+        verification_constraints.push(Box::new(verifier));
+    }
+    if let Some(path_to_cert) = cli.cert.as_ref() {
+        let cert = fs::read(path_to_cert).map_err(|e| anyhow!("Cannot read cert: {:?}", e))?;
+        let require_rekor_bundle = if frd.rekor_pub_key.is_some() {
+            true
+        } else {
+            warn!("certificate based verification is weaker when Rekor integration is disabled");
+            false
+        };
+
+        let verifier = CertificateVerifier::from_pem(
+            &cert,
+            require_rekor_bundle,
+            cert_chain.as_ref().map(|v| v.as_slice()),
+        )
+        .map_err(|e| anyhow!("Cannot create certificate verifier: {}", e))?;
 
         verification_constraints.push(Box::new(verifier));
     }
@@ -266,6 +301,7 @@ pub async fn main() {
                     &trusted_layers,
                     verification_constraints.iter(),
                 );
+
                 match filter_result {
                     Ok(()) => {
                         println!("Image successfully verified");
@@ -290,4 +326,18 @@ pub async fn main() {
             println!("------");
         }
     }
+}
+
+fn parse_cert_bundle(bundle_path: &str) -> Result<Vec<sigstore::registry::Certificate>> {
+    let data =
+        fs::read(bundle_path).map_err(|e| anyhow!("Error reading {}: {}", bundle_path, e))?;
+    let pems = pem::parse_many(&data)?;
+
+    Ok(pems
+        .iter()
+        .map(|pem| sigstore::registry::Certificate {
+            encoding: sigstore::registry::CertificateEncoding::Der,
+            data: pem.contents.clone(),
+        })
+        .collect())
 }
