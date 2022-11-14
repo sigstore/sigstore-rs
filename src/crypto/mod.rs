@@ -192,7 +192,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
     pub(crate) struct CertData {
         pub cert: X509,
-        pub private_key: EcKey<pkey::Private>,
+        pub private_key: pkey::PKey<pkey::Private>,
     }
 
     pub(crate) struct CertGenerationOptions {
@@ -206,12 +206,20 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         pub subject_issuer: Option<String>,
         pub not_before: DateTime<chrono::Utc>,
         pub not_after: DateTime<chrono::Utc>,
+        pub private_key: pkey::PKey<pkey::Private>,
+        pub public_key: pkey::PKey<pkey::Public>,
     }
 
     impl Default for CertGenerationOptions {
         fn default() -> Self {
             let not_before = Utc::now().checked_sub_signed(Duration::days(1)).unwrap();
             let not_after = Utc::now().checked_add_signed(Duration::days(1)).unwrap();
+
+            // Sigstore relies on NIST P-256
+            // NIST P-256 is a Weierstrass curve specified in FIPS 186-4: Digital Signature Standard (DSS):
+            // https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf
+            // Also known as prime256v1 (ANSI X9.62) and secp256r1 (SECG)
+            let (private_key, public_key) = generate_ecdsa_p256_keypair();
 
             CertGenerationOptions {
                 digital_signature_key_usage: true,
@@ -221,26 +229,80 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 subject_url: None,
                 not_before,
                 not_after,
+                private_key,
+                public_key,
             }
         }
+    }
+
+    pub(crate) fn generate_ecdsa_p256_keypair(
+    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("Cannot create EcGroup");
+        let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
+        let ec_public_key = ec_private_key.public_key();
+        let ec_pub_key =
+            EcKey::from_public_key(&group, ec_public_key).expect("Cannot create ec pub key");
+
+        let public_key = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
+        let private_key = pkey::PKey::from_ec_key(ec_private_key).expect("Cannot create pkey");
+
+        (private_key, public_key)
+    }
+
+    pub(crate) fn generate_ecdsa_p384_keypair(
+    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+        let group = EcGroup::from_curve_name(Nid::SECP384R1).expect("Cannot create EcGroup");
+        let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
+        let ec_public_key = ec_private_key.public_key();
+        let ec_pub_key =
+            EcKey::from_public_key(&group, ec_public_key).expect("Cannot create ec pub key");
+
+        let public_key = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
+        let private_key = pkey::PKey::from_ec_key(ec_private_key).expect("Cannot create pkey");
+
+        (private_key, public_key)
+    }
+
+    pub(crate) fn generate_rsa_keypair(
+        bits: u32,
+    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+        use openssl::rsa;
+
+        let rsa_private_key = rsa::Rsa::generate(bits).expect("Cannot generate RSA key");
+        let rsa_public_key_pem = rsa_private_key
+            .public_key_to_pem()
+            .expect("Cannot obtain public key");
+        let rsa_public_key = rsa::Rsa::public_key_from_pem(&rsa_public_key_pem)
+            .expect("Cannot create rsa_public_key");
+
+        let private_key = pkey::PKey::from_rsa(rsa_private_key).expect("cannot create private_key");
+        let public_key = pkey::PKey::from_rsa(rsa_public_key).expect("cannot create public_key");
+
+        (private_key, public_key)
+    }
+
+    pub(crate) fn generate_dsa_keypair(
+        bits: u32,
+    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+        use openssl::dsa;
+
+        let dsa_private_key = dsa::Dsa::generate(bits).expect("Cannot generate DSA key");
+        let dsa_public_key_pem = dsa_private_key
+            .public_key_to_pem()
+            .expect("Cannot obtain public key");
+        let dsa_public_key = dsa::Dsa::public_key_from_pem(&dsa_public_key_pem)
+            .expect("Cannot create rsa_public_key");
+
+        let private_key = pkey::PKey::from_dsa(dsa_private_key).expect("cannot create private_key");
+        let public_key = pkey::PKey::from_dsa(dsa_public_key).expect("cannot create public_key");
+
+        (private_key, public_key)
     }
 
     pub(crate) fn generate_certificate(
         issuer: Option<&CertData>,
         settings: CertGenerationOptions,
     ) -> anyhow::Result<CertData> {
-        // Sigstore relies on NIST P-256
-        // NIST P-256 is a Weierstrass curve specified in FIPS 186-4: Digital Signature Standard (DSS):
-        // https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf
-        // Also known as prime256v1 (ANSI X9.62) and secp256r1 (SECG)
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("Cannot create EcGroup");
-        let private_key = EcKey::generate(&group).expect("Cannot create private key");
-        let public_key = private_key.public_key();
-
-        let ec_pub_key =
-            EcKey::from_public_key(&group, public_key).expect("Cannot create ec pub key");
-        let pkey = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
-
         let mut x509_name_builder = X509NameBuilder::new()?;
         x509_name_builder.append_entry_by_text("O", "tests")?;
         x509_name_builder.append_entry_by_text("CN", "sigstore.test")?;
@@ -249,7 +311,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         let mut x509_builder = openssl::x509::X509::builder()?;
         x509_builder.set_subject_name(&x509_name)?;
         x509_builder
-            .set_pubkey(&pkey)
+            .set_pubkey(&settings.public_key)
             .expect("Cannot set public key");
 
         // set serial number
@@ -376,11 +438,10 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         }
 
         // sign the cert
-        let issuer_key = match issuer {
+        let issuer_pkey = match issuer {
             Some(issuer_data) => issuer_data.private_key.clone(),
-            None => private_key.clone(),
+            None => settings.private_key.clone(),
         };
-        let issuer_pkey = pkey::PKey::from_ec_key(issuer_key).expect("Cannot create signer pkey");
         x509_builder
             .sign(&issuer_pkey, MessageDigest::sha256())
             .expect("Cannot sign certificate");
@@ -389,7 +450,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         Ok(CertData {
             cert: x509,
-            private_key,
+            private_key: settings.private_key,
         })
     }
 }
