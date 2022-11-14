@@ -66,6 +66,9 @@ pub trait VerificationConstraint: std::fmt::Debug {
     fn verify(&self, signature_layer: &SignatureLayer) -> Result<bool>;
 }
 
+pub mod certificate_verifier;
+pub use certificate_verifier::CertificateVerifier;
+
 pub mod public_key_verifier;
 pub use public_key_verifier::PublicKeyVerifier;
 
