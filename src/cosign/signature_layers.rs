@@ -387,7 +387,7 @@ impl CertificateSignature {
         let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
-        fulcio_cert_pool.verify(cert_raw)?;
+        fulcio_cert_pool.verify_pem_cert(cert_raw)?;
 
         crypto::certificate::is_trusted(&cert, integrated_time)?;
 

@@ -17,6 +17,7 @@ use pkcs8::DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
 use signature::{DigestVerifier, Signature as _, Verifier};
+use std::convert::TryFrom;
 use x509_parser::{prelude::FromDer, x509::SubjectPublicKeyInfo};
 
 use super::{
@@ -51,6 +52,47 @@ pub enum CosignVerificationKey {
     ECDSA_P256_SHA256_ASN1(ecdsa::VerifyingKey<p256::NistP256>),
     ECDSA_P384_SHA384_ASN1(ecdsa::VerifyingKey<p384::NistP384>),
     ED25519(ed25519_dalek_fiat::PublicKey),
+}
+
+/// Attempts to convert a [x509 Subject Public Key Info](SubjectPublicKeyInfo) object into
+/// a `CosignVerificationKey` one.
+///
+/// Currently can convert only the following types of keys:
+///   * ECDSA P-256: assumes the SHA-256 digest algorithm is used
+///   * ECDSA P-384: assumes the SHA-384 digest algorithm is used
+///   * RSA: assumes PKCS1 padding is used
+impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
+    type Error = SigstoreError;
+
+    fn try_from(subject_pub_key_info: &SubjectPublicKeyInfo<'a>) -> Result<Self> {
+        use x509_parser::public_key::PublicKey;
+
+        let pubkey = subject_pub_key_info.parsed()?;
+        match pubkey {
+            PublicKey::EC(_) => match pubkey.key_size() {
+                256 => CosignVerificationKey::from_der(
+                    subject_pub_key_info.raw,
+                    &SigningScheme::ECDSA_P256_SHA256_ASN1,
+                ),
+                384 => CosignVerificationKey::from_der(
+                    subject_pub_key_info.raw,
+                    &SigningScheme::ECDSA_P384_SHA384_ASN1,
+                ),
+                _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
+                    "EC with size {} is not supported",
+                    pubkey.key_size()
+                ))),
+            },
+            PublicKey::RSA(_) => CosignVerificationKey::from_der(
+                subject_pub_key_info.raw,
+                &SigningScheme::RSA_PKCS1_SHA256(pubkey.key_size()),
+            ),
+            _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
+                "Key with algorithm OID {} is not supported",
+                subject_pub_key_info.algorithm.oid()
+            ))),
+        }
+    }
 }
 
 impl CosignVerificationKey {
@@ -376,5 +418,113 @@ DwIDAQAB
         assert!(verification_key
             .verify_signature(signature, msg.as_bytes())
             .is_ok());
+    }
+
+    #[test]
+    fn convert_ecdsa_p256_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
+        let (private_key, public_key) = generate_ecdsa_p256_keypair();
+        let issued_cert_generation_options = CertGenerationOptions {
+            private_key,
+            public_key,
+            ..Default::default()
+        };
+
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+
+        let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let subject_public_key = cert.public_key();
+
+        let cosign_verification_key =
+            CosignVerificationKey::try_from(subject_public_key).expect("conversion failed");
+
+        assert!(matches!(
+            cosign_verification_key,
+            CosignVerificationKey::ECDSA_P256_SHA256_ASN1(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn convert_ecdsa_p384_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
+        let (private_key, public_key) = generate_ecdsa_p384_keypair();
+        let issued_cert_generation_options = CertGenerationOptions {
+            private_key,
+            public_key,
+            ..Default::default()
+        };
+
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+
+        let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let subject_public_key = cert.public_key();
+
+        let cosign_verification_key =
+            CosignVerificationKey::try_from(subject_public_key).expect("conversion failed");
+
+        assert!(matches!(
+            cosign_verification_key,
+            CosignVerificationKey::ECDSA_P384_SHA384_ASN1(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn convert_rsa_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
+        let (private_key, public_key) = generate_rsa_keypair(2048);
+        let issued_cert_generation_options = CertGenerationOptions {
+            private_key,
+            public_key,
+            ..Default::default()
+        };
+
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+
+        let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let subject_public_key = cert.public_key();
+
+        let cosign_verification_key =
+            CosignVerificationKey::try_from(subject_public_key).expect("conversion failed");
+
+        assert!(matches!(
+            cosign_verification_key,
+            CosignVerificationKey::RSA_PKCS1_SHA256(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key(
+    ) -> anyhow::Result<()> {
+        let (private_key, public_key) = generate_dsa_keypair(2048);
+        let issued_cert_generation_options = CertGenerationOptions {
+            private_key,
+            public_key,
+            ..Default::default()
+        };
+
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+
+        let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
+        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let subject_public_key = cert.public_key();
+
+        let err = CosignVerificationKey::try_from(subject_public_key);
+        assert!(matches!(
+            err,
+            Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(_))
+        ));
+
+        Ok(())
     }
 }
