@@ -22,7 +22,7 @@ impl PublicKeyVerifier {
     /// The `key_raw` variable holds a PEM encoded representation of the
     /// public key to be used at verification time. The verification
     /// algorithm will be derived from the public key type:
-    /// * `RSA public key`: `RSA_PSS_SHA256`
+    /// * `RSA public key`: `RSA_PKCS1_SHA256`
     /// * `EC public key with P-256 curve`: `ECDSA_P256_SHA256_ASN1`
     /// * `EC public key with P-384 curve`: `ECDSA_P384_SHA384_ASN1`
     /// * `Ed25519 public key`: `Ed25519`
