@@ -101,7 +101,7 @@ impl OauthTokenProvider {
 
         let oidc_url = oidc_url?;
         let result = RedirectListener::new(
-            &*format!(
+            &format!(
                 "127.0.0.1:{}",
                 self.redirect_port.unwrap_or(DEFAULT_REDIRECT_PORT)
             ),
