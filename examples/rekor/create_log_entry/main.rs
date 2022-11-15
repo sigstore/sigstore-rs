@@ -18,7 +18,6 @@ use sigstore::rekor::models::{
     hashedrekord::{AlgorithmKind, Data, Hash, PublicKey, Signature, Spec},
     ProposedEntry,
 };
-use url::Url;
 
 use clap::{Arg, Command};
 

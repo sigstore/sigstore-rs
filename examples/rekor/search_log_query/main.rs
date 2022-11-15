@@ -20,7 +20,6 @@ use sigstore::rekor::models::{
     ProposedEntry, SearchLogQuery,
 };
 use std::str::FromStr;
-use url::Url;
 
 #[tokio::main]
 async fn main() {
