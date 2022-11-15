@@ -36,7 +36,7 @@ use crate::{
     simple_signing::SimpleSigning,
 };
 
-/// Describe the details of a a certificate produced when signing artifacts
+/// Describe the details of a certificate produced when signing artifacts
 /// using the keyless mode.
 #[derive(Clone, Debug, Serialize)]
 pub struct CertificateSignature {
@@ -375,8 +375,8 @@ pub(crate) fn build_signature_layers(
 }
 
 impl CertificateSignature {
-    /// Ensure the given certificate can be trusted, then extracts
-    /// its details and return them as a `CertificateSignature` object
+    /// Ensures the given certificate can be trusted, then extracts
+    /// its details and returns them as a `CertificateSignature` object
     pub(crate) fn from_certificate(
         cert_raw: &[u8],
         fulcio_cert_pool: &CertificatePool,
