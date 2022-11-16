@@ -73,7 +73,7 @@ impl OauthTokenProvider {
     }
 
     /// Perform human-involved OIDC flow to acquire an id token, along with
-    /// the extracted email claim value for used in signed challenge with Fulcio.
+    /// the extracted email claim value for use in signed challenge with Fulcio.
     pub async fn get_token(&self) -> Result<(CoreIdToken, String)> {
         let oidc_url = OpenIDAuthorize::new(
             self.client_id
