@@ -127,7 +127,7 @@ impl ECDSAKeys {
         }
     }
 
-    /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encided private key.
+    /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`super::COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`super::SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
