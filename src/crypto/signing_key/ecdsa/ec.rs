@@ -259,7 +259,7 @@ where
                     .map_err(|e| SigstoreError::PKCS8DerError(e.to_string()))?,
             },
             _ => pem::Pem {
-                tag: SIGSTORE_PRIVATE_KEY_PEM_LABEL.to_string(),
+                tag: COSIGN_PRIVATE_KEY_PEM_LABEL.to_string(),
                 contents: kdf::encrypt(&der, password)?,
             },
         };
