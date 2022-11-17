@@ -85,7 +85,7 @@ impl RSAKeys {
         RSAKeys::from_der(&priv_key)
     }
 
-    /// Builds a `RSAKeys` from encrypted pkcs8 PEM-encided private key.
+    /// Builds a `RSAKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(encrypted_pem: &[u8], password: &[u8]) -> Result<Self> {

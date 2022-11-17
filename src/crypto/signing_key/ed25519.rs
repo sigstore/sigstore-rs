@@ -110,7 +110,7 @@ impl Ed25519Keys {
         Ed25519Keys::from_der(priv_key.as_bytes())
     }
 
-    /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encided private key.
+    /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(encrypted_pem: &[u8], password: &[u8]) -> Result<Self> {
