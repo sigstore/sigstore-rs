@@ -161,7 +161,7 @@ impl Default for ClientConfig {
 impl From<ClientConfig> for oci_distribution::client::ClientConfig {
     fn from(config: ClientConfig) -> Self {
         oci_distribution::client::ClientConfig {
-            protocol: oci_distribution::client::ClientProtocol::Https,
+            protocol: config.protocol.into(),
             accept_invalid_certificates: config.accept_invalid_certificates,
             #[cfg(feature = "native-tls")]
             accept_invalid_hostnames: config.accept_invalid_hostnames,
@@ -171,6 +171,33 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
                 .map(|c| c.into())
                 .collect(),
             ..Default::default()
+        }
+    }
+}
+
+/// A client configuration
+#[derive(Debug, Clone)]
+pub struct PushResponse {
+    /// Pullable url for the config.
+    pub config_url: String,
+    /// Pullable url for the manifest.
+    pub manifest_url: String,
+}
+
+impl From<PushResponse> for oci_distribution::client::PushResponse {
+    fn from(pr: PushResponse) -> Self {
+        oci_distribution::client::PushResponse {
+            config_url: pr.config_url,
+            manifest_url: pr.manifest_url,
+        }
+    }
+}
+
+impl From<oci_distribution::client::PushResponse> for PushResponse {
+    fn from(pr: oci_distribution::client::PushResponse) -> Self {
+        PushResponse {
+            config_url: pr.config_url,
+            manifest_url: pr.manifest_url,
         }
     }
 }

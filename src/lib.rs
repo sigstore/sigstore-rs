@@ -235,5 +235,4 @@ pub mod fulcio;
 pub mod oauth;
 pub mod registry;
 pub mod rekor;
-pub mod simple_signing;
 pub mod tuf;

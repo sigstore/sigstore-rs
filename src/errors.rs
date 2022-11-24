@@ -17,12 +17,20 @@
 
 use thiserror::Error;
 
-use crate::cosign::verification_constraint::VerificationConstraintRefVec;
+use crate::cosign::{
+    constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
+};
 
 #[derive(Error, Debug)]
 #[error("Several Signature Layers failed verification")]
 pub struct SigstoreVerifyConstraintsError<'a> {
     pub unsatisfied_constraints: VerificationConstraintRefVec<'a>,
+}
+
+#[derive(Error, Debug)]
+#[error("Several Constraints failed to apply on the SignatureLayer")]
+pub struct SigstoreApplicationConstraintsError<'a> {
+    pub unapplied_constraints: SignConstraintRefVec<'a>,
 }
 
 pub type Result<T> = std::result::Result<T, SigstoreError>;
@@ -41,6 +49,9 @@ pub enum SigstoreError {
     #[error("invalid key format: {error}")]
     InvalidKeyFormat { error: String },
 
+    #[error("unmatched key type {key_typ} and signing scheme {scheme}")]
+    UnmatchedKeyAndSigningScheme { key_typ: String, scheme: String },
+
     #[error(transparent)]
     PEMParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
 
@@ -49,6 +60,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
+
     #[error(transparent)]
     X509Error(#[from] x509_parser::error::X509Error),
 
@@ -106,6 +118,9 @@ pub enum SigstoreError {
     #[error("Cannot pull {image}: {error}")]
     RegistryPullError { image: String, error: String },
 
+    #[error("Cannot push {image}: {error}")]
+    RegistryPushError { image: String, error: String },
+
     #[error("OCI reference not valid: {reference}")]
     OciReferenceNotValidError { reference: String },
 
@@ -141,6 +156,9 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     VerificationConstraintError(String),
+
+    #[error("{0}")]
+    ApplyConstraintError(String),
 
     #[error("Verification of OIDC claims received from OpenIdProvider failed")]
     ClaimsVerificationError,

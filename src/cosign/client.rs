@@ -13,20 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
+use std::collections::HashMap;
 
-use super::{
-    constants::SIGSTORE_OCI_MEDIA_TYPE,
-    signature_layers::{build_signature_layers, SignatureLayer},
-    CosignCapabilities,
-};
+use async_trait::async_trait;
+use oci_distribution::manifest::OCI_IMAGE_MEDIA_TYPE;
+use tracing::warn;
+
+use super::constants::{SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION};
+use super::{CosignCapabilities, SignatureLayer};
+use crate::cosign::signature_layers::build_signature_layers;
 use crate::crypto::CosignVerificationKey;
-use crate::registry::Auth;
+use crate::registry::{Auth, PushResponse};
 use crate::{
     crypto::certificate_pool::CertificatePool,
     errors::{Result, SigstoreError},
 };
 use tracing::debug;
+
+/// Used to generate an empty [OCI Configuration](https://github.com/opencontainers/image-spec/blob/v1.0.0/config.md).
+pub const CONFIG_DATA: &str = "{}";
 
 /// Cosign Client
 ///
@@ -95,6 +100,58 @@ impl CosignCapabilities for Client {
         debug!(signature_layers=?sl, ?cosign_image, "trusted signature layers");
         Ok(sl)
     }
+
+    async fn push_signature(
+        &mut self,
+        annotations: Option<HashMap<String, String>>,
+        auth: &Auth,
+        target_reference: &str,
+        signature_layers: Vec<SignatureLayer>,
+    ) -> Result<PushResponse> {
+        let image_reference: oci_distribution::Reference =
+            target_reference
+                .parse()
+                .map_err(|_| SigstoreError::OciReferenceNotValidError {
+                    reference: target_reference.to_string(),
+                })?;
+
+        let layers: Vec<oci_distribution::client::ImageLayer> = signature_layers
+            .iter()
+            .filter_map(|sl| {
+                match serde_json::to_vec(&sl.simple_signing) {
+                    Ok(data) => {
+                        let annotations = match &sl.signature {
+                            Some(sig) => [(SIGSTORE_SIGNATURE_ANNOTATION.into(), sig.clone())].into(),
+                            None => HashMap::new(),
+                        };
+                        let image_layer = oci_distribution::client::ImageLayer::new(data, SIGSTORE_OCI_MEDIA_TYPE.into(), Some(annotations));
+                        Some(image_layer)
+                    }
+                    Err(e) => {
+                        warn!(error = ?e, signaturelayer = ?sl, "Skipping SignatureLayer because serialization failed");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        // TODO: Do we need to support OCI Image Configuration?
+        let config =
+            oci_distribution::client::Config::oci_v1(CONFIG_DATA.as_bytes().to_vec(), None);
+        let mut manifest =
+            oci_distribution::manifest::OciImageManifest::build(&layers[..], &config, annotations);
+        manifest.media_type = Some(OCI_IMAGE_MEDIA_TYPE.to_string());
+        self.registry_client
+            .push(
+                &image_reference,
+                &layers[..],
+                config,
+                &auth.into(),
+                Some(manifest),
+            )
+            .await
+            .map(|r| r.into())
+    }
 }
 
 impl Client {
@@ -162,6 +219,7 @@ mod tests {
             fetch_manifest_digest_response: Some(Ok(image_digest.clone())),
             pull_response: None,
             pull_manifest_response: None,
+            push_response: None,
         };
         let mut cosign_client = build_test_client(mock_client);
 

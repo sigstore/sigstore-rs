@@ -75,7 +75,7 @@ use crate::errors::*;
 use self::{
     ecdsa::{ec::EcdsaSigner, ECDSAKeys},
     ed25519::{Ed25519Keys, Ed25519Signer},
-    rsa::{keypair::RSAKeys, RSASigner},
+    rsa::{keypair::RSAKeys, DigestAlgorithm, PaddingScheme, RSASigner},
 };
 
 use super::{verification_key::CosignVerificationKey, SigningScheme};
@@ -139,6 +139,16 @@ pub enum SigStoreKeyPair {
     RSA(RSAKeys),
 }
 
+impl ToString for SigStoreKeyPair {
+    fn to_string(&self) -> String {
+        match self {
+            SigStoreKeyPair::ECDSA(_) => String::from("EC Key"),
+            SigStoreKeyPair::ED25519(_) => String::from("Ed25519 Key"),
+            SigStoreKeyPair::RSA(_) => String::from("RSA Key"),
+        }
+    }
+}
+
 /// This macro helps to reduce duplicated code.
 macro_rules! sigstore_keypair_from {
     ($func: ident ($($args:expr),*)) => {
@@ -146,8 +156,10 @@ macro_rules! sigstore_keypair_from {
             Ok(SigStoreKeyPair::ECDSA(keys))
         } else if let Ok(keys) = Ed25519Keys::$func($($args,)*) {
             Ok(SigStoreKeyPair::ED25519(keys))
+        } else if let Ok(keys) = RSAKeys::$func($($args,)*) {
+            Ok(SigStoreKeyPair::RSA(keys))
         } else {
-            Err(SigstoreError::KeyParseError("SigStoreKeys".to_string()))
+            Err(SigstoreError::KeyParseError("Unsupported key type".to_string()))
         }
     }
 }
@@ -214,6 +226,74 @@ impl SigStoreKeyPair {
     ) -> Result<CosignVerificationKey> {
         sigstore_keypair_code!(to_verification_key(signing_scheme), self)
     }
+
+    /// Convert this KeyPair into a [`SigStoreSigner`] due to the given
+    /// signing scheme. If the key type does not match the given
+    /// signing scheme, an error will occur.
+    pub fn to_sigstore_signer(&self, signing_scheme: &SigningScheme) -> Result<SigStoreSigner> {
+        match self {
+            SigStoreKeyPair::ECDSA(keys) => match signing_scheme {
+                SigningScheme::ECDSA_P256_SHA256_ASN1 => match keys {
+                    ECDSAKeys::P256(key) => {
+                        let signer = EcdsaSigner::from_ecdsa_keys(key)?;
+                        Ok(SigStoreSigner::ECDSA_P256_SHA256_ASN1(signer))
+                    }
+                    ECDSAKeys::P384(_) => Err(SigstoreError::UnmatchedKeyAndSigningScheme {
+                        key_typ: keys.to_string(),
+                        scheme: signing_scheme.to_string(),
+                    }),
+                },
+                SigningScheme::ECDSA_P384_SHA384_ASN1 => match keys {
+                    ECDSAKeys::P384(key) => {
+                        let signer = EcdsaSigner::from_ecdsa_keys(key)?;
+                        Ok(SigStoreSigner::ECDSA_P384_SHA384_ASN1(signer))
+                    }
+                    ECDSAKeys::P256(_) => Err(SigstoreError::UnmatchedKeyAndSigningScheme {
+                        key_typ: keys.to_string(),
+                        scheme: signing_scheme.to_string(),
+                    }),
+                },
+                _ => Err(SigstoreError::UnmatchedKeyAndSigningScheme {
+                    key_typ: self.to_string(),
+                    scheme: signing_scheme.to_string(),
+                }),
+            },
+            SigStoreKeyPair::ED25519(keys) => {
+                if *signing_scheme != SigningScheme::ED25519 {
+                    Err(SigstoreError::UnmatchedKeyAndSigningScheme {
+                        key_typ: self.to_string(),
+                        scheme: signing_scheme.to_string(),
+                    })
+                } else {
+                    keys.to_sigstore_signer()
+                }
+            }
+            SigStoreKeyPair::RSA(keys) => match signing_scheme {
+                SigningScheme::RSA_PSS_SHA256(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha256, PaddingScheme::PSS)
+                }
+                SigningScheme::RSA_PSS_SHA384(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha384, PaddingScheme::PSS)
+                }
+                SigningScheme::RSA_PSS_SHA512(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha512, PaddingScheme::PSS)
+                }
+                SigningScheme::RSA_PKCS1_SHA256(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha256, PaddingScheme::PKCS1v15)
+                }
+                SigningScheme::RSA_PKCS1_SHA384(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha384, PaddingScheme::PKCS1v15)
+                }
+                SigningScheme::RSA_PKCS1_SHA512(_) => {
+                    keys.to_sigstore_signer(DigestAlgorithm::Sha512, PaddingScheme::PKCS1v15)
+                }
+                _ => Err(SigstoreError::UnmatchedKeyAndSigningScheme {
+                    key_typ: self.to_string(),
+                    scheme: signing_scheme.to_string(),
+                }),
+            },
+        }
+    }
 }
 
 /// `Signer` trait is an abstraction of a specific set of asymmetric
@@ -227,6 +307,7 @@ pub trait Signer {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
 }
 
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum SigStoreSigner {
     RSA_PSS_SHA256(RSASigner),

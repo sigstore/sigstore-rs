@@ -77,6 +77,7 @@ use super::{
     SIGSTORE_PRIVATE_KEY_PEM_LABEL,
 };
 
+#[derive(Debug)]
 pub struct Ed25519Keys {
     key_pair: ed25519_dalek_fiat::Keypair,
     key_pair_bytes: KeypairBytes,
@@ -266,6 +267,7 @@ impl KeyPair for Ed25519Keys {
     }
 }
 
+#[derive(Debug)]
 pub struct Ed25519Signer {
     key_pair: Ed25519Keys,
 }

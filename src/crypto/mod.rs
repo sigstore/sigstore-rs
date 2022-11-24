@@ -47,7 +47,7 @@ pub use verification_key::CosignVerificationKey;
 /// signature format please refer
 /// to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SigningScheme {
     RSA_PSS_SHA256(usize),
     RSA_PSS_SHA384(usize),
@@ -58,6 +58,23 @@ pub enum SigningScheme {
     ECDSA_P256_SHA256_ASN1,
     ECDSA_P384_SHA384_ASN1,
     ED25519,
+}
+
+impl ToString for SigningScheme {
+    fn to_string(&self) -> String {
+        let str = match self {
+            SigningScheme::RSA_PSS_SHA256(_) => "RSA_PSS_SHA256",
+            SigningScheme::RSA_PSS_SHA384(_) => "RSA_PSS_SHA384",
+            SigningScheme::RSA_PSS_SHA512(_) => "RSA_PSS_SHA512",
+            SigningScheme::RSA_PKCS1_SHA256(_) => "RSA_PKCS1_SHA256",
+            SigningScheme::RSA_PKCS1_SHA384(_) => "RSA_PKCS1_SHA384",
+            SigningScheme::RSA_PKCS1_SHA512(_) => "RSA_PKCS1_SHA512",
+            SigningScheme::ECDSA_P256_SHA256_ASN1 => "ECDSA_P256_SHA256_ASN1",
+            SigningScheme::ECDSA_P384_SHA384_ASN1 => "ECDSA_P384_SHA384_ASN1",
+            SigningScheme::ED25519 => "ED25519",
+        };
+        String::from(str)
+    }
 }
 
 impl TryFrom<&str> for SigningScheme {

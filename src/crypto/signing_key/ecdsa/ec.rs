@@ -108,7 +108,7 @@ use super::ECDSAKeys;
 ///
 /// More elliptic curves, please refer to
 /// <https://github.com/RustCrypto/elliptic-curves#crates>.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EcdsaKeys<C>
 where
     C: Curve + ProjectiveArithmetic + pkcs8::AssociatedOid,
@@ -287,7 +287,7 @@ where
 ///
 /// For concrete digest algorithms, please refer to
 /// <https://github.com/RustCrypto/hashes#supported-algorithms>.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EcdsaSigner<C, D>
 where
     C: PrimeCurve + ProjectiveArithmetic + AssociatedOid,

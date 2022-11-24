@@ -10,9 +10,11 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [features]
-default = ["native-tls"]
+default = ["native-tls", "test-registry"]
 native-tls = ["oci-distribution/native-tls", "openidconnect/native-tls", "reqwest/native-tls"]
 rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls", "reqwest/rustls-tls"]
+# This features is used by tests that use docker to create a registry
+test-registry = []
 
 [dependencies]
 async-trait = "0.1.52"
@@ -57,17 +59,23 @@ anyhow = { version = "1.0", features = ["backtrace"] }
 assert-json-diff = "2.0.2"
 chrono = "0.4.20"
 clap = { version = "4.0.8", features = ["derive"] }
+docker_credential = { git = "https://github.com/Xynnn007/docker_credential", rev = "f350805"}
 openssl = "0.10.38"
 rstest = "0.15.0"
 tempfile = "3.3.0"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
-
+testcontainers = "0.14"
+serial_test = "0.9.0"
 
 # cosign example mappings
 
 [[example]]
 name = "verify"
 path = "examples/cosign/verify/main.rs"
+
+[[example]]
+name = "sign"
+path = "examples/cosign/sign/main.rs"
 
 # openidconnect example mappings
 

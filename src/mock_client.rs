@@ -19,7 +19,10 @@ pub(crate) mod test {
 
     use async_trait::async_trait;
     use oci_distribution::{
-        client::ImageData, manifest::OciManifest, secrets::RegistryAuth, Reference,
+        client::{ImageData, PushResponse},
+        manifest::OciManifest,
+        secrets::RegistryAuth,
+        Reference,
     };
 
     #[derive(Default)]
@@ -27,6 +30,7 @@ pub(crate) mod test {
         pub fetch_manifest_digest_response: Option<anyhow::Result<String>>,
         pub pull_response: Option<anyhow::Result<ImageData>>,
         pub pull_manifest_response: Option<anyhow::Result<(OciManifest, String)>>,
+        pub push_response: Option<anyhow::Result<PushResponse>>,
     }
 
     #[async_trait]
@@ -92,6 +96,34 @@ pub(crate) mod test {
                 Ok(r) => Ok(r.clone()),
                 Err(e) => Err(SigstoreError::RegistryPullError {
                     image: image.whole(),
+                    error: e.to_string(),
+                }),
+            }
+        }
+
+        async fn push(
+            &mut self,
+            image_ref: &oci_distribution::Reference,
+            _layers: &[oci_distribution::client::ImageLayer],
+            _config: oci_distribution::client::Config,
+            _auth: &oci_distribution::secrets::RegistryAuth,
+            _manifest: Option<oci_distribution::manifest::OciImageManifest>,
+        ) -> Result<PushResponse> {
+            let mock_response =
+                self.push_response
+                    .as_ref()
+                    .ok_or_else(|| SigstoreError::RegistryPushError {
+                        image: image_ref.whole(),
+                        error: String::from("No push_response provided!"),
+                    })?;
+
+            match mock_response {
+                Ok(r) => Ok(PushResponse {
+                    config_url: r.config_url.clone(),
+                    manifest_url: r.manifest_url.clone(),
+                }),
+                Err(e) => Err(SigstoreError::RegistryPushError {
+                    image: image_ref.whole(),
                     error: e.to_string(),
                 }),
             }

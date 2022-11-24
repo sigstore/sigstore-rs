@@ -198,7 +198,7 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
         let signature_layer = SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
             oci_digest: String::from("sha256:f9b817c013972c75de8689d55c0d441c3eb84f6233ac75f6a9c722ea5db0058b"),
-            signature: String::from("MEYCIQCIqLEe6hnjEXP/YC2P9OIwEr2yMmwPNHLzvCPaoaXFOQIhALyTouhKNKc2ZVrR0GUQ7J0U5AtlyDZDLGnasAi7XnV/"),
+            signature: Some(String::from("MEYCIQCIqLEe6hnjEXP/YC2P9OIwEr2yMmwPNHLzvCPaoaXFOQIhALyTouhKNKc2ZVrR0GUQ7J0U5AtlyDZDLGnasAi7XnV/")),
             bundle: Some(bundle),
             certificate_signature: None,
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
