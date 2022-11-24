@@ -1,3 +1,31 @@
+# v0.6.0
+
+## Fixes
+* Fix typo in cosign/mod.rs doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/148
+* Fix typo in KeyPair trait doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/149
+* Update cached requirement from 0.39.0 to 0.40.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/154
+* Fix typos in PublicKeyVerifier doc comments by @danbev in https://github.com/sigstore/sigstore-rs/pull/155
+* Fix: CI error for auto deref by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/160
+* Fix typo and grammar in signature_layers.rs by @danbev in https://github.com/sigstore/sigstore-rs/pull/161
+* Remove unused imports in examples/rekor by @danbev in https://github.com/sigstore/sigstore-rs/pull/162
+* Update link to verification example by @danbev in https://github.com/sigstore/sigstore-rs/pull/156
+* Fix typos in from_encrypted_pem doc comments by @danbev in https://github.com/sigstore/sigstore-rs/pull/164
+* Fix typos in doc comments by @danbev in https://github.com/sigstore/sigstore-rs/pull/163
+* Update path to fulcio-cert in verify example by @danbev in https://github.com/sigstore/sigstore-rs/pull/168
+
+## Enhancements
+* Add getter functions for LogEntry fields by @lkatalin in https://github.com/sigstore/sigstore-rs/pull/147
+* Add TreeSize alias to Rekor by @avery-blanchard in https://github.com/sigstore/sigstore-rs/pull/151
+* Updates for parsing hashedrekord LogEntry by @lkatalin in https://github.com/sigstore/sigstore-rs/pull/152
+* Add certificate based verification by @flavio in https://github.com/sigstore/sigstore-rs/pull/159
+* Add support for OCI Image signing (spec v1.0) by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/158
+## Contributors
+* Avery Blanchard (@avery-blanchardmade)
+* Daniel Bevenius (@danbev)
+* Flavio Castelli (@flavio)
+* Lily Sturmann (@lkatalin)
+* Xynnn (@Xynnn007)
+
 # v0.5.3
 
 ## Fixes
