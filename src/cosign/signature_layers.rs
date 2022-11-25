@@ -221,7 +221,7 @@ impl SignatureLayer {
     /// Create a SignatureLayer that can be considered trusted.
     ///
     /// Params:
-    ///   * `descriptor`: the metatada of the layer, taken from the OCI manifest associated
+    ///   * `descriptor`: the metadata of the layer, taken from the OCI manifest associated
     ///     with the Sigstore object
     ///   * `layer`: the data referenced by the descriptor
     ///   * `source_image_digest`: the digest of the object that we're trying
