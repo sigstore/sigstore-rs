@@ -59,7 +59,7 @@ anyhow = { version = "1.0", features = ["backtrace"] }
 assert-json-diff = "2.0.2"
 chrono = "0.4.20"
 clap = { version = "4.0.8", features = ["derive"] }
-docker_credential = { git = "https://github.com/Xynnn007/docker_credential", rev = "f350805"}
+docker_credential = "1.1.0"
 openssl = "0.10.38"
 rstest = "0.15.0"
 tempfile = "3.3.0"
