@@ -3,33 +3,36 @@ Continuous integration | Docs | License | Crate version | Crate downloads
  [![Continuous integration](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml/badge.svg)](https://github.com/sigstore/sigstore-rs/actions/workflows/tests.yml) | [![Docs](https://img.shields.io/badge/docs-%20-blue)](https://docs.rs/sigstore/latest/sigstore) |  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0) | [![Crate version](https://img.shields.io/crates/v/sigstore?style=flat-square)](https://crates.io/crates/sigstore) | [![Crate downloads](https://img.shields.io/crates/d/sigstore?style=flat-square)](https://crates.io/crates/sigstore)
 
 
-This is an experimental crate to interact with [sigstore](https://sigstore.dev/).
+A crate to interact with [sigstore](https://sigstore.dev/).
 
-This is under high development, many features and checks are still missing.
+This is crate is under active development and is not will not be considered
+stable until the 1.0 release.
 
 ## Features
 
-### CosignVerification
+### Cosign Sign and Verify
 
 The crate implements the following verification mechanisms:
 
+  * Sign using a cosign key and store the signature in a registry
   * Verify using a given key
   * Verify bundle produced by transparency log (Rekor)
   * Verify signature produced in keyless mode, using Fulcio Web-PKI
 
 Signature annotations and certificate email can be provided at verification time.
 
-### OpenID Connect
+### Fulcio Integration
 
-For use with Fulcio ephemeral key signing, an OpenID connect API is available.
+For use with Fulcio ephemeral key signing, an OpenID connect API is available,
+along with a fulcio client implementation.
 
 ### Rekor Client
 
-All of the rekor client APIs can be leveraged.
+All rekor client APIs can be leveraged to interact with the transparency log.
 
 ### Key Interface
 
-The crate implements the following key interfaces:
+Cryptographic key management with the following key interfaces:
 
 * Generate a key pair
 * Sign data
@@ -39,8 +42,7 @@ The crate implements the following key interfaces:
 
 #### Known limitations
 
-* The crate does not handle verification of attestations yet or perform OIC
-container signing operations.
+* The crate does not handle verification of attestations yet.
 
 ## Examples
 
@@ -49,14 +51,21 @@ The `examples` directory contains demo programs using the library.
   * [`openidflow`](examples/openidflow/README.md)
   * [`key_interface`](examples/key_interface/README.md)
   * [`rekor`](examples/rekor/README.md)
+  * [`cosign/verify`](examples/cosign/verify/README.md)
+  * [`cosign/sign`](examples/cosign/sign/README.md)
 
 Each example can be executed with the `cargo run --example <name>` command.
 
-For example, the `openidconnect` example can be run with the following command:
+For example, `openidconnect` can be run with the following command:
 
 ```bash
 cargo run --example openidconnect
 ```
+
+## Contributing
+
+Contributions are welcome! Please see the [contributing guidelines](CONTRIBUTING.md).
+for more information.
 
 ## Security
 
