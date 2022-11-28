@@ -5,7 +5,7 @@ Continuous integration | Docs | License | Crate version | Crate downloads
 
 A crate to interact with [sigstore](https://sigstore.dev/).
 
-This is crate is under active development and is not will not be considered
+This crate is under active development and will not be considered
 stable until the 1.0 release.
 
 ## Features
