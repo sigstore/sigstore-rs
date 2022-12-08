@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module provides a series of Rust Struct that implementation
+//! This module provides a series of Rust structs that implementation
 //! the Container signature format described
 //! [here](https://github.com/containers/image/blob/a5061e5a5f00333ea3a92e7103effd11c6e2f51d/docs/containers-signature.5.md#json-data-format).
 
@@ -46,7 +46,7 @@ impl fmt::Display for SimpleSigning {
 
 impl SimpleSigning {
     /// Create a new simple signing payload due to the given image reference
-    /// and manifefst_digest
+    /// and manifest_digest
     pub fn new(image_ref: &str, manifest_digest: &str) -> Self {
         Self {
             critical: Critical {
