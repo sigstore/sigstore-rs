@@ -66,7 +66,7 @@ impl Constraint for PrivateKeySigner {
         }
         signature_layer.raw_data = serde_json::to_vec(&signature_layer.simple_signing)?;
         let sig = self.key.sign(&signature_layer.raw_data)?;
-        let sig_base64 = base64::encode(&sig);
+        let sig_base64 = base64::encode(sig);
         signature_layer.signature = Some(sig_base64);
         Ok(true)
     }
