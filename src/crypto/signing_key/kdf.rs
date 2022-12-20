@@ -124,7 +124,7 @@ impl ScryptKDF {
     }
 }
 
-/// Secretbox is used to seal the given secrert
+/// Secretbox is used to seal the given secret
 #[derive(Serialize, Deserialize)]
 struct SecretBoxCipher {
     name: String,
