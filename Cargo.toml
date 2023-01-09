@@ -19,7 +19,7 @@ test-registry = []
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.20.0"
-cached = "0.41.0"
+cached = "0.42.0"
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false }
 olpc-cjson = "0.1"
