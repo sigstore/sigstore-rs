@@ -1,4 +1,4 @@
-use base64::decode;
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::SigstoreError;
@@ -21,7 +21,7 @@ pub struct LogEntry {
 
 impl LogEntry {
     pub fn decode_body(&self) -> Result<Body, SigstoreError> {
-        let decoded = decode(&self.body)?;
+        let decoded = BASE64_STD_ENGINE.decode(&self.body)?;
         serde_json::from_slice(&decoded).map_err(SigstoreError::from)
     }
 }

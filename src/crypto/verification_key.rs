@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use pkcs8::DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
@@ -249,7 +250,7 @@ impl CosignVerificationKey {
     pub fn verify_signature(&self, signature: Signature, msg: &[u8]) -> Result<()> {
         let sig = match signature {
             Signature::Raw(data) => data.to_owned(),
-            Signature::Base64Encoded(data) => base64::decode(data)?,
+            Signature::Base64Encoded(data) => BASE64_STD_ENGINE.decode(data)?,
         };
 
         match self {
