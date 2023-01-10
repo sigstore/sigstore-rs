@@ -19,6 +19,7 @@
 //! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
 //! for golang version.
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use xsalsa20poly1305::aead::{AeadMut, KeyInit};
@@ -73,7 +74,7 @@ fn to_base64<S>(v: &[u8], serializer: S) -> std::result::Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    serializer.serialize_str(&base64::encode(v))
+    serializer.serialize_str(&BASE64_STD_ENGINE.encode(v))
 }
 
 /// Help to deserialize `salt` from base64
@@ -82,7 +83,9 @@ where
     D: Deserializer<'de>,
 {
     let s = <String>::deserialize(deserializer)?;
-    base64::decode(s).map_err(serde::de::Error::custom)
+    BASE64_STD_ENGINE
+        .decode(s)
+        .map_err(serde::de::Error::custom)
 }
 
 impl Default for ScryptKDF {

@@ -15,6 +15,7 @@
 
 //! Structs that can be used to sign a [`crate::cosign::SignatureLayer`]
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use tracing::warn;
 use zeroize::Zeroizing;
 
@@ -66,7 +67,7 @@ impl Constraint for PrivateKeySigner {
         }
         signature_layer.raw_data = serde_json::to_vec(&signature_layer.simple_signing)?;
         let sig = self.key.sign(&signature_layer.raw_data)?;
-        let sig_base64 = base64::encode(sig);
+        let sig_base64 = BASE64_STD_ENGINE.encode(sig);
         signature_layer.signature = Some(sig_base64);
         Ok(true)
     }

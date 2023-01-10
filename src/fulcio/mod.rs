@@ -4,6 +4,7 @@ use crate::crypto::signing_key::SigStoreSigner;
 use crate::crypto::SigningScheme;
 use crate::errors::{Result, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use openidconnect::core::CoreIdToken;
 use reqwest::Body;
 use serde::ser::SerializeStruct;
@@ -135,11 +136,11 @@ impl FulcioClient {
 
         let signer = signing_scheme.create_signer()?;
         let signature = signer.sign(challenge.as_bytes())?;
-        let signature = base64::encode(signature);
+        let signature = BASE64_STD_ENGINE.encode(signature);
 
         let key_pair = signer.to_sigstore_keypair()?;
         let public_key = key_pair.public_key_to_der()?;
-        let public_key = base64::encode(public_key);
+        let public_key = BASE64_STD_ENGINE.encode(public_key);
 
         let csr = Csr {
             public_key: Some(PublicKey(public_key, signing_scheme)),
