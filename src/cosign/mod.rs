@@ -44,7 +44,7 @@ use tracing::warn;
 use crate::errors::{Result, SigstoreApplicationConstraintsError, SigstoreVerifyConstraintsError};
 use crate::registry::{Auth, PushResponse};
 
-mod bundle;
+pub mod bundle;
 pub(crate) mod constants;
 pub mod signature_layers;
 pub use signature_layers::SignatureLayer;
