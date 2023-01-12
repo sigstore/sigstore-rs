@@ -13,9 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
+use std::convert::TryFrom;
 
 use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::{Result, SigstoreError};
@@ -43,12 +45,25 @@ impl SignedArtifactBundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
-    #[allow(dead_code)]
-    pub(crate) fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
+    pub fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: SignedArtifactBundle = serde_json::from_str(raw).map_err(|e| {
             SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
         })?;
         Bundle::verify_bundle(&bundle.rekor_bundle, rekor_pub_key).map(|_| bundle)
+    }
+
+    /// Verifies the passed-in blob against the signature in this
+    /// SignedArtifactBundle.
+    pub fn verify_blob(&self, blob: &[u8]) -> Result<()> {
+        let cert = BASE64_STD_ENGINE.decode(&self.cert)?;
+        let (_, pem) = x509_parser::pem::parse_x509_pem(&cert)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let subject_public_key = cert.public_key();
+        let ver_key =
+            CosignVerificationKey::try_from(subject_public_key).expect("conversion failed");
+        let signature = Signature::Base64Encoded(self.base64_signature.as_bytes());
+        ver_key.verify_signature(signature, blob)?;
+        Ok(())
     }
 }
 

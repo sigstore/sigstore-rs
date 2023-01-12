@@ -74,6 +74,10 @@ name = "verify"
 path = "examples/cosign/verify/main.rs"
 
 [[example]]
+name = "verify-bundle"
+path = "examples/cosign/verify-bundle/main.rs"
+
+[[example]]
 name = "sign"
 path = "examples/cosign/sign/main.rs"
 
