@@ -1,5 +1,5 @@
-This is a simple example that shows how perform cosign verification
-using a bundle which contains everything required to verify a blob.
+This example shows how to verify a blob, using a bundle that was created by the
+`cosign sign-blob` command.
 
 ### Create the artifact to be signed.
 ```console

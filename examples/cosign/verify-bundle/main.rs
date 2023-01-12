@@ -27,7 +27,7 @@ struct Cli {
     #[clap(short, long)]
     bundle: String,
 
-    /// Path to artifact to be verify
+    /// Path to artifact to be verified
     blob: String,
 
     /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
@@ -51,17 +51,18 @@ pub async fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    let rekor_pub_pem = fs::read_to_string(&cli.rekor_pub_key).unwrap();
+    let rekor_pub_pem =
+        fs::read_to_string(&cli.rekor_pub_key).expect("error reading rekor's public key");
     let rekor_pub_key =
         CosignVerificationKey::from_pem(rekor_pub_pem.as_bytes(), &SigningScheme::default())
             .expect("Cannot create Rekor verification key");
-    let bundle_json = fs::read_to_string(&cli.bundle).unwrap();
-    let blob = fs::read(&cli.blob.as_str()).unwrap();
+    let bundle_json = fs::read_to_string(&cli.bundle).expect("error reading bundle json file");
+    let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
 
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
     if bundle.verify_blob(&blob).is_ok() {
         println!("Verification succeeded");
     } else {
-        println!("Verification failed");
+        eprintln!("Verification failed");
     }
 }
