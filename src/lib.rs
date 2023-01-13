@@ -222,6 +222,29 @@
 //! The [`sigstore::tuf`](crate::tuf) module provides the helper structures to deal
 //! with it.
 //!
+//! # Feature Flags
+//!
+//! Sigstore-rs uses a set of [feature flags] to reduce the amount of compiled code.
+//! It is suggested to just enable those features in need. The features includes:
+//!
+//! - `default`: Enables `full-native-tls`, `cached-client` and `test-registry` features.
+//! - `full-native-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
+//! tls uses `native-tls`. This feature will not enable `test-registry.`
+//! - `full-rustls-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
+//! tls uses `rustls-tls`. This feature will not enable `test-registry.`
+//!
+//! - `fulcio-native-tls` and `fulcio-rustls-tls`: Enables support for `fulcio`, but one uses
+//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!
+//! - `rekor-native-tls` and `rekor-rustls-tls`: Enables support for `rekor`, but one uses
+//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!
+//! - `cosign-native-tls` and `cosign-rustls-tls`: Enables support for `cosign`, but one uses
+//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!
+//! - `cached-client`: Enables support for OCI registry client caching.
+//!
+//! - `test-registry`: Enables tests based on a temporary OCI registry.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
