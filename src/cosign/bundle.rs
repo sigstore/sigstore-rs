@@ -32,7 +32,7 @@ use crate::errors::{Result, SigstoreError};
 #[serde(rename_all = "camelCase")]
 pub struct SignedArtifactBundle {
     /// Represents the `base64Signature' field which is the signature of the
-    /// 'logIndex', 'body', and the 'integratedTime' fields.
+    /// of the blob.
     pub base64_signature: String,
     /// Represents the 'cert' field which is a PEM encoded certificate.
     pub cert: String,
