@@ -173,7 +173,9 @@ pub enum Signature<'a> {
     Base64Encoded(&'a [u8]),
 }
 
+#[cfg(feature = "cert")]
 pub(crate) mod certificate;
+#[cfg(feature = "cert")]
 pub(crate) mod certificate_pool;
 
 pub mod verification_key;

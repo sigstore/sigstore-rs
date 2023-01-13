@@ -227,12 +227,26 @@
 #![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
+
+#[cfg(feature = "mock-client")]
 mod mock_client;
 
+#[cfg(feature = "cosign")]
 pub mod cosign;
+
 pub mod errors;
+
+#[cfg(feature = "fulcio")]
 pub mod fulcio;
+
+#[cfg(feature = "oauth")]
 pub mod oauth;
+
+#[cfg(feature = "registry")]
 pub mod registry;
+
+#[cfg(feature = "rekor")]
 pub mod rekor;
+
+#[cfg(feature = "tuf")]
 pub mod tuf;
