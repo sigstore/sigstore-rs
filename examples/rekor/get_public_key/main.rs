@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::{fs::write, process};
+
 use clap::{Arg, Command};
 use sigstore::rekor::apis::{configuration::Configuration, pubkey_api};
 
@@ -29,7 +31,15 @@ async fn main() {
     .arg(Arg::new("tree_id")
              .long("tree_id")
              .value_name("TREE_ID")
-             .help("The tree ID of the tree that you wish to prove consistency for. To use the default value, do not input any value."));
+             .help("The tree ID of the tree that you wish to prove consistency for. To use the default value, do not input any value."))
+    .arg(Arg::new("output")
+            .short('o')
+            .long("output")
+            .value_name("OUTPUT_FILE")
+            .num_args(0..=1)
+            .require_equals(true)
+            .default_missing_value("key.pub")
+            .help("The path to the output file that you wish to store the public key in. To use the default value (pub.key), do not provide OUTPUT_FILE."));
 
     let flags = matches.get_matches();
     let configuration = Configuration::default();
@@ -38,5 +48,16 @@ async fn main() {
         flags.get_one::<String>("tree_id").map(|s| s.as_str()),
     )
     .await;
-    println!("{:#?}", pubkey.unwrap());
+
+    if let Some(out_path) = flags.get_one::<String>("output") {
+        match write(out_path, pubkey.unwrap()) {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Could not write to {out_path}: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        print!("{}", pubkey.unwrap());
+    }
 }
