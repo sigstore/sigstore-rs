@@ -48,7 +48,7 @@ p384 = "0.11.1"
 ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
 digest = "0.10.3"
 signature = { version = "1.5.0", features = [ "digest-preview" ] }
-ed25519 = { version = "1", features = [ "alloc" ] }
+ed25519 = { version = "2", features = [ "alloc" ] }
 ed25519-dalek-fiat = "0.1.0"
 rsa = "0.7.0"
 pkcs1 = "0.4.0"
