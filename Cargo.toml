@@ -45,7 +45,7 @@ pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] 
 elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
 p256 = "0.11.1"
 p384 = "0.11.1"
-ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
+ecdsa = { version = "0.15.0", features = [ "pkcs8", "digest", "der" ] }
 digest = "0.10.3"
 signature = { version = "1.5.0", features = [ "digest-preview" ] }
 ed25519 = { version = "1", features = [ "alloc" ] }
