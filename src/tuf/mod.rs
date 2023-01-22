@@ -97,9 +97,9 @@ impl SigstoreRepository {
     /// ## Usage inside of async code
     ///
     /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it peforms blocking operations.
+    /// an async function because it performs blocking operations.
     ///
-    /// If needed, this can be solved in that way:
+    /// If needed, this can be solved in the following way:
     ///
     /// ```rust,no_run
     /// use tokio::task::spawn_blocking;
