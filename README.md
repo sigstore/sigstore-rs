@@ -63,6 +63,16 @@ For example, `openidconnect` can be run with the following command:
 cargo run --example openidconnect
 ```
 
+## WebAssembly/WASM support
+
+To embedded this crate in WASM modules, build it using the `wasm` cargo feature:
+
+```bash
+cargo build --no-default-features --features wasm --target wasm32-unknown-unknown
+```
+
+NOTE: The wasm32-wasi target architecture is not yet supported.
+
 ## Contributing
 
 Contributions are welcome! Please see the [contributing guidelines](CONTRIBUTING.md).

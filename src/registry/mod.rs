@@ -30,9 +30,9 @@ use crate::errors::Result;
 
 use async_trait::async_trait;
 
-#[async_trait]
+#[async_trait(?Send)]
 /// Capabilities that are expected to be provided by a registry client
-pub(crate) trait ClientCapabilities: Send + Sync {
+pub(crate) trait ClientCapabilities {
     async fn fetch_manifest_digest(
         &mut self,
         image: &oci_distribution::Reference,

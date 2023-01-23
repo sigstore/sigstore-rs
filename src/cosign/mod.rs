@@ -63,7 +63,7 @@ pub mod payload;
 pub use payload::simple_signing;
 
 pub mod constraint;
-#[async_trait]
+#[async_trait(?Send)]
 /// Cosign Abilities that have to be implemented by a
 /// Cosign client
 pub trait CosignCapabilities {
