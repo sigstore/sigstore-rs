@@ -116,7 +116,7 @@ impl RepositoryHelper {
 /// cache when possible.
 ///
 /// * `repository`: TUF repository holding the file
-/// * `target`: TUF representation of the file to be downloaded
+/// * `target_name`: TUF representation of the file to be downloaded
 /// * `local_file`: location where the file should be downloaded
 ///
 /// This function will reuse the local copy of the file if contents
