@@ -50,16 +50,16 @@ pub struct Attestation {
 #[serde(rename_all = "camelCase")]
 pub struct Verification {
     #[serde(skip_serializing_if = "Option::is_none")]
-    inclusion_proof: Option<InclusionProof>,
-    signed_entry_timestamp: String,
+    pub inclusion_proof: Option<InclusionProof>,
+    pub signed_entry_timestamp: String,
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InclusionProof {
-    hashes: Vec<String>,
-    log_index: i64,
-    root_hash: String,
-    tree_size: TreeSize,
+    pub hashes: Vec<String>,
+    pub log_index: i64,
+    pub root_hash: String,
+    pub tree_size: TreeSize,
 }
