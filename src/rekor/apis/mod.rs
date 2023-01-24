@@ -27,8 +27,13 @@ pub enum Error<T> {
         source: std::io::Error,
     },
 
-    #[error("error in response: status code {{error.status:?}}")]
+    #[error("error in response: status code {:?}", error_status(.0))]
     ResponseError(ResponseContent<T>),
+}
+
+#[inline]
+fn error_status<T>(response: &ResponseContent<T>) -> reqwest::StatusCode {
+    response.status
 }
 
 pub fn urlencode<T: AsRef<str>>(s: T) -> String {
