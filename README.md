@@ -52,6 +52,7 @@ The `examples` directory contains demo programs using the library.
   * [`key_interface`](examples/key_interface/README.md)
   * [`rekor`](examples/rekor/README.md)
   * [`cosign/verify`](examples/cosign/verify/README.md)
+  * [`cosign/verify-bundle`](examples/cosign/verify-bundle/README.md)
   * [`cosign/sign`](examples/cosign/sign/README.md)
 
 Each example can be executed with the `cargo run --example <name>` command.
