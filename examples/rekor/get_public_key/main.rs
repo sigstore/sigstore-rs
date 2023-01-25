@@ -47,10 +47,11 @@ async fn main() {
         &configuration,
         flags.get_one::<String>("tree_id").map(|s| s.as_str()),
     )
-    .await;
+    .await
+    .expect("Unable to retrieve public key");
 
     if let Some(out_path) = flags.get_one::<String>("output") {
-        match write(out_path, pubkey.unwrap()) {
+        match write(out_path, pubkey) {
             Ok(_) => (),
             Err(e) => {
                 eprintln!("Could not write to {out_path}: {e}");
@@ -58,6 +59,6 @@ async fn main() {
             }
         }
     } else {
-        print!("{}", pubkey.unwrap());
+        print!("{}", pubkey);
     }
 }
