@@ -62,9 +62,9 @@
 
 use std::convert::TryFrom;
 
-use ed25519::{pkcs8::PublicKeyBytes, KeypairBytes};
+use ed25519::KeypairBytes;
+use ed25519_dalek::{Signer as _, SigningKey};
 use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
-use signature::Signer as _;
 use x509_parser::nom::AsBytes;
 
 use crate::{
@@ -77,11 +77,10 @@ use super::{
     SIGSTORE_PRIVATE_KEY_PEM_LABEL,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ed25519Keys {
-    key_pair: ed25519_dalek_fiat::Keypair,
-    key_pair_bytes: KeypairBytes,
-    public_key_bytes: PublicKeyBytes,
+    signing_key: ed25519_dalek::SigningKey,
+    verifying_key: ed25519_dalek::VerifyingKey,
 }
 
 impl Ed25519Keys {
@@ -90,17 +89,11 @@ impl Ed25519Keys {
     /// generated.
     pub fn new() -> Result<Self> {
         let mut csprng = rand::rngs::OsRng {};
-        let key_pair = ed25519_dalek_fiat::Keypair::generate(&mut csprng);
-        let key_pair_bytes = KeypairBytes::from_bytes(&key_pair.to_bytes());
-        let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {e}"
-            ))
-        })?;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let verifying_key = signing_key.verifying_key();
         Ok(Self {
-            key_pair,
-            key_pair_bytes,
-            public_key_bytes,
+            signing_key,
+            verifying_key,
         })
     }
 
@@ -172,21 +165,16 @@ impl Ed25519Keys {
 
     /// Builds a `Ed25519Keys` from a `KeypairBytes`.
     fn from_key_pair_bytes(key_pair_bytes: KeypairBytes) -> Result<Self> {
-        let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {e}"
-            ))
-        })?;
-        let key_pair = ed25519_dalek_fiat::Keypair::from_bytes(
+        let signing_key = ed25519_dalek::SigningKey::from_keypair_bytes(
             &key_pair_bytes.to_bytes().ok_or_else(|| {
                 SigstoreError::PKCS8SpkiError("No public key info in given key_pair_bytes.".into())
             })?,
         )?;
+        let verifying_key = signing_key.verifying_key();
 
         Ok(Self {
-            key_pair,
-            public_key_bytes,
-            key_pair_bytes,
+            signing_key,
+            verifying_key,
         })
     }
 
@@ -202,7 +190,7 @@ impl Ed25519Keys {
 impl KeyPair for Ed25519Keys {
     /// Return the public key in PEM-encoded SPKI format.
     fn public_key_to_pem(&self) -> Result<String> {
-        self.public_key_bytes
+        self.verifying_key
             .to_public_key_pem(pkcs8::LineEnding::LF)
             .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
     }
@@ -210,7 +198,7 @@ impl KeyPair for Ed25519Keys {
     /// Return the public key in asn.1 SPKI format.
     fn public_key_to_der(&self) -> Result<Vec<u8>> {
         Ok(self
-            .public_key_bytes
+            .verifying_key
             .to_public_key_der()
             .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?
             .to_vec())
@@ -235,7 +223,7 @@ impl KeyPair for Ed25519Keys {
 
     /// Return the private key in pkcs8 PEM-encoded format.
     fn private_key_to_pem(&self) -> Result<zeroize::Zeroizing<String>> {
-        self.key_pair_bytes
+        self.signing_key
             .to_pkcs8_pem(pkcs8::LineEnding::LF)
             .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
     }
@@ -243,7 +231,7 @@ impl KeyPair for Ed25519Keys {
     /// Return the private key in asn.1 pkcs8 format.
     fn private_key_to_der(&self) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         let pkcs8 = self
-            .key_pair_bytes
+            .signing_key
             .to_pkcs8_der()
             .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
         Ok(pkcs8.to_bytes())
@@ -267,23 +255,9 @@ pub struct Ed25519Signer {
 
 impl Ed25519Signer {
     pub fn from_ed25519_keys(ed25519_keys: &Ed25519Keys) -> Result<Self> {
-        let key_pair_bytes =
-            KeypairBytes::from_bytes(&ed25519_keys.key_pair_bytes.to_bytes().ok_or_else(|| {
-                SigstoreError::PKCS8SpkiError("No public key info in given key_pair_bytes.".into())
-            })?);
-        let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {e}"
-            ))
-        })?;
-
-        let key_pair = Ed25519Keys {
-            key_pair: ed25519_dalek_fiat::Keypair::from_bytes(&ed25519_keys.key_pair.to_bytes())?,
-            key_pair_bytes,
-            public_key_bytes,
-        };
-
-        Ok(Self { key_pair })
+        Ok(Self {
+            key_pair: ed25519_keys.clone(),
+        })
     }
 
     /// Return the ref to the keypair inside the signer
@@ -300,7 +274,7 @@ impl Signer for Ed25519Signer {
 
     /// Sign the given message using Ed25519
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let signature = self.key_pair.key_pair.try_sign(msg)?;
+        let signature = self.key_pair.signing_key.try_sign(msg)?;
         Ok(signature.to_vec())
     }
 }
