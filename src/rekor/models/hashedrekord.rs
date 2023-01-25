@@ -109,8 +109,8 @@ pub enum AlgorithmKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hash {
-    algorithm: AlgorithmKind,
-    value: String,
+    pub algorithm: AlgorithmKind,
+    pub value: String,
 }
 
 impl Hash {
