@@ -14,6 +14,7 @@ use super::{configuration, Error};
 use crate::rekor::apis::ResponseContent;
 use crate::rekor::models::log_entry::LogEntry;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// struct for typed errors of method [`create_log_entry`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,7 +94,7 @@ pub async fn create_log_entry(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str::<LogEntry>(&(parse_response(local_var_content))).map_err(Error::from)
+        LogEntry::from_str(&(parse_response(local_var_content))).map_err(Error::from)
     } else {
         let local_var_entity: Option<CreateLogEntryError> =
             serde_json::from_str(&local_var_content).ok();
@@ -130,7 +131,7 @@ pub async fn get_log_entry_by_index(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str::<LogEntry>(&(parse_response(local_var_content))).map_err(Error::from)
+        LogEntry::from_str(&(parse_response(local_var_content))).map_err(Error::from)
     } else {
         let local_var_entity: Option<GetLogEntryByIndexError> =
             serde_json::from_str(&local_var_content).ok();
@@ -170,7 +171,7 @@ pub async fn get_log_entry_by_uuid(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str::<LogEntry>(&(parse_response(local_var_content))).map_err(Error::from)
+        LogEntry::from_str(&(parse_response(local_var_content))).map_err(Error::from)
     } else {
         let local_var_entity: Option<GetLogEntryByUuidError> =
             serde_json::from_str(&local_var_content).ok();
