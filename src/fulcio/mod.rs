@@ -8,7 +8,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _
 use openidconnect::core::CoreIdToken;
 use reqwest::Body;
 use serde::ser::SerializeStruct;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Display, Formatter};
 use url::Url;
@@ -17,10 +17,53 @@ use url::Url;
 pub const FULCIO_ROOT: &str = "https://fulcio.sigstore.dev/";
 
 /// Path within Fulcio to obtain a signing certificate.
-pub const SIGNING_CERT_PATH: &str = "api/v1/signingCert";
+pub const SIGNING_CERT_PATH: &str = "api/v2/signingCert";
 
 const CONTENT_TYPE_HEADER_NAME: &str = "content-type";
 
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Credentials {
+    oidc_identity_token: String,
+}
+
+#[derive(Debug)]
+struct PublicKey {
+    algorithm: Option<SigningScheme>,
+    content: String,
+}
+impl Serialize for PublicKey {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut pk = serializer.serialize_struct("PublicKey", 2)?;
+        pk.serialize_field("content", &self.content)?;
+        pk.serialize_field(
+            "algorithm",
+            match self.algorithm {
+                Some(SigningScheme::ECDSA_P256_SHA256_ASN1)
+                | Some(SigningScheme::ECDSA_P384_SHA384_ASN1) => "ECDSA",
+                Some(SigningScheme::ED25519) => "ED25519",
+                Some(SigningScheme::RSA_PSS_SHA256(_))
+                | Some(SigningScheme::RSA_PSS_SHA384(_))
+                | Some(SigningScheme::RSA_PSS_SHA512(_))
+                | Some(SigningScheme::RSA_PKCS1_SHA256(_))
+                | Some(SigningScheme::RSA_PKCS1_SHA384(_))
+                | Some(SigningScheme::RSA_PKCS1_SHA512(_)) => "RSA",
+                _ => "PUBLIC_KEY_ALGORITHM_UNSPECIFIED",
+            },
+        )?;
+        pk.end()
+    }
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PublicKeyRequest {
+    public_key: PublicKey,
+    proof_of_possession: String,
+}
 /// Fulcio certificate signing request
 ///
 /// Used to present a public key and signed challenge/proof-of-key in exchange
@@ -28,8 +71,9 @@ const CONTENT_TYPE_HEADER_NAME: &str = "content-type";
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Csr {
-    public_key: Option<PublicKey>,
-    signed_email_address: Option<String>,
+    credentials: Credentials,
+    public_key_request: PublicKeyRequest,
+    certificate_signing_request: Option<String>,
 }
 
 impl TryFrom<Csr> for Body {
@@ -40,37 +84,33 @@ impl TryFrom<Csr> for Body {
     }
 }
 
-/// Internal newtype to control serde jsonification.
-#[derive(Debug)]
-struct PublicKey(String, SigningScheme);
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Chain {
+    certificates: Vec<FulcioCert>,
+}
 
-impl Serialize for PublicKey {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut pk = serializer.serialize_struct("PublicKey", 2)?;
-        pk.serialize_field("content", &self.0)?;
-        pk.serialize_field(
-            "algorithm",
-            match self.1 {
-                SigningScheme::ECDSA_P256_SHA256_ASN1 | SigningScheme::ECDSA_P384_SHA384_ASN1 => {
-                    "ecdsa"
-                }
-                SigningScheme::ED25519 => "ed25519",
-                SigningScheme::RSA_PSS_SHA256(_)
-                | SigningScheme::RSA_PSS_SHA384(_)
-                | SigningScheme::RSA_PSS_SHA512(_)
-                | SigningScheme::RSA_PKCS1_SHA256(_)
-                | SigningScheme::RSA_PKCS1_SHA384(_)
-                | SigningScheme::RSA_PKCS1_SHA512(_) => "rsa",
-            },
-        )?;
-        pk.end()
-    }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SignedCertificateDetachedSct {
+    chain: Chain,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SignedCertificateEmbeddedSct {
+    chain: Chain,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CsrResponse {
+    signed_certificate_detached_sct: Option<SignedCertificateDetachedSct>,
+    signed_certificate_embedded_sct: Option<SignedCertificateEmbeddedSct>,
 }
 
 /// The PEM-encoded certificate chain returned by Fulcio.
+#[derive(Deserialize, Clone)]
 pub struct FulcioCert(String);
 
 impl AsRef<[u8]> for FulcioCert {
@@ -164,12 +204,19 @@ impl FulcioClient {
         let signature = BASE64_STD_ENGINE.encode(signature);
 
         let key_pair = signer.to_sigstore_keypair()?;
-        let public_key = key_pair.public_key_to_der()?;
-        let public_key = BASE64_STD_ENGINE.encode(public_key);
-
+        let public_key = key_pair.public_key_to_pem()?;
         let csr = Csr {
-            public_key: Some(PublicKey(public_key, signing_scheme)),
-            signed_email_address: Some(signature),
+            credentials: Credentials {
+                oidc_identity_token: token.to_string(),
+            },
+            public_key_request: PublicKeyRequest {
+                public_key: PublicKey {
+                    algorithm: Some(signing_scheme),
+                    content: public_key,
+                },
+                proof_of_possession: signature,
+            },
+            certificate_signing_request: None,
         };
 
         let csr = TryInto::<Body>::try_into(csr)?;
@@ -184,11 +231,24 @@ impl FulcioClient {
             .await
             .map_err(|_| SigstoreError::SigstoreFulcioCertificatesNotProvidedError)?;
 
-        let cert = response
-            .text()
+        let cert_response = response
+            .json::<CsrResponse>()
             .await
             .map_err(|_| SigstoreError::SigstoreFulcioCertificatesNotProvidedError)?;
 
-        Ok((signer, FulcioCert(cert)))
+        let cert: FulcioCert;
+
+        if let Some(signed_certificate_detached_sct) = cert_response.signed_certificate_detached_sct
+        {
+            cert = signed_certificate_detached_sct.chain.certificates[0].clone();
+        } else if let Some(signed_certificate_embedded_sct) =
+            cert_response.signed_certificate_embedded_sct
+        {
+            cert = signed_certificate_embedded_sct.chain.certificates[0].clone();
+        } else {
+            return Err(SigstoreError::CertificateRequestError);
+        }
+
+        Ok((signer, cert))
     }
 }
