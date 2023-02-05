@@ -38,6 +38,7 @@ pub struct PrivateKeySigner {
 impl PrivateKeySigner {
     /// Create a new [PrivateKeySigner] with given raw PEM data of a
     /// private key.
+    #[allow(clippy::result_large_err)]
     pub fn new_with_raw(
         key_raw: Zeroizing<Vec<u8>>,
         password: Zeroizing<Vec<u8>>,

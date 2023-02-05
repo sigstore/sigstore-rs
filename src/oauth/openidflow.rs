@@ -130,6 +130,7 @@ impl OpenIDAuthorize {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn auth_url_internal(
         &self,
         provider_metadata: CoreProviderMetadata,
@@ -157,6 +158,7 @@ impl OpenIDAuthorize {
         Ok((authorize_url, client, nonce, pkce_verifier))
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
         let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
@@ -217,6 +219,7 @@ impl RedirectListener {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn redirect_listener_internal(&self) -> Result<AuthorizationCode> {
         let listener = TcpListener::bind(self.client_redirect_host.clone())?;
         #[allow(clippy::manual_flatten)]
@@ -234,12 +237,12 @@ impl RedirectListener {
                         .nth(1)
                         .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
                     let url =
-                        Url::parse(format!("http://localhost{}", client_redirect_host).as_str())?;
+                        Url::parse(format!("http://localhost{client_redirect_host}").as_str())?;
 
                     let code_pair = url
                         .query_pairs()
                         .find(|pair| {
-                            let &(ref key, _) = pair;
+                            let (key, _) = pair;
                             key == "code"
                         })
                         .ok_or(SigstoreError::CodePairError)?;
@@ -268,6 +271,7 @@ impl RedirectListener {
         Err(SigstoreError::CodePairError)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let code = self.redirect_listener_internal()?;
 
@@ -303,6 +307,7 @@ impl RedirectListener {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     fn extract_token_and_claims(
         token_response: &CoreTokenResponse,
         id_token_verifier: &CoreIdTokenVerifier,

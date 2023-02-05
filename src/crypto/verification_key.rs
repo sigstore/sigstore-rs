@@ -99,14 +99,14 @@ impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
 impl CosignVerificationKey {
     /// Builds a [`CosignVerificationKey`] from DER-encoded data. The methods takes care
     /// of extracting the SubjectPublicKeyInfo from the DER-encoded data.
+    #[allow(clippy::result_large_err)]
     pub fn from_der(der_data: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
         Ok(match signing_scheme {
             SigningScheme::RSA_PSS_SHA256(_) => {
                 CosignVerificationKey::RSA_PSS_SHA256(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -115,8 +115,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PSS_SHA384(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -125,8 +124,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PSS_SHA512(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -135,8 +133,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -145,8 +142,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA384(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -155,8 +151,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA512(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -164,16 +159,14 @@ impl CosignVerificationKey {
             SigningScheme::ECDSA_P256_SHA256_ASN1 => CosignVerificationKey::ECDSA_P256_SHA256_ASN1(
                 ecdsa::VerifyingKey::from_public_key_der(der_data).map_err(|e| {
                     SigstoreError::PKCS8SpkiError(format!(
-                        "Ecdsa-P256 from der bytes to public key failed: {}",
-                        e,
+                        "Ecdsa-P256 from der bytes to public key failed: {e}"
                     ))
                 })?,
             ),
             SigningScheme::ECDSA_P384_SHA384_ASN1 => CosignVerificationKey::ECDSA_P384_SHA384_ASN1(
                 ecdsa::VerifyingKey::from_public_key_der(der_data).map_err(|e| {
                     SigstoreError::PKCS8SpkiError(format!(
-                        "Ecdsa-P384 from der bytes to public key failed: {}",
-                        e,
+                        "Ecdsa-P384 from der bytes to public key failed: {e}"
                     ))
                 })?,
             ),
@@ -192,6 +185,7 @@ impl CosignVerificationKey {
     /// * `EC public key with P-256 curve`: `ECDSA_P256_SHA256_ASN1`
     /// * `EC public key with P-384 curve`: `ECDSA_P384_SHA384_ASN1`
     /// * `Ed25519 public key`: `Ed25519`
+    #[allow(clippy::result_large_err)]
     pub fn try_from_der(der_data: &[u8]) -> Result<Self> {
         if let Ok(p256vk) = ecdsa::VerifyingKey::from_public_key_der(der_data) {
             Ok(Self::ECDSA_P256_SHA256_ASN1(p256vk))
@@ -217,6 +211,7 @@ impl CosignVerificationKey {
     /// Builds a [`CosignVerificationKey`] from PEM-encoded data. The methods takes care
     /// of decoding the PEM-encoded data and then extracting the SubjectPublicKeyInfo
     /// from the DER-encoded bytes.
+    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem_data: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
         let key_pem = pem::parse(pem_data)?;
         Self::from_der(key_pem.contents.as_slice(), signing_scheme)
@@ -228,6 +223,7 @@ impl CosignVerificationKey {
     /// * `EC public key with P-256 curve`: `ECDSA_P256_SHA256_ASN1`
     /// * `EC public key with P-384 curve`: `ECDSA_P384_SHA384_ASN1`
     /// * `Ed25519 public key`: `Ed25519`
+    #[allow(clippy::result_large_err)]
     pub fn try_from_pem(pem_data: &[u8]) -> Result<Self> {
         let key_pem = pem::parse(pem_data)?;
         Self::try_from_der(key_pem.contents.as_slice())
@@ -235,18 +231,21 @@ impl CosignVerificationKey {
 
     /// Builds a `CosignVerificationKey` from [`SigStoreSigner`]. The methods will derive
     /// a `CosignVerificationKey` from the given [`SigStoreSigner`]'s public key.
+    #[allow(clippy::result_large_err)]
     pub fn from_sigstore_signer(signer: &SigStoreSigner) -> Result<Self> {
         signer.to_verification_key()
     }
 
     /// Builds a `CosignVerificationKey` from [`KeyPair`]. The methods will derive
     /// a `CosignVerificationKey` from the given [`KeyPair`]'s public key.
+    #[allow(clippy::result_large_err)]
     pub fn from_key_pair(signer: &dyn KeyPair, signing_scheme: &SigningScheme) -> Result<Self> {
         signer.to_verification_key(signing_scheme)
     }
 
     /// Verify the signature provided has been actually generated by the given key
     /// when signing the provided message.
+    #[allow(clippy::result_large_err)]
     pub fn verify_signature(&self, signature: Signature, msg: &[u8]) -> Result<()> {
         let sig = match signature {
             Signature::Raw(data) => data.to_owned(),

@@ -116,6 +116,7 @@ impl ClientBuilder {
         self
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {

@@ -81,7 +81,7 @@ impl fmt::Display for CertificateSignature {
             self.github_workflow_ref,
         );
 
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
 
@@ -174,7 +174,7 @@ impl fmt::Display for SignatureLayer {
             self.simple_signing,
         );
 
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
 
@@ -203,6 +203,7 @@ impl SignatureLayer {
     /// }
     ///
     /// ```
+    #[allow(clippy::result_large_err)]
     pub fn new_unsigned(image_ref: &str, manifest_digest: &str) -> Result<Self> {
         let simple_signing = SimpleSigning::new(image_ref, manifest_digest);
 
@@ -234,6 +235,7 @@ impl SignatureLayer {
     /// **Note well:** the certificate and bundle added to the final SignatureLayer
     /// object are to be considered **trusted** and **verified**, according to
     /// the parameters provided to this method.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn new(
         descriptor: &oci_distribution::manifest::OciDescriptor,
         layer: &oci_distribution::client::ImageLayer,
@@ -256,8 +258,7 @@ impl SignatureLayer {
 
         let simple_signing: SimpleSigning = serde_json::from_slice(&layer.data).map_err(|e| {
             SigstoreError::UnexpectedError(format!(
-                "Cannot convert layer data into SimpleSigning object: {:?}",
-                e
+                "Cannot convert layer data into SimpleSigning object: {e:?}"
             ))
         })?;
 
@@ -287,6 +288,7 @@ impl SignatureLayer {
         })
     }
 
+    #[allow(clippy::result_large_err)]
     fn get_signature_from_annotations(annotations: &HashMap<String, String>) -> Result<String> {
         let signature: String = annotations
             .get(SIGSTORE_SIGNATURE_ANNOTATION)
@@ -295,6 +297,7 @@ impl SignatureLayer {
         Ok(signature)
     }
 
+    #[allow(clippy::result_large_err)]
     fn get_bundle_from_annotations(
         annotations: &HashMap<String, String>,
         rekor_pub_key: Option<&CosignVerificationKey>,
@@ -383,6 +386,7 @@ impl SignatureLayer {
 /// **Note well:** when Rekor and Fulcio data has been provided, the
 /// returned `SignatureLayer` is guaranteed to be
 /// verified using the given Rekor and Fulcio keys.
+#[allow(clippy::result_large_err)]
 pub(crate) fn build_signature_layers(
     manifest: &oci_distribution::manifest::OciImageManifest,
     source_image_digest: &str,
@@ -424,6 +428,7 @@ pub(crate) fn build_signature_layers(
 impl CertificateSignature {
     /// Ensures the given certificate can be trusted, then extracts
     /// its details and returns them as a `CertificateSignature` object
+    #[allow(clippy::result_large_err)]
     pub(crate) fn from_certificate(
         cert_raw: &[u8],
         fulcio_cert_pool: &CertificatePool,
@@ -487,6 +492,7 @@ impl CertificateSignature {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn get_cert_extension_by_oid(
     cert: &X509Certificate,
     ext_oid: Oid,
@@ -495,10 +501,10 @@ fn get_cert_extension_by_oid(
     let extension = cert.tbs_certificate.get_extension_unique(&ext_oid)?;
     extension
         .map(|ext| {
+            #[allow(clippy::result_large_err)]
             String::from_utf8(ext.value.to_vec()).map_err(|_| {
                 SigstoreError::UnexpectedError(format!(
-                    "Certificate's extension Sigstore {} is not UTF8 compatible",
-                    ext_oid_name,
+                    "Certificate's extension Sigstore {ext_oid_name} is not UTF8 compatible"
                 ))
             })
         })
@@ -506,6 +512,7 @@ fn get_cert_extension_by_oid(
 }
 
 impl CertificateSubject {
+    #[allow(clippy::result_large_err)]
     pub fn from_certificate(certificate: &X509Certificate) -> Result<CertificateSubject> {
         let subject_alternative_name = certificate
             .tbs_certificate

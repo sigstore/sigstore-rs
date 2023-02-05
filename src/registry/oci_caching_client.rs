@@ -115,7 +115,7 @@ impl<'a> PullSettings<'a> {
         let result = hasher.finalize();
         result
             .iter()
-            .map(|v| format!("{:x}", v))
+            .map(|v| format!("{v:x}"))
             .collect::<Vec<String>>()
             .join("")
     }
@@ -206,7 +206,7 @@ impl PullManifestSettings {
         let result = hasher.finalize();
         result
             .iter()
-            .map(|v| format!("{:x}", v))
+            .map(|v| format!("{v:x}"))
             .collect::<Vec<String>>()
             .join("")
     }

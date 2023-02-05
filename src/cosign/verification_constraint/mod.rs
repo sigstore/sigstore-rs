@@ -63,6 +63,7 @@ pub trait VerificationConstraint: std::fmt::Debug {
     ///         "something went wrong!".to_string()))
     ///   }
     /// }
+    #[allow(clippy::result_large_err)]
     fn verify(&self, signature_layer: &SignatureLayer) -> Result<bool>;
 }
 

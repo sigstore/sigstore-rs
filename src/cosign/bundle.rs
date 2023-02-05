@@ -45,15 +45,17 @@ impl SignedArtifactBundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
+    #[allow(clippy::result_large_err)]
     pub fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: SignedArtifactBundle = serde_json::from_str(raw).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
+            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
         })?;
         Bundle::verify_bundle(&bundle.rekor_bundle, rekor_pub_key).map(|_| bundle)
     }
 
     /// Verifies the passed-in blob against the signature in this
     /// SignedArtifactBundle.
+    #[allow(clippy::result_large_err)]
     pub fn verify_blob(&self, blob: &[u8]) -> Result<()> {
         let cert = BASE64_STD_ENGINE.decode(&self.cert)?;
         let (_, pem) = x509_parser::pem::parse_x509_pem(&cert)?;
@@ -79,9 +81,10 @@ impl Bundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: Bundle = serde_json::from_str(raw).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
+            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
         })?;
         Self::verify_bundle(&bundle, rekor_pub_key).map(|_| bundle)
     }
@@ -90,6 +93,7 @@ impl Bundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn verify_bundle(
         bundle: &Bundle,
         rekor_pub_key: &CosignVerificationKey,
@@ -98,8 +102,7 @@ impl Bundle {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
         bundle.payload.serialize(&mut ser).map_err(|e| {
             SigstoreError::UnexpectedError(format!(
-                "Cannot create canonical JSON representation of bundle: {:?}",
-                e
+                "Cannot create canonical JSON representation of bundle: {e:?}"
             ))
         })?;
 

@@ -91,13 +91,14 @@ impl TryFrom<&str> for SigningScheme {
             "RSA_PKCS1_SHA256" => Ok(Self::RSA_PKCS1_SHA256(DEFAULT_KEY_SIZE)),
             "RSA_PKCS1_SHA384" => Ok(Self::RSA_PKCS1_SHA384(DEFAULT_KEY_SIZE)),
             "RSA_PKCS1_SHA512" => Ok(Self::RSA_PKCS1_SHA512(DEFAULT_KEY_SIZE)),
-            unknown => Err(format!("Unsupported signing algorithm: {}", unknown)),
+            unknown => Err(format!("Unsupported signing algorithm: {unknown}")),
         }
     }
 }
 
 impl SigningScheme {
     /// Create a key-pair due to the given signing scheme.
+    #[allow(clippy::result_large_err)]
     pub fn create_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
             SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(

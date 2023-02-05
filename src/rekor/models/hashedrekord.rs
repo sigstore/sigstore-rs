@@ -80,6 +80,7 @@ impl PublicKey {
         PublicKey { content }
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn decode(&self) -> Result<String, SigstoreError> {
         let decoded = BASE64_STD_ENGINE.decode(&self.content)?;
         String::from_utf8(decoded).map_err(|e| SigstoreError::from(e.utf8_error()))

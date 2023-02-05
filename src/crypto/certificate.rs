@@ -23,6 +23,7 @@ use crate::errors::{Result, SigstoreError};
 /// The following checks are performed against the given certificate:
 /// * The certificate has the right set of key usages
 /// * The certificate cannot be used before the current time
+#[allow(clippy::result_large_err)]
 pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
     verify_key_usages(certificate)?;
     verify_has_san(certificate)?;
@@ -32,6 +33,7 @@ pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) ->
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
     let key_usage = certificate
         .tbs_certificate
@@ -52,6 +54,7 @@ pub(crate) fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
     let _subject_alternative_name = certificate
         .tbs_certificate
@@ -60,6 +63,7 @@ pub(crate) fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn verify_validity(certificate: &X509Certificate) -> Result<()> {
     // Comment taken from cosign verification code:
     // THIS IS IMPORTANT: WE DO NOT CHECK TIMES HERE
@@ -76,6 +80,7 @@ pub(crate) fn verify_validity(certificate: &X509Certificate) -> Result<()> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn verify_expiration(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
     let it = ASN1Time::from_timestamp(integrated_time)?;
     let validity = certificate.validity();

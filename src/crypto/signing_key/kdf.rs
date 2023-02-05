@@ -106,6 +106,7 @@ impl Default for ScryptKDF {
 
 impl ScryptKDF {
     /// Derivate a new key from the given password
+    #[allow(clippy::result_large_err)]
     fn key(&self, password: &[u8]) -> Result<Vec<u8>> {
         let log_n = (self.params.n as f64).log2() as u8;
         let params = scrypt::Params::new(log_n, self.params.r, self.params.p)?;
@@ -117,6 +118,7 @@ impl ScryptKDF {
 
     /// Check whether the given params is as the default,
     /// to avoid a DoS attack.
+    #[allow(clippy::result_large_err)]
     fn check_params(&self) -> Result<()> {
         match self.params.n == SCRYPT_N && self.params.r == SCRYPT_R && self.params.p == SCRYPT_P {
             true => Ok(()),
@@ -150,6 +152,7 @@ impl Default for SecretBoxCipher {
 
 impl SecretBoxCipher {
     /// Seal the plaintext using the key and nonce.
+    #[allow(clippy::result_large_err)]
     fn encrypt(&mut self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         if self.encrypted {
             return Err(SigstoreError::PrivateKeyEncryptError(
@@ -167,6 +170,7 @@ impl SecretBoxCipher {
     }
 
     /// Unseal the ciphertext using the key
+    #[allow(clippy::result_large_err)]
     fn decrypt(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let nonce = xsalsa20poly1305::Nonce::from_slice(&self.nonce);
         let key = xsalsa20poly1305::Key::from_slice(key);
@@ -203,6 +207,7 @@ fn generate_random(len: u32) -> Vec<u8> {
 /// Encrypt the given plaintext using a derived key from
 /// password. In sigstore, it is used to encrypt the
 /// private key.
+#[allow(clippy::result_large_err)]
 pub fn encrypt(plaintext: &[u8], password: &[u8]) -> Result<Vec<u8>> {
     let kdf = ScryptKDF::default();
 
@@ -223,6 +228,7 @@ pub fn encrypt(plaintext: &[u8], password: &[u8]) -> Result<Vec<u8>> {
 /// Encrypt the given plaintext using a derived key from
 /// password. In sigstore, it is used to decrypt the
 /// private key.
+#[allow(clippy::result_large_err)]
 pub fn decrypt(ciphertext: &[u8], password: &[u8]) -> Result<Vec<u8>> {
     let data: Data = serde_json::from_slice(ciphertext)?;
     if data.cipher.name != NAME_SECRET_BOX {

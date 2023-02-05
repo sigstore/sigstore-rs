@@ -88,14 +88,14 @@ impl Ed25519Keys {
     /// Create a new `Ed25519Keys` Object.
     /// The private key will be randomly
     /// generated.
+    #[allow(clippy::result_large_err)]
     pub fn new() -> Result<Self> {
         let mut csprng = rand::rngs::OsRng {};
         let key_pair = ed25519_dalek_fiat::Keypair::generate(&mut csprng);
         let key_pair_bytes = KeypairBytes::from_bytes(&key_pair.to_bytes());
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
         Ok(Self {
@@ -106,6 +106,7 @@ impl Ed25519Keys {
     }
 
     /// Create a new `Ed25519Keys` Object from given `Ed25519Keys` Object.
+    #[allow(clippy::result_large_err)]
     pub fn from_ed25519key(key: &Ed25519Keys) -> Result<Self> {
         let priv_key = key.private_key_to_der()?;
         Ed25519Keys::from_der(priv_key.as_bytes())
@@ -114,31 +115,31 @@ impl Ed25519Keys {
     /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
+    #[allow(clippy::result_large_err)]
     pub fn from_encrypted_pem(encrypted_pem: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(encrypted_pem)?;
         match &key.tag[..] {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(&key.contents, password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
                     ))
                 })?;
                 Self::from_key_pair_bytes(key_pair_bytes)
             }
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
 
     /// Builds a `Ed25519Keys` from a pkcs8 PEM-encoded private key.
     /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`]
+    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem: &[u8]) -> Result<Self> {
         let pem = std::str::from_utf8(pem)?;
         let (label, document) = pkcs8::SecretDocument::from_pem(pem)
@@ -147,41 +148,39 @@ impl Ed25519Keys {
         match label {
             PRIVATE_KEY_PEM_LABEL => {
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(document.as_bytes()).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
                     ))
                 })?;
                 Self::from_key_pair_bytes(key_pair_bytes)
             }
 
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
 
     /// Builds a `Ed25519Keys` from a pkcs8 asn.1 private key.
+    #[allow(clippy::result_large_err)]
     pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
         let key_pair_bytes = KeypairBytes::from_pkcs8_der(der_bytes).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
-                "Convert from pkcs8 der to ed25519 private key failed: {}",
-                e,
+                "Convert from pkcs8 der to ed25519 private key failed: {e}"
             ))
         })?;
         Self::from_key_pair_bytes(key_pair_bytes)
     }
 
     /// Builds a `Ed25519Keys` from a `KeypairBytes`.
+    #[allow(clippy::result_large_err)]
     fn from_key_pair_bytes(key_pair_bytes: KeypairBytes) -> Result<Self> {
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e,
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
         let key_pair = ed25519_dalek_fiat::Keypair::from_bytes(
@@ -199,6 +198,7 @@ impl Ed25519Keys {
 
     /// `to_sigstore_signer` will create the [`SigStoreSigner`] using
     /// this ed25519 private key.
+    #[allow(clippy::result_large_err)]
     pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
         Ok(SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(
             self,
@@ -273,6 +273,7 @@ pub struct Ed25519Signer {
 }
 
 impl Ed25519Signer {
+    #[allow(clippy::result_large_err)]
     pub fn from_ed25519_keys(ed25519_keys: &Ed25519Keys) -> Result<Self> {
         let key_pair_bytes =
             KeypairBytes::from_bytes(&ed25519_keys.key_pair_bytes.to_bytes().ok_or_else(|| {
@@ -280,8 +281,7 @@ impl Ed25519Signer {
             })?);
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e,
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
 

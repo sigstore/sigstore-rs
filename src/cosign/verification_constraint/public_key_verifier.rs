@@ -13,6 +13,7 @@ impl PublicKeyVerifier {
     /// Create a new instance of `PublicKeyVerifier`.
     /// The `key_raw` variable holds a PEM encoded representation of the
     /// public key to be used at verification time.
+    #[allow(clippy::result_large_err)]
     pub fn new(key_raw: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
         let key = CosignVerificationKey::from_pem(key_raw, signing_scheme)?;
         Ok(PublicKeyVerifier { key })
@@ -26,6 +27,7 @@ impl PublicKeyVerifier {
     /// * `EC public key with P-256 curve`: `ECDSA_P256_SHA256_ASN1`
     /// * `EC public key with P-384 curve`: `ECDSA_P384_SHA384_ASN1`
     /// * `Ed25519 public key`: `Ed25519`
+    #[allow(clippy::result_large_err)]
     pub fn try_from(key_raw: &[u8]) -> Result<Self> {
         let key = CosignVerificationKey::try_from_pem(key_raw)?;
         Ok(PublicKeyVerifier { key })

@@ -44,6 +44,7 @@ pub(crate) struct CertificatePool {
 
 impl CertificatePool {
     /// Build a `CertificatePool` instance using the provided list of [`Certificate`]
+    #[allow(clippy::result_large_err)]
     pub(crate) fn from_certificates(certs: &[Certificate]) -> Result<Self> {
         let mut trusted_roots = vec![];
         let mut intermediates = vec![];
@@ -93,6 +94,7 @@ impl CertificatePool {
     /// Because of that the validity checks performed by this method are more
     /// relaxed. The validity checks are done inside of
     /// [`crate::crypto::verify_validity`] and [`crate::crypto::verify_expiration`].
+    #[allow(clippy::result_large_err)]
     pub(crate) fn verify_pem_cert(&self, cert_pem: &[u8]) -> Result<()> {
         let cert_pem_str = std::str::from_utf8(cert_pem).map_err(|_| {
             SigstoreError::UnexpectedError("Cannot convert cert back to string".to_string())
@@ -109,11 +111,13 @@ impl CertificatePool {
     /// Because of that the validity checks performed by this method are more
     /// relaxed. The validity checks are done inside of
     /// [`crate::crypto::verify_validity`] and [`crate::crypto::verify_expiration`].
+    #[allow(clippy::result_large_err)]
     pub(crate) fn verify_der_cert(&self, bytes: &[u8]) -> Result<()> {
         let cert = picky::x509::Cert::from_der(bytes)?;
         self.verify(&cert)
     }
 
+    #[allow(clippy::result_large_err)]
     fn verify(&self, cert: &picky::x509::Cert) -> Result<()> {
         let verified = self
             .create_chains_for_all_certificates()

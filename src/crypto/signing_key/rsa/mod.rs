@@ -159,6 +159,7 @@ impl RSASigner {
     }
 
     /// Return the related [`CosignVerificationKey`] of this RSASigner
+    #[allow(clippy::result_large_err)]
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
         Ok(match self {
             RSASigner::RSA_PSS_SHA256(signer, _) => {
