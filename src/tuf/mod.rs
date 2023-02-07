@@ -140,8 +140,7 @@ impl SigstoreRepository {
         let rekor_pub_key = repository_helper.rekor_pub_key().map(|data| {
             String::from_utf8(data).map_err(|e| {
                 SigstoreError::UnexpectedError(format!(
-                    "Cannot parse Rekor's public key obtained from TUF repository: {}",
-                    e
+                    "Cannot parse Rekor's public key obtained from TUF repository: {e}",
                 ))
             })
         })??;

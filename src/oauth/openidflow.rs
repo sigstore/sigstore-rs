@@ -234,12 +234,12 @@ impl RedirectListener {
                         .nth(1)
                         .ok_or(SigstoreError::RedirectUrlRequestLineError)?;
                     let url =
-                        Url::parse(format!("http://localhost{}", client_redirect_host).as_str())?;
+                        Url::parse(format!("http://localhost{client_redirect_host}").as_str())?;
 
                     let code_pair = url
                         .query_pairs()
                         .find(|pair| {
-                            let &(ref key, _) = pair;
+                            let (key, _) = pair;
                             key == "code"
                         })
                         .ok_or(SigstoreError::CodePairError)?;

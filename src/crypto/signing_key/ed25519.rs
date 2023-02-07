@@ -94,8 +94,7 @@ impl Ed25519Keys {
         let key_pair_bytes = KeypairBytes::from_bytes(&key_pair.to_bytes());
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
         Ok(Self {
@@ -120,19 +119,17 @@ impl Ed25519Keys {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(&key.contents, password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
                     ))
                 })?;
                 Self::from_key_pair_bytes(key_pair_bytes)
             }
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -147,20 +144,18 @@ impl Ed25519Keys {
         match label {
             PRIVATE_KEY_PEM_LABEL => {
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(document.as_bytes()).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
                     ))
                 })?;
                 Self::from_key_pair_bytes(key_pair_bytes)
             }
 
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -169,8 +164,7 @@ impl Ed25519Keys {
     pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
         let key_pair_bytes = KeypairBytes::from_pkcs8_der(der_bytes).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
-                "Convert from pkcs8 der to ed25519 private key failed: {}",
-                e,
+                "Convert from pkcs8 der to ed25519 private key failed: {e}"
             ))
         })?;
         Self::from_key_pair_bytes(key_pair_bytes)
@@ -180,8 +174,7 @@ impl Ed25519Keys {
     fn from_key_pair_bytes(key_pair_bytes: KeypairBytes) -> Result<Self> {
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e,
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
         let key_pair = ed25519_dalek_fiat::Keypair::from_bytes(
@@ -280,8 +273,7 @@ impl Ed25519Signer {
             })?);
         let public_key_bytes = PublicKeyBytes::try_from(&key_pair_bytes).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!(
-                "ED25519 convert from keypair to public key failed: {}",
-                e,
+                "ED25519 convert from keypair to public key failed: {e}"
             ))
         })?;
 

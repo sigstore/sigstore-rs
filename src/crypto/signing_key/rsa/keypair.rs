@@ -94,20 +94,18 @@ impl RSAKeys {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(&key.contents, password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let private_key = RsaPrivateKey::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to rsa private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to rsa private key failed: {e}"
                     ))
                 })?;
                 Ok(Self::from(private_key))
             }
 
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -122,12 +120,11 @@ impl RSAKeys {
         match label {
             PRIVATE_KEY_PEM_LABEL => {
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(document.as_bytes()).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let private_key = RsaPrivateKey::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to rsa private key failed: {}",
-                        e,
+                        "Convert from pkcs8 pem to rsa private key failed: {e}"
                     ))
                 })?;
                 Ok(Self::from(private_key))
@@ -139,8 +136,7 @@ impl RSAKeys {
             }
 
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -149,8 +145,7 @@ impl RSAKeys {
     pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
         let private_key = RsaPrivateKey::from_pkcs8_der(der_bytes).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
-                "Convert from pkcs8 der to rsa private key failed: {}",
-                e,
+                "Convert from pkcs8 der to rsa private key failed: {e}"
             ))
         })?;
         Ok(Self::from(private_key))

@@ -81,7 +81,7 @@ impl fmt::Display for CertificateSignature {
             self.github_workflow_ref,
         );
 
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
 
@@ -174,7 +174,7 @@ impl fmt::Display for SignatureLayer {
             self.simple_signing,
         );
 
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
 
@@ -256,8 +256,7 @@ impl SignatureLayer {
 
         let simple_signing: SimpleSigning = serde_json::from_slice(&layer.data).map_err(|e| {
             SigstoreError::UnexpectedError(format!(
-                "Cannot convert layer data into SimpleSigning object: {:?}",
-                e
+                "Cannot convert layer data into SimpleSigning object: {e:?}"
             ))
         })?;
 
@@ -497,8 +496,7 @@ fn get_cert_extension_by_oid(
         .map(|ext| {
             String::from_utf8(ext.value.to_vec()).map_err(|_| {
                 SigstoreError::UnexpectedError(format!(
-                    "Certificate's extension Sigstore {} is not UTF8 compatible",
-                    ext_oid_name,
+                    "Certificate's extension Sigstore {ext_oid_name} is not UTF8 compatible"
                 ))
             })
         })

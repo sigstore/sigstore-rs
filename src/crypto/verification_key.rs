@@ -105,8 +105,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PSS_SHA256(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -115,8 +114,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PSS_SHA384(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -125,8 +123,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PSS_SHA512(pss::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -135,8 +132,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -145,8 +141,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA384(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -155,8 +150,7 @@ impl CosignVerificationKey {
                 CosignVerificationKey::RSA_PKCS1_SHA512(pkcs1v15::VerifyingKey::new_with_prefix(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
-                            "read rsa public key from der failed: {}",
-                            e
+                            "read rsa public key from der failed: {e}"
                         ))
                     })?,
                 ))
@@ -164,16 +158,14 @@ impl CosignVerificationKey {
             SigningScheme::ECDSA_P256_SHA256_ASN1 => CosignVerificationKey::ECDSA_P256_SHA256_ASN1(
                 ecdsa::VerifyingKey::from_public_key_der(der_data).map_err(|e| {
                     SigstoreError::PKCS8SpkiError(format!(
-                        "Ecdsa-P256 from der bytes to public key failed: {}",
-                        e,
+                        "Ecdsa-P256 from der bytes to public key failed: {e}"
                     ))
                 })?,
             ),
             SigningScheme::ECDSA_P384_SHA384_ASN1 => CosignVerificationKey::ECDSA_P384_SHA384_ASN1(
                 ecdsa::VerifyingKey::from_public_key_der(der_data).map_err(|e| {
                     SigstoreError::PKCS8SpkiError(format!(
-                        "Ecdsa-P384 from der bytes to public key failed: {}",
-                        e,
+                        "Ecdsa-P384 from der bytes to public key failed: {e}"
                     ))
                 })?,
             ),

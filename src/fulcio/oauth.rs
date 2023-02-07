@@ -96,7 +96,7 @@ impl OauthTokenProvider {
                     url.0,
                 );
             }
-            Err(e) => println!("{}", e),
+            Err(e) => println!("{e}"),
         }
 
         let oidc_url = oidc_url?;

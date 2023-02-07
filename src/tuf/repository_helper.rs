@@ -42,7 +42,8 @@ impl RepositoryHelper {
     {
         let repository = RepositoryLoader::new(root, metadata_base, target_base)
             .expiration_enforcement(tough::ExpirationEnforcement::Safe)
-            .load()?;
+            .load()
+            .map_err(Box::new)?;
 
         Ok(Self {
             repository,
@@ -97,7 +98,7 @@ impl RepositoryHelper {
     ///
     /// The contents of the local cache are updated when they are outdated.
     pub(crate) fn rekor_pub_key(&self) -> Result<Vec<u8>> {
-        let rekor_target_name = TargetName::new(SIGSTORE_REKOR_PUB_KEY_TARGET)?;
+        let rekor_target_name = TargetName::new(SIGSTORE_REKOR_PUB_KEY_TARGET).map_err(Box::new)?;
 
         let local_rekor_path = self
             .checkout_dir
@@ -157,7 +158,7 @@ fn fetch_target_or_reuse_local_cache(
 /// Download a file from a TUF repository
 fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
     let data: Vec<u8>;
-    match repository.read_target(target_name)? {
+    match repository.read_target(target_name).map_err(Box::new)? {
         None => Err(SigstoreError::TufTargetNotFoundError(
             target_name.raw().to_string(),
         )),
@@ -254,7 +255,8 @@ mod tests {
         let repo =
             RepositoryLoader::new(SIGSTORE_ROOT.as_bytes(), metadata_base_url, target_base_url)
                 .expiration_enforcement(tough::ExpirationEnforcement::Unsafe)
-                .load()?;
+                .load()
+                .map_err(Box::new)?;
         Ok(repo)
     }
 

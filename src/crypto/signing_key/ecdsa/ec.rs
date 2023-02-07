@@ -147,14 +147,13 @@ where
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(&key.contents, password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {}", e))
+                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
                 let ec_seckey = SecretKey::<C>::from_sec1_der(pkcs8.private_key)?;
                 Self::from_private_key(ec_seckey)
             }
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -170,15 +169,13 @@ where
                 let ec_seckey =
                     SecretKey::<C>::from_pkcs8_der(document.as_bytes()).map_err(|e| {
                         SigstoreError::PKCS8Error(format!(
-                            "Convert from pkcs8 pem to ecdsa private key failed: {}",
-                            e
+                            "Convert from pkcs8 pem to ecdsa private key failed: {e}"
                         ))
                     })?;
                 Self::from_private_key(ec_seckey)
             }
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
-                "Unsupported pem tag {}",
-                tag
+                "Unsupported pem tag {tag}"
             ))),
         }
     }
@@ -187,8 +184,7 @@ where
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
         let ec_seckey = SecretKey::<C>::from_pkcs8_der(private_key).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
-                "Convert from pkcs8 der to ecdsa private key failed: {}",
-                e,
+                "Convert from pkcs8 der to ecdsa private key failed: {e}"
             ))
         })?;
         Self::from_private_key(ec_seckey)
@@ -317,8 +313,7 @@ where
             ecdsa::SigningKey::<C>::from_pkcs8_der(ecdsa_keys.private_key_to_der()?.as_bytes())
                 .map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 der to ecdsa private key failed: {}",
-                        e,
+                        "Convert from pkcs8 der to ecdsa private key failed: {e}"
                     ))
                 })?;
 

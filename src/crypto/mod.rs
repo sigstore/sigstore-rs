@@ -91,7 +91,7 @@ impl TryFrom<&str> for SigningScheme {
             "RSA_PKCS1_SHA256" => Ok(Self::RSA_PKCS1_SHA256(DEFAULT_KEY_SIZE)),
             "RSA_PKCS1_SHA384" => Ok(Self::RSA_PKCS1_SHA384(DEFAULT_KEY_SIZE)),
             "RSA_PKCS1_SHA512" => Ok(Self::RSA_PKCS1_SHA512(DEFAULT_KEY_SIZE)),
-            unknown => Err(format!("Unsupported signing algorithm: {}", unknown)),
+            unknown => Err(format!("Unsupported signing algorithm: {unknown}")),
         }
     }
 }

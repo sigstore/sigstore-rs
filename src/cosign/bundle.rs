@@ -47,7 +47,7 @@ impl SignedArtifactBundle {
     /// using the supplied `rekor_pub_key` public key.
     pub fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: SignedArtifactBundle = serde_json::from_str(raw).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
+            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
         })?;
         Bundle::verify_bundle(&bundle.rekor_bundle, rekor_pub_key).map(|_| bundle)
     }
@@ -81,7 +81,7 @@ impl Bundle {
     /// using the supplied `rekor_pub_key` public key.
     pub(crate) fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: Bundle = serde_json::from_str(raw).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{}|: {:?}", raw, e))
+            SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
         })?;
         Self::verify_bundle(&bundle, rekor_pub_key).map(|_| bundle)
     }
@@ -98,8 +98,7 @@ impl Bundle {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
         bundle.payload.serialize(&mut ser).map_err(|e| {
             SigstoreError::UnexpectedError(format!(
-                "Cannot create canonical JSON representation of bundle: {:?}",
-                e
+                "Cannot create canonical JSON representation of bundle: {e:?}"
             ))
         })?;
 
