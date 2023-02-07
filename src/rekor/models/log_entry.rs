@@ -1,9 +1,12 @@
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
-use serde::{Deserialize, Serialize};
-
 use crate::errors::SigstoreError;
 use crate::rekor::models::hashedrekord::Spec;
 use crate::rekor::TreeSize;
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Error, Value};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -12,21 +15,31 @@ pub struct LogEntry {
     pub uuid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation: Option<Attestation>,
-    pub body: String,
+    pub body: Body,
     pub integrated_time: i64,
     pub log_i_d: String,
     pub log_index: i64,
     pub verification: Verification,
 }
 
-impl LogEntry {
-    pub fn decode_body(&self) -> Result<Body, SigstoreError> {
-        let decoded = BASE64_STD_ENGINE.decode(&self.body)?;
-        serde_json::from_slice(&decoded).map_err(SigstoreError::from)
+impl FromStr for LogEntry {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut log_entry_map = serde_json::from_str::<HashMap<&str, Value>>(s)?;
+        log_entry_map.entry("body").and_modify(|body| {
+            let decoded_body = serde_json::to_value(
+                decode_body(body.as_str().expect("Failed to parse Body"))
+                    .expect("Failed to decode Body"),
+            )
+            .expect("Serialization failed");
+            *body = json!(decoded_body);
+        });
+        let log_entry_str = serde_json::to_string(&log_entry_map)?;
+        Ok(serde_json::from_str::<LogEntry>(&log_entry_str).expect("Serialization failed"))
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Body {
     #[serde(rename = "kind")]
     pub kind: String,
@@ -34,6 +47,11 @@ pub struct Body {
     pub api_version: String,
     #[serde(rename = "spec")]
     pub spec: Spec,
+}
+
+fn decode_body(s: &str) -> Result<Body, SigstoreError> {
+    let decoded = BASE64_STD_ENGINE.decode(s)?;
+    serde_json::from_slice(&decoded).map_err(SigstoreError::from)
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
