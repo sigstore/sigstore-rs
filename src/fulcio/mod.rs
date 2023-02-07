@@ -88,6 +88,31 @@ impl Display for FulcioCert {
 /// Provider for Fulcio token.
 #[allow(clippy::large_enum_variant)]
 pub enum TokenProvider {
+    /// A Static provider consists of a tuple where the first value is a
+    /// OIDC token. The second is the value of the challenge.
+    ///
+    /// To figure out the correct value for the challenge one can list the
+    /// issuers available:
+    /// ```console
+    /// $ curl -Ls https://fulcio.sigstore.dev/api/v2/configuration | jq
+    /// ```
+    /// Find the issuer of the token, and then find the value of the
+    /// `challengeClaim` which will specify which value of the OIDC token's
+    /// claims to use.
+    ///
+    /// For example, if the token was issued from
+    /// `https://token.actions.githubusercontent.com`:
+    /// ```json
+    /// {
+    ///   "issuerUrl": "https://token.actions.githubusercontent.com",
+    ///   "audience": "sigstore",
+    ///   "challengeClaim": "sub",
+    ///   "spiffeTrustDomain": ""
+    /// }
+    /// ```
+    /// In this case the value of the challenge should be the value of the
+    /// `sub` (`subject`) claim of the token.
+    ///
     Static((CoreIdToken, String)),
     Oauth(OauthTokenProvider),
 }
