@@ -31,7 +31,6 @@ pub(crate) struct RepositoryHelper {
 }
 
 impl RepositoryHelper {
-    #[allow(clippy::result_large_err)]
     pub(crate) fn new<R>(
         root: R,
         metadata_base: Url,
@@ -43,7 +42,8 @@ impl RepositoryHelper {
     {
         let repository = RepositoryLoader::new(root, metadata_base, target_base)
             .expiration_enforcement(tough::ExpirationEnforcement::Safe)
-            .load()?;
+            .load()
+            .map_err(Box::new)?;
 
         Ok(Self {
             repository,
@@ -55,7 +55,6 @@ impl RepositoryHelper {
     /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    #[allow(clippy::result_large_err)]
     pub(crate) fn fulcio_certs(&self) -> Result<Vec<crate::registry::Certificate>> {
         let fulcio_target_names = self.fulcio_cert_target_names();
         let mut certs = vec![];
@@ -98,9 +97,8 @@ impl RepositoryHelper {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    #[allow(clippy::result_large_err)]
     pub(crate) fn rekor_pub_key(&self) -> Result<Vec<u8>> {
-        let rekor_target_name = TargetName::new(SIGSTORE_REKOR_PUB_KEY_TARGET)?;
+        let rekor_target_name = TargetName::new(SIGSTORE_REKOR_PUB_KEY_TARGET).map_err(Box::new)?;
 
         let local_rekor_path = self
             .checkout_dir
@@ -129,7 +127,6 @@ impl RepositoryHelper {
 ///
 /// **Note well:** the `local_file` is updated whenever its contents are
 /// outdated.
-#[allow(clippy::result_large_err)]
 fn fetch_target_or_reuse_local_cache(
     repository: &tough::Repository,
     target_name: &TargetName,
@@ -159,10 +156,9 @@ fn fetch_target_or_reuse_local_cache(
 }
 
 /// Download a file from a TUF repository
-#[allow(clippy::result_large_err)]
 fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
     let data: Vec<u8>;
-    match repository.read_target(target_name)? {
+    match repository.read_target(target_name).map_err(Box::new)? {
         None => Err(SigstoreError::TufTargetNotFoundError(
             target_name.raw().to_string(),
         )),
@@ -175,7 +171,6 @@ fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Res
 
 /// Compares the checksum of a local file, with the digest reported inside of
 /// TUF repository metadata
-#[allow(clippy::result_large_err)]
 fn is_local_file_outdated(
     repository: &tough::Repository,
     target_name: &TargetName,
@@ -205,7 +200,6 @@ fn is_local_file_outdated(
 }
 
 /// Gets the goods from a read and makes a Vec
-#[allow(clippy::result_large_err)]
 fn read_to_end<R: Read>(mut reader: R) -> Result<Vec<u8>> {
     let mut v = Vec::new();
     reader.read_to_end(&mut v)?;
@@ -261,7 +255,8 @@ mod tests {
         let repo =
             RepositoryLoader::new(SIGSTORE_ROOT.as_bytes(), metadata_base_url, target_base_url)
                 .expiration_enforcement(tough::ExpirationEnforcement::Unsafe)
-                .load()?;
+                .load()
+                .map_err(Box::new)?;
         Ok(repo)
     }
 

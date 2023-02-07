@@ -128,7 +128,6 @@ where
     /// <https://github.com/RustCrypto/elliptic-curves#crates> for curves.
     /// The secret key (private key) will be randomly
     /// generated.
-    #[allow(clippy::result_large_err)]
     pub fn new() -> Result<Self> {
         let ec_seckey: SecretKey<C> = SecretKey::random(rand::rngs::OsRng);
 
@@ -142,7 +141,6 @@ where
     /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
-    #[allow(clippy::result_large_err)]
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(private_key)?;
         match &key.tag[..] {
@@ -162,7 +160,6 @@ where
 
     /// Builds a `EcdsaKeys` from a pkcs8 PEM-encoded private key.
     /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`]
-    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
         let pem_data = std::str::from_utf8(pem_data)?;
         let (label, document) = pkcs8::SecretDocument::from_pem(pem_data)
@@ -184,7 +181,6 @@ where
     }
 
     /// Builds a `EcdsaKeys` from a pkcs8 asn.1 private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
         let ec_seckey = SecretKey::<C>::from_pkcs8_der(private_key).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
@@ -195,7 +191,6 @@ where
     }
 
     /// Builds a `EcdsaKeys` from a private key.
-    #[allow(clippy::result_large_err)]
     fn from_private_key(ec_seckey: SecretKey<C>) -> Result<Self> {
         let public_key = ec_seckey.public_key();
         Ok(Self {
@@ -205,7 +200,6 @@ where
     }
 
     /// Convert the [`EcdsaKeys`] into [`ECDSAKeys`].
-    #[allow(clippy::result_large_err)]
     pub fn to_wrapped_ecdsa_keys(&self) -> Result<ECDSAKeys> {
         let priv_key = self.private_key_to_der()?;
         ECDSAKeys::from_der((*priv_key).as_bytes())
@@ -314,7 +308,6 @@ where
     D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldSize<C>> + FixedOutputReset,
 {
     /// Create a new `EcdsaSigner` from the given `EcdsaKeys` and `SignatureDigestAlgorithm`
-    #[allow(clippy::result_large_err)]
     pub fn from_ecdsa_keys(ecdsa_keys: &EcdsaKeys<C>) -> Result<Self> {
         let signing_key =
             ecdsa::SigningKey::<C>::from_pkcs8_der(ecdsa_keys.private_key_to_der()?.as_bytes())

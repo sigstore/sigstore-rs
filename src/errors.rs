@@ -143,7 +143,7 @@ pub enum SigstoreError {
     SigstoreNoVerifiedLayer,
 
     #[error(transparent)]
-    TufError(#[from] tough::error::Error),
+    TufError(#[from] Box<tough::error::Error>),
 
     #[error("TUF target {0} not found inside of repository")]
     TufTargetNotFoundError(String),

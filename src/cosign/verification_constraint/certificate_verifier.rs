@@ -31,7 +31,6 @@ impl CertificateVerifier {
     ///    to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
-    #[allow(clippy::result_large_err)]
     pub fn from_pem(
         cert_bytes: &[u8],
         require_rekor_bundle: bool,
@@ -52,7 +51,6 @@ impl CertificateVerifier {
     ///    to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
-    #[allow(clippy::result_large_err)]
     pub fn from_der(
         cert_bytes: &[u8],
         require_rekor_bundle: bool,

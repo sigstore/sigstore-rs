@@ -120,7 +120,6 @@ impl SigstoreRepository {
     /// ```
     ///
     /// This of course has a performance hit when used inside of an async function.
-    #[allow(clippy::result_large_err)]
     pub fn fetch(checkout_dir: Option<&Path>) -> Result<Self> {
         let metadata_base = url::Url::parse(SIGSTORE_METADATA_BASE).map_err(|_| {
             SigstoreError::UnexpectedError(String::from("Cannot convert metadata_base to URL"))

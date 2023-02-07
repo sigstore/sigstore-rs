@@ -63,7 +63,6 @@ pub trait Constraint: std::fmt::Debug {
     /// }
     ///
     /// ```
-    #[allow(clippy::result_large_err)]
     fn add_constraint(&self, signature_layer: &mut SignatureLayer) -> Result<bool>;
 }
 

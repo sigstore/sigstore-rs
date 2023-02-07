@@ -108,30 +108,24 @@ pub const RSA_PRIVATE_KEY_PEM_LABEL: &str = "RSA PRIVATE KEY";
 /// the ram.
 pub trait KeyPair {
     /// `public_key_to_pem` will export the PEM-encoded public key.
-    #[allow(clippy::result_large_err)]
     fn public_key_to_pem(&self) -> Result<String>;
 
     /// `public_key_to_der` will export the asn.1 PKIX public key.
-    #[allow(clippy::result_large_err)]
     fn public_key_to_der(&self) -> Result<Vec<u8>>;
 
     /// `private_key_to_encrypted_pem` will export the encrypted asn.1 pkcs8 private key.
     /// This encryption follows the go-lang version in
     /// <https://github.com/sigstore/cosign/blob/main/pkg/cosign/keys.go#L139> using nacl secretbox.
-    #[allow(clippy::result_large_err)]
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>>;
 
     /// `private_key_to_pem` will export the PEM-encoded pkcs8 private key.
-    #[allow(clippy::result_large_err)]
     fn private_key_to_pem(&self) -> Result<Zeroizing<String>>;
 
     /// `private_key_to_der` will export the asn.1 pkcs8 private key.
-    #[allow(clippy::result_large_err)]
     fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>>;
 
     /// `to_verification_key` will derive the `CosignVerificationKey` from
     /// the public key.
-    #[allow(clippy::result_large_err)]
     fn to_verification_key(
         &self,
         signature_digest_algorithm: &SigningScheme,
@@ -183,31 +177,26 @@ macro_rules! sigstore_keypair_code {
 
 impl SigStoreKeyPair {
     /// Builds a `SigStoreKeyPair` from pkcs8 PEM-encoded private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
         sigstore_keypair_from!(from_pem(pem_data))
     }
 
     /// Builds a `SigStoreKeyPair` from pkcs8 DER-encoded private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
         sigstore_keypair_from!(from_der(private_key))
     }
 
     /// Builds a `SigStoreKeyPair` from encrypted pkcs8 PEM-encoded private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_encrypted_pem(pem_data: &[u8], password: &[u8]) -> Result<Self> {
         sigstore_keypair_from!(from_encrypted_pem(pem_data, password))
     }
 
     /// `public_key_to_pem` will export the PEM-encoded public key.
-    #[allow(clippy::result_large_err)]
     pub fn public_key_to_pem(&self) -> Result<String> {
         sigstore_keypair_code!(public_key_to_pem(), self)
     }
 
     /// `public_key_to_der` will export the asn.1 PKIX public key.
-    #[allow(clippy::result_large_err)]
     pub fn public_key_to_der(&self) -> Result<Vec<u8>> {
         sigstore_keypair_code!(public_key_to_der(), self)
     }
@@ -215,26 +204,22 @@ impl SigStoreKeyPair {
     /// `private_key_to_encrypted_pem` will export the encrypted asn.1 pkcs8 private key.
     /// This encryption follows the go-lang version in
     /// <https://github.com/sigstore/cosign/blob/main/pkg/cosign/keys.go#L139> using nacl secretbox.
-    #[allow(clippy::result_large_err)]
     pub fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>> {
         sigstore_keypair_code!(private_key_to_encrypted_pem(password), self)
     }
 
     /// `private_key_to_pem` will export the PEM-encoded pkcs8 private key.
-    #[allow(clippy::result_large_err)]
     pub fn private_key_to_pem(&self) -> Result<Zeroizing<String>> {
         sigstore_keypair_code!(private_key_to_pem(), self)
     }
 
     /// `private_key_to_der` will export the asn.1 pkcs8 private key.
-    #[allow(clippy::result_large_err)]
     pub fn private_key_to_der(&self) -> Result<Zeroizing<Vec<u8>>> {
         sigstore_keypair_code!(private_key_to_der(), self)
     }
 
     /// `to_verification_key` will derive the `CosignVerificationKey` from
     /// the public key.
-    #[allow(clippy::result_large_err)]
     pub fn to_verification_key(
         &self,
         signing_scheme: &SigningScheme,
@@ -245,7 +230,6 @@ impl SigStoreKeyPair {
     /// Convert this KeyPair into a [`SigStoreSigner`] due to the given
     /// signing scheme. If the key type does not match the given
     /// signing scheme, an error will occur.
-    #[allow(clippy::result_large_err)]
     pub fn to_sigstore_signer(&self, signing_scheme: &SigningScheme) -> Result<SigStoreSigner> {
         match self {
             SigStoreKeyPair::ECDSA(keys) => match signing_scheme {
@@ -320,7 +304,6 @@ pub trait Signer {
     fn key_pair(&self) -> &dyn KeyPair;
 
     /// `sign` will sign the given data, and return the signature.
-    #[allow(clippy::result_large_err)]
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>>;
 }
 
@@ -356,13 +339,11 @@ impl SigStoreSigner {
     }
 
     /// `sign` will sign the given data, and return the signature.
-    #[allow(clippy::result_large_err)]
     pub fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
         self.as_inner().sign(msg)
     }
 
     /// `to_verification_key` will derive the verification_key for the `SigStoreSigner`.
-    #[allow(clippy::result_large_err)]
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
         let signing_scheme = match self {
             SigStoreSigner::ECDSA_P256_SHA256_ASN1(_) => SigningScheme::ECDSA_P256_SHA256_ASN1,
@@ -381,7 +362,6 @@ impl SigStoreSigner {
     }
 
     /// `key_pair` will return the reference of the `SigStoreKeyPair` enum due to `SigStoreSigner`.
-    #[allow(clippy::result_large_err)]
     pub fn to_sigstore_keypair(&self) -> Result<SigStoreKeyPair> {
         Ok(match self {
             SigStoreSigner::ECDSA_P256_SHA256_ASN1(inner) => {

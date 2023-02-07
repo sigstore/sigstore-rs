@@ -121,7 +121,6 @@ macro_rules! iterate_on_curves {
 
 impl ECDSAKeys {
     /// Create a new [`ECDSAKeys`] due to the given [`EllipticCurve`].
-    #[allow(clippy::result_large_err)]
     pub fn new(curve: EllipticCurve) -> Result<Self> {
         Ok(match curve {
             EllipticCurve::P256 => ECDSAKeys::P256(EcdsaKeys::<p256::NistP256>::new()?),
@@ -141,7 +140,6 @@ impl ECDSAKeys {
     /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`super::COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`super::SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
-    #[allow(clippy::result_large_err)]
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
         iterate_on_curves!(
             from_encrypted_pem(private_key, password),
@@ -151,13 +149,11 @@ impl ECDSAKeys {
 
     /// Builds a `EcdsaKeys` from a pkcs8 PEM-encoded private key.
     /// The label of PEM should be [`super::PRIVATE_KEY_PEM_LABEL`]
-    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
         iterate_on_curves!(from_pem(pem_data), "Ecdsa keys from PEM private key")
     }
 
     /// Builds a `EcdsaKeys` from a pkcs8 asn.1 private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
         iterate_on_curves!(from_der(private_key), "Ecdsa keys from DER private key")
     }
@@ -167,7 +163,6 @@ impl ECDSAKeys {
     /// to indicate the digest algorthm, because the common signing schemes
     /// for ecdsa-p256 is `ECDSA_P256_SHA256`, and for ecdsa-p384 is
     /// `ECDSA_P384_SHA384`.
-    #[allow(clippy::result_large_err)]
     pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
             ECDSAKeys::P256(inner) => {

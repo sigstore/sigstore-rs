@@ -20,7 +20,6 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    #[allow(clippy::result_large_err)]
     pub fn decode_body(&self) -> Result<Body, SigstoreError> {
         let decoded = BASE64_STD_ENGINE.decode(&self.body)?;
         serde_json::from_slice(&decoded).map_err(SigstoreError::from)

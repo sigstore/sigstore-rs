@@ -45,7 +45,6 @@ impl SignedArtifactBundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
-    #[allow(clippy::result_large_err)]
     pub fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: SignedArtifactBundle = serde_json::from_str(raw).map_err(|e| {
             SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
@@ -55,7 +54,6 @@ impl SignedArtifactBundle {
 
     /// Verifies the passed-in blob against the signature in this
     /// SignedArtifactBundle.
-    #[allow(clippy::result_large_err)]
     pub fn verify_blob(&self, blob: &[u8]) -> Result<()> {
         let cert = BASE64_STD_ENGINE.decode(&self.cert)?;
         let (_, pem) = x509_parser::pem::parse_x509_pem(&cert)?;
@@ -81,7 +79,6 @@ impl Bundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
-    #[allow(clippy::result_large_err)]
     pub(crate) fn new_verified(raw: &str, rekor_pub_key: &CosignVerificationKey) -> Result<Self> {
         let bundle: Bundle = serde_json::from_str(raw).map_err(|e| {
             SigstoreError::UnexpectedError(format!("Cannot parse bundle |{raw}|: {e:?}"))
@@ -93,7 +90,6 @@ impl Bundle {
     ///
     /// **Note well:** The bundle will be returned only if it can be verified
     /// using the supplied `rekor_pub_key` public key.
-    #[allow(clippy::result_large_err)]
     pub(crate) fn verify_bundle(
         bundle: &Bundle,
         rekor_pub_key: &CosignVerificationKey,

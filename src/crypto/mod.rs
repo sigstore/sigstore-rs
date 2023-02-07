@@ -98,7 +98,6 @@ impl TryFrom<&str> for SigningScheme {
 
 impl SigningScheme {
     /// Create a key-pair due to the given signing scheme.
-    #[allow(clippy::result_large_err)]
     pub fn create_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
             SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(

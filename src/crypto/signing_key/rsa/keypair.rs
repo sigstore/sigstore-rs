@@ -69,7 +69,6 @@ impl RSAKeys {
     /// Create a new `RSAKeys` Object.
     /// The private key will be randomly
     /// generated.
-    #[allow(clippy::result_large_err)]
     pub fn new(bit_size: usize) -> Result<Self> {
         let mut rng = rand::rngs::OsRng {};
         let private_key = RsaPrivateKey::new(&mut rng, bit_size)?;
@@ -81,7 +80,6 @@ impl RSAKeys {
     }
 
     /// Create a new `RSAKeys` Object from given `RSAKeys` Object.
-    #[allow(clippy::result_large_err)]
     pub fn from_rsa_privatekey_key(key: &RSAKeys) -> Result<Self> {
         let priv_key = key.private_key_to_der()?;
         RSAKeys::from_der(&priv_key)
@@ -90,7 +88,6 @@ impl RSAKeys {
     /// Builds a `RSAKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
-    #[allow(clippy::result_large_err)]
     pub fn from_encrypted_pem(encrypted_pem: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(encrypted_pem)?;
         match &key.tag[..] {
@@ -115,7 +112,6 @@ impl RSAKeys {
 
     /// Builds a `RSAKeys` from a pkcs8 PEM-encoded private key.
     /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`]
-    #[allow(clippy::result_large_err)]
     pub fn from_pem(pem: &[u8]) -> Result<Self> {
         let pem = std::str::from_utf8(pem)?;
         let (label, document) = pkcs8::SecretDocument::from_pem(pem)
@@ -146,7 +142,6 @@ impl RSAKeys {
     }
 
     /// Builds a `RSAKeys` from a pkcs8 asn.1 private key.
-    #[allow(clippy::result_large_err)]
     pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
         let private_key = RsaPrivateKey::from_pkcs8_der(der_bytes).map_err(|e| {
             SigstoreError::PKCS8Error(format!(
@@ -158,7 +153,6 @@ impl RSAKeys {
 
     /// `to_sigstore_signer` will create the [`SigStoreSigner`] using
     /// this rsa key pair.
-    #[allow(clippy::result_large_err)]
     pub fn to_sigstore_signer(
         &self,
         digest_algorithm: DigestAlgorithm,
