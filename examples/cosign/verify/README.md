@@ -24,7 +24,9 @@ Verify the image signature using the example program defined in
 [main.rs](./main.rs):
 
 ```console
-cargo run --example verify -- \
+cargo run --example verify \
+  --all-features \
+  -- \
   -k cosign.pub \
   --rekor-pub-key ~/.sigstore/root/targets/rekor.pub \
   --fulcio-cert ~/.sigstore/root/targets/fulcio.crt.pem \

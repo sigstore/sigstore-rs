@@ -17,16 +17,19 @@
 
 use thiserror::Error;
 
+#[cfg(feature = "cosign")]
 use crate::cosign::{
     constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
 };
 
+#[cfg(feature = "cosign")]
 #[derive(Error, Debug)]
 #[error("Several Signature Layers failed verification")]
 pub struct SigstoreVerifyConstraintsError<'a> {
     pub unsatisfied_constraints: VerificationConstraintRefVec<'a>,
 }
 
+#[cfg(feature = "cosign")]
 #[derive(Error, Debug)]
 #[error("Several Constraints failed to apply on the SignatureLayer")]
 pub struct SigstoreApplicationConstraintsError<'a> {
@@ -142,6 +145,7 @@ pub enum SigstoreError {
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,
 
+    #[cfg(feature = "tuf")]
     #[error(transparent)]
     TufError(#[from] Box<tough::error::Error>),
 

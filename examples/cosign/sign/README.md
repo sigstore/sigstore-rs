@@ -26,7 +26,9 @@ Also, let us the annotation `a=1`.
 Sign a container image:
 
 ```console
-cargo run --example sign -- \
+cargo run --example sign \
+    --all-features \
+    -- \
     --key cosign.key \
     --image 172.17.0.2:5000/ubuntu \
     --signing-scheme ECDSA_P256_SHA256_ASN1 \

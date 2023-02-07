@@ -7,7 +7,7 @@ The general idea is to return an access_token and the email via a scope.
 Both values can then be made to form a POST request to fulcio for a software
 signing certificate
 
-`cargo run --example openidconnect`
+`cargo run --example openidconnect --all-features`
 
 The implementation contains a `redirect_listener` function that will create
 a local listening server to incept the ID token and scopes returned from

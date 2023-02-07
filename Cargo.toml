@@ -10,49 +10,80 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [features]
-default = ["native-tls", "test-registry"]
-native-tls = ["oci-distribution/native-tls", "openidconnect/native-tls", "reqwest/native-tls"]
-rustls-tls = ["oci-distribution/rustls-tls", "openidconnect/rustls-tls", "reqwest/rustls-tls"]
+default = ["full-native-tls", "cached-client"]
+
+full-native-tls = ["fulcio-native-tls", "rekor-native-tls", "cosign-native-tls", "mock-client-native-tls"]
+full-rustls-tls = ["fulcio-rustls-tls", "rekor-rustls-tls", "cosign-rustls-tls", "mock-client-rustls-tls"]
+
 # This features is used by tests that use docker to create a registry
 test-registry = []
+
+fulcio-native-tls = [ "oauth-native-tls", "reqwest/native-tls", "fulcio" ]
+fulcio-rustls-tls = [ "oauth-rustls-tls", "reqwest/rustls-tls", "fulcio" ]
+fulcio = []
+
+oauth-native-tls = [ "openidconnect/native-tls", "oauth" ]
+oauth-rustls-tls = [ "openidconnect/rustls-tls", "oauth" ]
+oauth = []
+
+rekor-native-tls = [ "reqwest/native-tls", "rekor"]
+rekor-rustls-tls = [ "reqwest/rustls-tls", "rekor" ]
+rekor = [ "tuf" ]
+tuf = [ "tough", "regex" ]
+
+cosign-native-tls = [ "oci-distribution/native-tls", "cert", "cosign", "registry-native-tls" ]
+cosign-rustls-tls = [ "oci-distribution/rustls-tls", "cert", "cosign", "registry-rustls-tls" ]
+cosign = []
+cert = []
+
+registry-native-tls = [ "oci-distribution/native-tls", "registry" ]
+registry-rustls-tls = [ "oci-distribution/rustls-tls", "registry" ]
+registry = []
+
+mock-client-native-tls = [ "oci-distribution/native-tls", "mock-client" ]
+mock-client-rustls-tls = [ "oci-distribution/rustls-tls", "mock-client" ]
+mock-client = []
+
+cached-client = [ "cached" ]
 
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.21.0"
-cached = "0.42.0"
+cached = { version = "0.42.0", optional = true }
+cfg-if = "1.0.0"
+digest = "0.10.3"
+ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
+ed25519 = { version = "1", features = [ "alloc" ] }
+ed25519-dalek-fiat = "0.1.0"
+elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
 lazy_static = "1.4.0"
-oci-distribution = { version = "0.9", default-features = false }
+oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
 open = "3.0.1"
-openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ] }
+openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ], optional = true}
+p256 = "0.11.1"
+p384 = "0.11.1"
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
-regex = "1.5.5"
-serde_json = "1.0.79"
+pkcs1 = "0.4.0"
+pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] }
+rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
+regex = { version = "1.5.5", optional = true }
+reqwest = { version = "0.11", default-features = false, features = ["json", "multipart"], optional = true}
+rsa = "0.7.0"
+scrypt = "0.10.0"
 serde = { version = "1.0.136", features = ["derive"] }
+serde_json = "1.0.79"
 sha2 = { version = "0.10.6", features = ["oid"] }
+signature = { version = "1.5.0", features = [ "digest-preview" ] }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
-tough = { version = "0.12", features = [ "http" ] }
+tough = { version = "0.12", features = [ "http" ], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
 x509-parser = { version = "0.14.0", features = ["verify"] }
-zeroize = "1.5.7"
-rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
-scrypt = "0.10.0"
 xsalsa20poly1305 = "0.9.0"
-pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] }
-elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
-p256 = "0.11.1"
-p384 = "0.11.1"
-ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
-digest = "0.10.3"
-signature = { version = "1.5.0", features = [ "digest-preview" ] }
-ed25519 = { version = "1", features = [ "alloc" ] }
-ed25519-dalek-fiat = "0.1.0"
-rsa = "0.7.0"
-pkcs1 = "0.4.0"
-reqwest = { version = "0.11", default-features = false, features = ["json", "multipart"] }
+zeroize = "1.5.7"
 
 [dev-dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
@@ -62,10 +93,10 @@ clap = { version = "4.0.8", features = ["derive"] }
 docker_credential = "1.1.0"
 openssl = "0.10.38"
 rstest = "0.16.0"
-tempfile = "3.3.0"
-tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
-testcontainers = "0.14"
 serial_test = "1.0.0"
+tempfile = "3.3.0"
+testcontainers = "0.14"
+tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
 
 # cosign example mappings
 

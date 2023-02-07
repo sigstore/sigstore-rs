@@ -54,11 +54,13 @@ pub struct ClientBuilder {
     oci_client_config: ClientConfig,
     rekor_pub_key: Option<String>,
     fulcio_certs: Vec<Certificate>,
+    #[cfg(feature = "cached-client")]
     enable_registry_caching: bool,
 }
 
 impl ClientBuilder {
     /// Enable caching of data returned from remote OCI registries
+    #[cfg(feature = "cached-client")]
     pub fn enable_registry_caching(mut self) -> Self {
         self.enable_registry_caching = true;
         self
@@ -139,16 +141,25 @@ impl ClientBuilder {
         let oci_client =
             oci_distribution::client::Client::new(self.oci_client_config.clone().into());
 
-        let registry_client: Box<dyn crate::registry::ClientCapabilities> =
-            if self.enable_registry_caching {
-                Box::new(crate::registry::OciCachingClient {
-                    registry_client: oci_client,
-                })
-            } else {
-                Box::new(crate::registry::OciClient {
-                    registry_client: oci_client,
-                })
-            };
+        let registry_client: Box<dyn crate::registry::ClientCapabilities> = {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "cached-client")] {
+                    if self.enable_registry_caching {
+                        Box::new(crate::registry::OciCachingClient {
+                            registry_client: oci_client,
+                        }) as Box<dyn crate::registry::ClientCapabilities>
+                    } else {
+                        Box::new(crate::registry::OciClient {
+                            registry_client: oci_client,
+                        }) as Box<dyn crate::registry::ClientCapabilities>
+                    }
+                } else {
+                    Box::new(crate::registry::OciClient {
+                        registry_client: oci_client,
+                    }) as Box<dyn crate::registry::ClientCapabilities>
+                }
+            }
+        };
 
         Ok(Client {
             registry_client,
