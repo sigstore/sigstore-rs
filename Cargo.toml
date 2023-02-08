@@ -10,7 +10,7 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [features]
-default = ["full-native-tls", "cached-client"]
+default = ["full-native-tls", "cached-client", "tuf"]
 
 full-native-tls = ["fulcio-native-tls", "rekor-native-tls", "cosign-native-tls", "mock-client-native-tls"]
 full-rustls-tls = ["fulcio-rustls-tls", "rekor-rustls-tls", "cosign-rustls-tls", "mock-client-rustls-tls"]
@@ -28,7 +28,8 @@ oauth = []
 
 rekor-native-tls = [ "reqwest/native-tls", "rekor"]
 rekor-rustls-tls = [ "reqwest/rustls-tls", "rekor" ]
-rekor = [ "tuf" ]
+rekor = []
+
 tuf = [ "tough", "regex" ]
 
 cosign-native-tls = [ "oci-distribution/native-tls", "cert", "cosign", "registry-native-tls" ]

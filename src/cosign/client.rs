@@ -190,6 +190,7 @@ impl Client {
     }
 }
 
+#[cfg(feature = "mock-client")]
 #[cfg(test)]
 mod tests {
     use super::*;
