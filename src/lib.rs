@@ -245,6 +245,7 @@
 //! - `cached-client`: Enables support for OCI registry client caching.
 //!
 //! - `test-registry`: Enables tests based on a temporary OCI registry.
+//! - `tuf`: Enables support for TUF to request for fulcio certs and rekor public key.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
