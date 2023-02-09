@@ -53,17 +53,17 @@ base64 = "0.21.0"
 cached = { version = "0.42.0", optional = true }
 cfg-if = "1.0.0"
 digest = "0.10.3"
-ecdsa = { version = "0.14.3", features = [ "pkcs8", "digest", "der" ] }
-ed25519 = { version = "1", features = [ "alloc" ] }
-ed25519-dalek-fiat = "0.1.0"
+ecdsa = { version = "0.15", features = [ "pkcs8", "digest", "der" ] }
+ed25519 = { version = "2", features = [ "alloc" ] }
+ed25519-dalek = { version = "2.0.0-pre.0", features = [ "pkcs8", "rand_core" ] }
 elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
 open = "3.0.1"
 openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ], optional = true}
-p256 = "0.11.1"
-p384 = "0.11.1"
+p256 = "0.12"
+p384 = "0.12"
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
 pkcs1 = "0.4.0"
@@ -71,12 +71,12 @@ pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] 
 rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
 regex = { version = "1.5.5", optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json", "multipart"], optional = true}
-rsa = "0.7.0"
+rsa = "0.8"
 scrypt = "0.10.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 sha2 = { version = "0.10.6", features = ["oid"] }
-signature = { version = "1.5.0", features = [ "digest-preview" ] }
+signature = { version = "2.0" }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tough = { version = "0.12", features = [ "http" ], optional = true }

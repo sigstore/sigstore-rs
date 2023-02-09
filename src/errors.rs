@@ -214,4 +214,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     PKCS1Error(#[from] pkcs1::Error),
+
+    #[error(transparent)]
+    ED25519PKCS1Error(#[from] ed25519_dalek::pkcs8::spki::Error),
 }

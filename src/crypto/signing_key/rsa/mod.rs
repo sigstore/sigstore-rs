@@ -51,7 +51,8 @@
 //! ```
 
 use ::rsa::{pkcs1v15::SigningKey, pss::BlindedSigningKey};
-use signature::RandomizedSigner;
+use ecdsa::SignatureEncoding;
+use signature::{Keypair, RandomizedSigner};
 
 use self::keypair::RSAKeys;
 
@@ -162,22 +163,22 @@ impl RSASigner {
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
         Ok(match self {
             RSASigner::RSA_PSS_SHA256(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA256(signer.into())
+                CosignVerificationKey::RSA_PSS_SHA256(signer.verifying_key())
             }
             RSASigner::RSA_PSS_SHA384(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA384(signer.into())
+                CosignVerificationKey::RSA_PSS_SHA384(signer.verifying_key())
             }
             RSASigner::RSA_PSS_SHA512(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA512(signer.into())
+                CosignVerificationKey::RSA_PSS_SHA512(signer.verifying_key())
             }
             RSASigner::RSA_PKCS1_SHA256(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA256(signer.into())
+                CosignVerificationKey::RSA_PKCS1_SHA256(signer.verifying_key())
             }
             RSASigner::RSA_PKCS1_SHA384(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA384(signer.into())
+                CosignVerificationKey::RSA_PKCS1_SHA384(signer.verifying_key())
             }
             RSASigner::RSA_PKCS1_SHA512(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA512(signer.into())
+                CosignVerificationKey::RSA_PKCS1_SHA512(signer.verifying_key())
             }
         })
     }

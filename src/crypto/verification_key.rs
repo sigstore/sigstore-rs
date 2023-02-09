@@ -17,9 +17,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _
 use pkcs8::DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
-use signature::{DigestVerifier, Signature as _, Verifier};
+use signature::{DigestVerifier, Verifier};
 use std::convert::TryFrom;
-use x509_parser::{prelude::FromDer, x509::SubjectPublicKeyInfo};
+use x509_parser::x509::SubjectPublicKeyInfo;
 
 use super::{
     signing_key::{KeyPair, SigStoreSigner},
@@ -52,7 +52,7 @@ pub enum CosignVerificationKey {
     RSA_PKCS1_SHA512(pkcs1v15::VerifyingKey<sha2::Sha512>),
     ECDSA_P256_SHA256_ASN1(ecdsa::VerifyingKey<p256::NistP256>),
     ECDSA_P384_SHA384_ASN1(ecdsa::VerifyingKey<p384::NistP384>),
-    ED25519(ed25519_dalek_fiat::PublicKey),
+    ED25519(ed25519_dalek::VerifyingKey),
 }
 
 /// Attempts to convert a [x509 Subject Public Key Info](SubjectPublicKeyInfo) object into
@@ -169,12 +169,9 @@ impl CosignVerificationKey {
                     ))
                 })?,
             ),
-            SigningScheme::ED25519 => {
-                let (_, public_key) = SubjectPublicKeyInfo::from_der(der_data)?;
-                CosignVerificationKey::ED25519(ed25519_dalek_fiat::PublicKey::from_bytes(
-                    &public_key.subject_public_key.data,
-                )?)
-            }
+            SigningScheme::ED25519 => CosignVerificationKey::ED25519(
+                ed25519_dalek::VerifyingKey::from_public_key_der(der_data)?,
+            ),
         })
     }
 
@@ -192,7 +189,7 @@ impl CosignVerificationKey {
         } else if let Ok(ed25519bytes) =
             ed25519::pkcs8::PublicKeyBytes::from_public_key_der(der_data)
         {
-            Ok(Self::ED25519(ed25519_dalek_fiat::PublicKey::from_bytes(
+            Ok(Self::ED25519(ed25519_dalek::VerifyingKey::from_bytes(
                 ed25519bytes.as_ref(),
             )?))
         } else if let Ok(rsapk) = rsa::RsaPublicKey::from_public_key_der(der_data) {
@@ -247,37 +244,37 @@ impl CosignVerificationKey {
 
         match self {
             CosignVerificationKey::RSA_PSS_SHA256(inner) => {
-                let sig = pss::Signature::from_bytes(&sig)?;
+                let sig = pss::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::RSA_PSS_SHA384(inner) => {
-                let sig = pss::Signature::from_bytes(&sig)?;
+                let sig = pss::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::RSA_PSS_SHA512(inner) => {
-                let sig = pss::Signature::from_bytes(&sig)?;
+                let sig = pss::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::RSA_PKCS1_SHA256(inner) => {
-                let sig = pkcs1v15::Signature::from_bytes(&sig)?;
+                let sig = pkcs1v15::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::RSA_PKCS1_SHA384(inner) => {
-                let sig = pkcs1v15::Signature::from_bytes(&sig)?;
+                let sig = pkcs1v15::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::RSA_PKCS1_SHA512(inner) => {
-                let sig = pkcs1v15::Signature::from_bytes(&sig)?;
+                let sig = pkcs1v15::Signature::try_from(sig.as_slice())?;
                 inner
                     .verify(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
@@ -300,7 +297,7 @@ impl CosignVerificationKey {
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::ED25519(inner) => {
-                let sig = ed25519::Signature::from_bytes(&sig[..])
+                let sig = ed25519::Signature::from_slice(sig.as_slice())
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)?;
                 inner
                     .verify(msg, &sig)
