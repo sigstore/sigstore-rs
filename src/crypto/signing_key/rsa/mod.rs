@@ -50,9 +50,11 @@
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature_data),message).is_ok());
 //! ```
 
-use ::rsa::{pkcs1v15::SigningKey, pss::BlindedSigningKey};
-use ecdsa::SignatureEncoding;
-use signature::{Keypair, RandomizedSigner};
+use ::rsa::{
+    pkcs1v15::SigningKey,
+    pss::BlindedSigningKey,
+    signature::{Keypair, RandomizedSigner, SignatureEncoding},
+};
 
 use self::keypair::RSAKeys;
 
@@ -193,7 +195,7 @@ impl Signer for RSASigner {
             self,
             signer,
             _key,
-            signer.try_sign_with_rng(&mut rng, msg)?.to_vec()
+            signer.sign_with_rng(&mut rng, msg).to_vec()
         ))
     }
 

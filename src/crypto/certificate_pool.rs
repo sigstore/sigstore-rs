@@ -52,7 +52,7 @@ impl CertificatePool {
             let pc = match c.encoding {
                 crate::registry::CertificateEncoding::Pem => {
                     let pem_str = String::from_utf8(c.data.clone()).map_err(|_| {
-                        SigstoreError::UnexpectedError("certificate is not PEM encoded".to_string())
+                        SigstoreError::X509Error("certificate is not PEM encoded".to_string())
                     })?;
                     picky::x509::Cert::from_pem_str(&pem_str)
                 }

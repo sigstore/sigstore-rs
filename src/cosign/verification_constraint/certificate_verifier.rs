@@ -1,21 +1,19 @@
+use chrono::{DateTime, NaiveDateTime, Utc};
+use pkcs8::der::Decode;
 use std::convert::TryFrom;
 use tracing::warn;
-use x509_parser::{
-    certificate::X509Certificate,
-    pem::parse_x509_pem,
-    prelude::{ASN1Time, FromDer},
-};
+use x509_cert::Certificate;
 
 use super::VerificationConstraint;
 use crate::cosign::signature_layers::SignatureLayer;
 use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
-use crate::errors::Result;
+use crate::errors::{Result, SigstoreError};
 
 /// Verify signature layers using the public key defined inside of a x509 certificate
 #[derive(Debug)]
 pub struct CertificateVerifier {
     cert_verification_key: CosignVerificationKey,
-    cert_validity: x509_parser::certificate::Validity,
+    cert_validity: x509_cert::time::Validity,
     require_rekor_bundle: bool,
 }
 
@@ -36,7 +34,7 @@ impl CertificateVerifier {
         require_rekor_bundle: bool,
         cert_chain: Option<&[crate::registry::Certificate]>,
     ) -> Result<Self> {
-        let (_, pem) = parse_x509_pem(cert_bytes)?;
+        let pem = pem::parse(cert_bytes)?;
         Self::from_der(&pem.contents, require_rekor_bundle, cert_chain)
     }
 
@@ -56,7 +54,8 @@ impl CertificateVerifier {
         require_rekor_bundle: bool,
         cert_chain: Option<&[crate::registry::Certificate]>,
     ) -> Result<Self> {
-        let (_, cert) = X509Certificate::from_der(cert_bytes)?;
+        let cert = Certificate::from_der(cert_bytes)
+            .map_err(|e| SigstoreError::X509Error(format!("parse from der {e}")))?;
         crate::crypto::certificate::verify_key_usages(&cert)?;
         crate::crypto::certificate::verify_has_san(&cert)?;
         crate::crypto::certificate::verify_validity(&cert)?;
@@ -66,12 +65,12 @@ impl CertificateVerifier {
             cert_pool.verify_der_cert(cert_bytes)?;
         }
 
-        let subject_public_key_info = cert.public_key();
+        let subject_public_key_info = &cert.tbs_certificate.subject_public_key_info;
         let cosign_verification_key = CosignVerificationKey::try_from(subject_public_key_info)?;
 
         Ok(Self {
             cert_verification_key: cosign_verification_key,
-            cert_validity: cert.validity().to_owned(),
+            cert_validity: cert.tbs_certificate.validity,
             require_rekor_bundle,
         })
     }
@@ -84,8 +83,15 @@ impl VerificationConstraint for CertificateVerifier {
         }
         match &signature_layer.bundle {
             Some(bundle) => {
-                let it = ASN1Time::from_timestamp(bundle.payload.integrated_time)?;
-                if it < self.cert_validity.not_before {
+                let it = DateTime::<Utc>::from_utc(
+                    NaiveDateTime::from_timestamp_opt(bundle.payload.integrated_time, 0).ok_or(
+                        SigstoreError::UnexpectedError("timestamp is not legal".into()),
+                    )?,
+                    Utc,
+                );
+                let not_before: DateTime<Utc> =
+                    self.cert_validity.not_before.to_system_time().into();
+                if it < not_before {
                     warn!(
                         integrated_time = it.to_string(),
                         not_before = self.cert_validity.not_before.to_string(),
@@ -94,7 +100,8 @@ impl VerificationConstraint for CertificateVerifier {
                     return Ok(false);
                 }
 
-                if it > self.cert_validity.not_after {
+                let not_after: DateTime<Utc> = self.cert_validity.not_after.to_system_time().into();
+                if it > not_after {
                     warn!(
                         integrated_time = it.to_string(),
                         not_after = self.cert_validity.not_after.to_string(),
@@ -118,12 +125,16 @@ impl VerificationConstraint for CertificateVerifier {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::*;
     use crate::cosign::bundle::Bundle;
     use crate::crypto::tests::*;
     use crate::registry;
 
+    use pkcs8::der::asn1::UtcTime;
     use serde_json::json;
+    use x509_cert::time::{Time, Validity};
 
     #[test]
     fn verify_certificate_() -> anyhow::Result<()> {
@@ -262,14 +273,21 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
 
         let mut vc = CertificateVerifier::from_pem(cert_pem_raw.as_bytes(), true, None)
             .expect("cannot create verification constraint");
-        let now = ASN1Time::now().timestamp();
-        let not_before =
-            ASN1Time::from_timestamp(now - 60).expect("cannot create not_before timestamp");
-        let not_after =
-            ASN1Time::from_timestamp(now + 60).expect("cannot create not_after timestamp");
-        let validity = x509_parser::certificate::Validity {
-            not_before,
-            not_after,
+        let not_before = UtcTime::from_system_time(
+            SystemTime::now()
+                .checked_sub(Duration::from_secs(60))
+                .expect("cannot sub time by 60 seconds"),
+        )
+        .expect("cannot create not_before timestamp");
+        let not_after = UtcTime::from_system_time(
+            SystemTime::now()
+                .checked_add(Duration::from_secs(60))
+                .expect("cannot add time by 60 seconds"),
+        )
+        .expect("cannot create not_after timestamp");
+        let validity = Validity {
+            not_before: Time::UtcTime(not_before),
+            not_after: Time::UtcTime(not_after),
         };
         vc.cert_validity = validity;
         assert!(!vc.verify(&signature_layer).expect("error while verifying"));

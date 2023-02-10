@@ -172,7 +172,7 @@ impl FulcioClient {
             signed_email_address: Some(signature),
         };
 
-        let csr: Body = csr.try_into()?;
+        let csr = TryInto::<Body>::try_into(csr)?;
 
         let client = reqwest::Client::new();
         let response = client

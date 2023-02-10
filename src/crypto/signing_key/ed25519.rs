@@ -65,7 +65,6 @@ use std::convert::TryFrom;
 use ed25519::KeypairBytes;
 use ed25519_dalek::{Signer as _, SigningKey};
 use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
-use x509_parser::nom::AsBytes;
 
 use crate::{
     crypto::{verification_key::CosignVerificationKey, SigningScheme},
@@ -100,7 +99,7 @@ impl Ed25519Keys {
     /// Create a new `Ed25519Keys` Object from given `Ed25519Keys` Object.
     pub fn from_ed25519key(key: &Ed25519Keys) -> Result<Self> {
         let priv_key = key.private_key_to_der()?;
-        Ed25519Keys::from_der(priv_key.as_bytes())
+        Ed25519Keys::from_der(&priv_key[..])
     }
 
     /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encoded private key.
