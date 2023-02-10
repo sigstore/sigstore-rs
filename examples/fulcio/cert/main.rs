@@ -1,8 +1,10 @@
+use pkcs8::der::Decode;
 use sigstore::crypto::SigningScheme;
 use sigstore::fulcio::oauth::OauthTokenProvider;
 use sigstore::fulcio::{FulcioClient, TokenProvider, FULCIO_ROOT};
 use url::Url;
-use x509_parser::pem::Pem;
+use x509_cert::ext::pkix::SubjectAltName;
+use x509_cert::Certificate;
 
 #[tokio::main]
 async fn main() {
@@ -17,18 +19,18 @@ async fn main() {
     {
         println!("Received certificate chain");
 
-        for cert in Pem::iter_from_buffer(cert.as_ref()) {
-            if let Ok(cert) = cert {
-                if let Ok(result) = cert.parse_x509() {
-                    if let Ok(san) = result.subject_alternative_name() {
-                        if let Some(san) = san {
-                            let san = san.value;
-                            for name in &san.general_names {
-                                println!("SAN: {}", name);
-                            }
-                        }
-                    }
-                }
+        let pems = pem::parse_many(cert.as_ref()).expect("parse pem failed");
+        for pem in &pems {
+            let cert = Certificate::from_der(&pem.contents).expect("parse certificate from der");
+
+            let (_, san) = cert
+                .tbs_certificate
+                .get::<SubjectAltName>()
+                .expect("get SAN failed")
+                .expect("No SAN found");
+
+            for name in &san.0 {
+                println!("SAN: {name:?}");
             }
         }
     }

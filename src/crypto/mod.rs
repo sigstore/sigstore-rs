@@ -197,7 +197,7 @@ pub(crate) mod tests {
     use openssl::ec::{EcGroup, EcKey};
     use openssl::hash::MessageDigest;
     use openssl::nid::Nid;
-    use openssl::pkey;
+    use openssl::pkey::{self, Id, PKey};
     use openssl::x509::extension::{
         AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
         SubjectAlternativeName, SubjectKeyIdentifier,
@@ -278,6 +278,18 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
         let public_key = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
         let private_key = pkey::PKey::from_ec_key(ec_private_key).expect("Cannot create pkey");
+
+        (private_key, public_key)
+    }
+
+    pub(crate) fn generate_ed25519_keypair() -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>)
+    {
+        let private_key = PKey::generate_ed25519().expect("Cannot create private key");
+        let public_key = private_key
+            .raw_public_key()
+            .expect("Cannot export public key");
+        let public_key = PKey::public_key_from_raw_bytes(&public_key, Id::ED25519)
+            .expect("Cannot create ec pub key");
 
         (private_key, public_key)
     }

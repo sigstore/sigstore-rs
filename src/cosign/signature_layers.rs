@@ -13,15 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use const_oid::ObjectIdentifier;
 use digest::Digest;
 use oci_distribution::client::ImageLayer;
+use pkcs8::der::Decode;
 use serde::Serialize;
+use std::convert::TryFrom;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, info, warn};
-use x509_parser::{
-    certificate::X509Certificate, der_parser::oid::Oid, extensions::GeneralName,
-    parse_x509_certificate, pem::parse_x509_pem,
-};
+use x509_cert::ext::pkix::name::GeneralName;
+use x509_cert::ext::pkix::SubjectAltName;
+use x509_cert::Certificate;
 
 use super::bundle::Bundle;
 use super::constants::{
@@ -33,7 +35,7 @@ use super::constants::{
 use crate::crypto::certificate_pool::CertificatePool;
 use crate::{
     cosign::simple_signing::SimpleSigning,
-    crypto::{self, CosignVerificationKey, Signature, SigningScheme},
+    crypto::{self, CosignVerificationKey, Signature},
     errors::{Result, SigstoreError},
 };
 
@@ -428,8 +430,9 @@ impl CertificateSignature {
         fulcio_cert_pool: &CertificatePool,
         trusted_bundle: &Bundle,
     ) -> Result<Self> {
-        let (_, pem) = parse_x509_pem(cert_raw)?;
-        let (_, cert) = parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(cert_raw)?;
+        let cert = Certificate::from_der(&pem.contents)
+            .map_err(|e| SigstoreError::X509Error(format!("parse from der: {e}")))?;
         let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
@@ -439,7 +442,7 @@ impl CertificateSignature {
 
         let subject = CertificateSubject::from_certificate(&cert)?;
         let verification_key =
-            CosignVerificationKey::from_der(cert.public_key().raw, &SigningScheme::default())?;
+            CosignVerificationKey::try_from(&cert.tbs_certificate.subject_public_key_info)?;
 
         let issuer = get_cert_extension_by_oid(&cert, SIGSTORE_ISSUER_OID, "Issuer")?;
 
@@ -487,15 +490,21 @@ impl CertificateSignature {
 }
 
 fn get_cert_extension_by_oid(
-    cert: &X509Certificate,
-    ext_oid: Oid,
+    cert: &Certificate,
+    ext_oid: ObjectIdentifier,
     ext_oid_name: &str,
 ) -> Result<Option<String>> {
-    let extension = cert.tbs_certificate.get_extension_unique(&ext_oid)?;
-    extension
+    cert.tbs_certificate
+        .extensions
+        .as_ref()
+        .ok_or(SigstoreError::X509Error(
+            "Certificate's extension is empty".to_string(),
+        ))?
+        .iter()
+        .find(|ext| ext.extn_id == ext_oid)
         .map(|ext| {
-            String::from_utf8(ext.value.to_vec()).map_err(|_| {
-                SigstoreError::UnexpectedError(format!(
+            String::from_utf8(ext.extn_value.to_vec()).map_err(|_| {
+                SigstoreError::X509Error(format!(
                     "Certificate's extension Sigstore {ext_oid_name} is not UTF8 compatible"
                 ))
             })
@@ -504,18 +513,19 @@ fn get_cert_extension_by_oid(
 }
 
 impl CertificateSubject {
-    pub fn from_certificate(certificate: &X509Certificate) -> Result<CertificateSubject> {
-        let subject_alternative_name = certificate
+    pub fn from_certificate(certificate: &Certificate) -> Result<CertificateSubject> {
+        let (_, san) = certificate
             .tbs_certificate
-            .subject_alternative_name()?
-            .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
+            .get::<SubjectAltName>()
+            .map_err(|e| SigstoreError::PKCS8Error(format!("get SAN ext failed: {e}")))?
+            .ok_or(SigstoreError::PKCS8Error("No SAN ext found".to_string()))?;
 
-        for general_name in &subject_alternative_name.value.general_names {
-            if let GeneralName::RFC822Name(name) = general_name {
+        for general_name in &san.0 {
+            if let GeneralName::Rfc822Name(name) = general_name {
                 return Ok(CertificateSubject::Email(name.to_string()));
             }
 
-            if let GeneralName::URI(uri) = general_name {
+            if let GeneralName::UniformResourceIdentifier(uri) = general_name {
                 return Ok(CertificateSubject::Uri(uri.to_string()));
             }
         }
@@ -854,6 +864,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     // Testing CertificateSignature
     use crate::cosign::bundle::Payload;
     use crate::crypto::tests::{generate_certificate, CertGenerationOptions};
+    use crate::crypto::SigningScheme;
     use chrono::{Duration, Utc};
 
     impl TryFrom<X509> for crate::registry::Certificate {

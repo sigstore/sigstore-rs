@@ -86,7 +86,6 @@ use elliptic_curve::{
 };
 use pkcs8::{der::Encode, AssociatedOid, DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use signature::DigestSigner;
-use x509_parser::nom::AsBytes;
 
 use crate::{
     crypto::{
@@ -202,7 +201,7 @@ where
     /// Convert the [`EcdsaKeys`] into [`ECDSAKeys`].
     pub fn to_wrapped_ecdsa_keys(&self) -> Result<ECDSAKeys> {
         let priv_key = self.private_key_to_der()?;
-        ECDSAKeys::from_der((*priv_key).as_bytes())
+        ECDSAKeys::from_der(&priv_key[..])
     }
 }
 
@@ -309,13 +308,14 @@ where
 {
     /// Create a new `EcdsaSigner` from the given `EcdsaKeys` and `SignatureDigestAlgorithm`
     pub fn from_ecdsa_keys(ecdsa_keys: &EcdsaKeys<C>) -> Result<Self> {
-        let signing_key =
-            ecdsa::SigningKey::<C>::from_pkcs8_der(ecdsa_keys.private_key_to_der()?.as_bytes())
-                .map_err(|e| {
-                    SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 der to ecdsa private key failed: {e}"
-                    ))
-                })?;
+        let signing_key = ecdsa::SigningKey::<C>::from_pkcs8_der(
+            &ecdsa_keys.private_key_to_der()?[..],
+        )
+        .map_err(|e| {
+            SigstoreError::PKCS8Error(format!(
+                "Convert from pkcs8 der to ecdsa private key failed: {e}"
+            ))
+        })?;
 
         Ok(Self {
             signing_key,

@@ -13,7 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use x509_parser::{certificate::X509Certificate, prelude::ASN1Time};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use const_oid::db::rfc5912::ID_KP_CODE_SIGNING;
+use x509_cert::{
+    ext::pkix::{ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName},
+    Certificate,
+};
 
 use crate::errors::{Result, SigstoreError};
 
@@ -23,7 +28,7 @@ use crate::errors::{Result, SigstoreError};
 /// The following checks are performed against the given certificate:
 /// * The certificate has the right set of key usages
 /// * The certificate cannot be used before the current time
-pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
+pub(crate) fn is_trusted(certificate: &Certificate, integrated_time: i64) -> Result<()> {
     verify_key_usages(certificate)?;
     verify_has_san(certificate)?;
     verify_validity(certificate)?;
@@ -32,42 +37,51 @@ pub(crate) fn is_trusted(certificate: &X509Certificate, integrated_time: i64) ->
     Ok(())
 }
 
-pub(crate) fn verify_key_usages(certificate: &X509Certificate) -> Result<()> {
-    let key_usage = certificate
+pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
+    let (_, key_usage) = certificate
         .tbs_certificate
-        .key_usage()?
+        .get::<KeyUsage>()
+        .map_err(|_| SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?
         .ok_or(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?;
-    if !key_usage.value.digital_signature() {
+
+    if key_usage.0.bits() & KeyUsages::DigitalSignature as u16 == 1 {
         return Err(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage);
     }
 
-    let ext_key_usage = certificate
+    let (_, key_ext_usage) = certificate
         .tbs_certificate
-        .extended_key_usage()?
+        .get::<ExtendedKeyUsage>()
+        .map_err(|_| SigstoreError::CertificateWithoutCodeSigningKeyUsage)?
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
-    if !ext_key_usage.value.code_signing {
+
+    // code signing
+    if !key_ext_usage.0.iter().any(|ext| *ext == ID_KP_CODE_SIGNING) {
         return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
 
     Ok(())
 }
 
-pub(crate) fn verify_has_san(certificate: &X509Certificate) -> Result<()> {
-    let _subject_alternative_name = certificate
+pub(crate) fn verify_has_san(certificate: &Certificate) -> Result<()> {
+    if certificate
         .tbs_certificate
-        .subject_alternative_name()?
-        .ok_or(SigstoreError::CertificateWithoutSubjectAlternativeName)?;
-    Ok(())
+        .get::<SubjectAltName>()
+        .map_err(|_| SigstoreError::CertificateWithoutSubjectAlternativeName)?
+        .is_some()
+    {
+        Ok(())
+    } else {
+        Err(SigstoreError::CertificateWithoutSubjectAlternativeName)
+    }
 }
 
-pub(crate) fn verify_validity(certificate: &X509Certificate) -> Result<()> {
+pub(crate) fn verify_validity(certificate: &Certificate) -> Result<()> {
     // Comment taken from cosign verification code:
     // THIS IS IMPORTANT: WE DO NOT CHECK TIMES HERE
     // THE CERTIFICATE IS TREATED AS TRUSTED FOREVER
     // WE CHECK THAT THE SIGNATURES WERE CREATED DURING THIS WINDOW
-    let validity = certificate.validity();
-    let now = ASN1Time::now();
-    if now < validity.not_before {
+    let validity = &certificate.tbs_certificate.validity;
+    if std::time::SystemTime::now() < validity.not_before.to_system_time() {
         Err(SigstoreError::CertificateValidityError(
             validity.not_before.to_string(),
         ))
@@ -76,11 +90,15 @@ pub(crate) fn verify_validity(certificate: &X509Certificate) -> Result<()> {
     }
 }
 
-fn verify_expiration(certificate: &X509Certificate, integrated_time: i64) -> Result<()> {
-    let it = ASN1Time::from_timestamp(integrated_time)?;
-    let validity = certificate.validity();
-
-    if it < validity.not_before {
+fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<()> {
+    let it = DateTime::<Utc>::from_utc(
+        NaiveDateTime::from_timestamp_opt(integrated_time, 0)
+            .ok_or(SigstoreError::X509Error("timestamp is not legal".into()))?,
+        Utc,
+    );
+    let validity = &certificate.tbs_certificate.validity;
+    let not_before: DateTime<Utc> = validity.not_before.to_system_time().into();
+    if it < not_before {
         return Err(
             SigstoreError::CertificateExpiredBeforeSignaturesSubmittedToRekor {
                 integrated_time: it.to_string(),
@@ -89,7 +107,8 @@ fn verify_expiration(certificate: &X509Certificate, integrated_time: i64) -> Res
         );
     }
 
-    if it > validity.not_after {
+    let not_after: DateTime<Utc> = validity.not_after.to_system_time().into();
+    if it > not_after {
         return Err(
             SigstoreError::CertificateIssuedAfterSignaturesSubmittedToRekor {
                 integrated_time: it.to_string(),
@@ -107,6 +126,7 @@ mod tests {
     use crate::crypto::tests::*;
 
     use chrono::{Duration, Utc};
+    use der::Decode;
 
     #[test]
     fn verify_cert_key_usages_success() -> anyhow::Result<()> {
@@ -114,9 +134,8 @@ mod tests {
 
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
-
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
         assert!(verify_key_usages(&cert).is_ok());
 
         Ok(())
@@ -134,8 +153,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
         let found = match err {
@@ -159,8 +178,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
         let found = match err {
@@ -185,8 +204,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         let error = verify_has_san(&cert).expect_err("Didn't get an error");
         let found = match error {
@@ -204,8 +223,8 @@ mod tests {
 
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         assert!(verify_validity(&cert).is_ok());
 
@@ -225,8 +244,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         let err = verify_validity(&cert).expect_err("Was expecting an error");
         let found = match err {
@@ -253,8 +272,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         assert!(verify_expiration(&cert, integrated_time.timestamp(),).is_ok());
 
@@ -276,8 +295,8 @@ mod tests {
             },
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
-        let (_, pem) = x509_parser::pem::parse_x509_pem(&issued_cert_pem)?;
-        let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)?;
+        let pem = pem::parse(issued_cert_pem)?;
+        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
 
         let err = verify_expiration(&cert, integrated_time.timestamp())
             .expect_err("Was expecting an error");

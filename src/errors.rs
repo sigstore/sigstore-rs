@@ -55,17 +55,11 @@ pub enum SigstoreError {
     #[error("unmatched key type {key_typ} and signing scheme {scheme}")]
     UnmatchedKeyAndSigningScheme { key_typ: String, scheme: String },
 
-    #[error(transparent)]
-    PEMParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
+    #[error("x509 error: {0}")]
+    X509Error(String),
 
     #[error(transparent)]
     FromPEMError(#[from] pem::PemError),
-
-    #[error(transparent)]
-    X509ParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
-
-    #[error(transparent)]
-    X509Error(#[from] x509_parser::error::X509Error),
 
     #[error(transparent)]
     CertError(#[from] picky::x509::certificate::CertError),
