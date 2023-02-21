@@ -102,8 +102,8 @@
 //!   // Obtain the list the signatures layers associated that can be trusted
 //!   let signature_layers = client.trusted_signature_layers(
 //!     auth,
-//!     cosign_image,
 //!     source_image_digest,
+//!     cosign_image,
 //!   ).await.expect("Could not obtain signature layers");
 //!
 //!   // Define verification constraints
