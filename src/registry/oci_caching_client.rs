@@ -240,7 +240,7 @@ async fn pull_manifest_cached(
         .map(cached::Return::new)
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl ClientCapabilities for OciCachingClient {
     async fn fetch_manifest_digest(
         &mut self,

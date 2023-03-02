@@ -26,7 +26,10 @@ use super::{
     Signature, SigningScheme,
 };
 
-use crate::{cosign::constants::ED25519, errors::*};
+use crate::errors::*;
+
+#[cfg(feature = "cosign")]
+use crate::cosign::constants::ED25519;
 
 /// A key that can be used to verify signatures.
 ///
@@ -101,6 +104,7 @@ impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
                 ))
             }
             //
+            #[cfg(feature = "cosign")]
             ED25519 => Ok(CosignVerificationKey::ED25519(
                 ed25519_dalek::VerifyingKey::try_from(*subject_pub_key_info)?,
             )),

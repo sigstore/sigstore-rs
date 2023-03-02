@@ -90,7 +90,7 @@ impl OauthTokenProvider {
 
         match oidc_url.as_ref() {
             Ok(url) => {
-                open::that(url.0.to_string())?;
+                webbrowser::open(url.0.as_ref())?;
                 println!(
                     "Open this URL in a browser if it does not automatically open for you:\n{}\n",
                     url.0,

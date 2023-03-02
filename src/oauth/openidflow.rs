@@ -87,11 +87,14 @@ use openidconnect::core::{
     CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreProviderMetadata,
     CoreResponseType, CoreTokenResponse,
 };
-use openidconnect::reqwest::{async_http_client, http_client};
+use openidconnect::reqwest::async_http_client;
 use openidconnect::{
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use openidconnect::reqwest::http_client;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -157,6 +160,7 @@ impl OpenIDAuthorize {
         Ok((authorize_url, client, nonce, pkce_verifier))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn auth_url(&self) -> Result<(Url, CoreClient, Nonce, PkceCodeVerifier)> {
         let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
@@ -268,6 +272,7 @@ impl RedirectListener {
         Err(SigstoreError::CodePairError)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let code = self.redirect_listener_internal()?;
 

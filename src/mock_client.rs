@@ -33,7 +33,7 @@ pub(crate) mod test {
         pub push_response: Option<anyhow::Result<PushResponse>>,
     }
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl crate::registry::ClientCapabilities for MockOciClient {
         async fn fetch_manifest_digest(
             &mut self,

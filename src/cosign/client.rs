@@ -42,7 +42,7 @@ pub struct Client {
     pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl CosignCapabilities for Client {
     async fn triangulate(&mut self, image: &str, auth: &Auth) -> Result<(String, String)> {
         let image_reference: oci_distribution::Reference =

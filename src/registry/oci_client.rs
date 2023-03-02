@@ -27,7 +27,7 @@ pub(crate) struct OciClient {
     pub registry_client: oci_distribution::Client,
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl ClientCapabilities for OciClient {
     async fn fetch_manifest_digest(
         &mut self,
