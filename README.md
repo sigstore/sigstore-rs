@@ -75,7 +75,7 @@ NOTE: The wasm32-wasi target architecture is not yet supported.
 
 ## Contributing
 
-Contributions are welcome! Please see the [contributing guidelines](CONTRIBUTING.md).
+Contributions are welcome! Please see the [contributing guidelines](CONTRIBUTORS.md)
 for more information.
 
 ## Security
