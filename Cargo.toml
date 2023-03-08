@@ -69,7 +69,7 @@ p256 = "0.12"
 p384 = "0.12"
 webbrowser = "0.8.4"
 pem = "1.0.2"
-picky = { version = "7.0.0-rc.3", default-features = false, features = [ "x509", "ec" ] }
+picky = { version = "7.0.0-rc.5", default-features = false, features = [ "x509", "ec" ] }
 pkcs1 = "0.4.0"
 pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] }
 rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
