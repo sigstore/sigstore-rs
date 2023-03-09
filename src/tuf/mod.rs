@@ -58,6 +58,7 @@ use repository_helper::RepositoryHelper;
 use super::errors::{Result, SigstoreError};
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository
+#[derive(Clone)]
 pub struct SigstoreRepository {
     rekor_pub_key: String,
     fulcio_certs: Vec<crate::registry::Certificate>,
