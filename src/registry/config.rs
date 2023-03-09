@@ -51,20 +51,15 @@ impl From<&oci_distribution::secrets::RegistryAuth> for Auth {
 }
 
 /// The protocol that the client should use to connect
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ClientProtocol {
     #[allow(missing_docs)]
     Http,
     #[allow(missing_docs)]
+    #[default]
     Https,
     #[allow(missing_docs)]
     HttpsExcept(Vec<String>),
-}
-
-impl Default for ClientProtocol {
-    fn default() -> Self {
-        ClientProtocol::Https
-    }
 }
 
 impl From<ClientProtocol> for oci_distribution::client::ClientProtocol {
