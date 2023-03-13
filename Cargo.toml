@@ -77,7 +77,7 @@ getrandom = "0.2.8"
 regex = { version = "1.5.5", optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json", "multipart"], optional = true}
 rsa = "0.8.0"
-scrypt = "0.10.0"
+scrypt = "0.11.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 sha2 = { version = "0.10.6", features = ["oid"] }
