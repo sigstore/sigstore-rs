@@ -13,13 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use olpc_cjson::CanonicalFormatter;
-use pkcs8::der::Decode;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
-use std::convert::TryFrom;
-use x509_cert::Certificate;
 
 use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::{Result, SigstoreError};
@@ -57,16 +53,7 @@ impl SignedArtifactBundle {
     /// Verifies the passed-in blob against the signature in this
     /// SignedArtifactBundle.
     pub fn verify_blob(&self, blob: &[u8]) -> Result<()> {
-        let cert = BASE64_STD_ENGINE.decode(&self.cert)?;
-        let pem = pem::parse(cert)?;
-        let cert = Certificate::from_der(&pem.contents).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}"))
-        })?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
-        let ver_key = CosignVerificationKey::try_from(&spki).expect("conversion failed");
-        let signature = Signature::Base64Encoded(self.base64_signature.as_bytes());
-        ver_key.verify_signature(signature, blob)?;
-        Ok(())
+        crate::cosign::verify_blob(&self.cert, &self.base64_signature, blob)
     }
 }
 

@@ -44,6 +44,13 @@ use tracing::warn;
 use crate::errors::{Result, SigstoreApplicationConstraintsError, SigstoreVerifyConstraintsError};
 use crate::registry::{Auth, PushResponse};
 
+use crate::crypto::{CosignVerificationKey, Signature};
+use crate::errors::SigstoreError;
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use pkcs8::der::Decode;
+use std::convert::TryFrom;
+use x509_cert::Certificate;
+
 pub mod bundle;
 pub(crate) mod constants;
 pub mod signature_layers;
@@ -227,6 +234,26 @@ where
             unapplied_constraints,
         })
     }
+}
+
+/// Verifies the signature produced by cosign when signing the given blob via the `cosign sign-blob` command
+///
+/// The parameters:
+/// * `cert`: a PEM encoded x509 certificate that contains the public key used to verify the signature
+/// * `signature`: the base64 encoded signature of the blob that has to be verified
+/// * `blob`: the contents of the blob
+///
+/// This function returns `Ok())` when the given signature has been verified, otherwise returns an `Err`.
+pub fn verify_blob(cert: &str, signature: &str, blob: &[u8]) -> Result<()> {
+    let cert = BASE64_STD_ENGINE.decode(cert)?;
+    let pem = pem::parse(cert)?;
+    let cert = Certificate::from_der(&pem.contents)
+        .map_err(|e| SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}")))?;
+    let spki = cert.tbs_certificate.subject_public_key_info;
+    let ver_key = CosignVerificationKey::try_from(&spki).expect("conversion failed");
+    let signature = Signature::Base64Encoded(signature.as_bytes());
+    ver_key.verify_signature(signature, blob)?;
+    Ok(())
 }
 
 #[cfg(test)]

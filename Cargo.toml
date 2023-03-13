@@ -111,6 +111,10 @@ name = "verify"
 path = "examples/cosign/verify/main.rs"
 
 [[example]]
+name = "verify-blob"
+path = "examples/cosign/verify-blob/main.rs"
+
+[[example]]
 name = "verify-bundle"
 path = "examples/cosign/verify-bundle/main.rs"
 
