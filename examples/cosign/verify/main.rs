@@ -253,7 +253,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<FulcioAndRekorData> 
             sigstore::tuf::SigstoreRepository::fetch(None)
         })
         .await
-        .map_err(|e| anyhow!("Error spawining blocking task inside of tokio: {}", e))?;
+        .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
 
         let repo: SigstoreRepository = repo?;
         data.fulcio_certs = repo.fulcio_certs().into();
