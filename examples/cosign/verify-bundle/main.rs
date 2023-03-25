@@ -60,9 +60,8 @@ pub async fn main() {
     let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
 
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
-    if bundle.verify_blob(&blob).is_ok() {
-        println!("Verification succeeded");
-    } else {
-        eprintln!("Verification failed");
+    match sigstore::cosign::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
+        Ok(_) => println!("Verification succeeded"),
+        Err(_) => eprintln!("Verification failed"),
     }
 }

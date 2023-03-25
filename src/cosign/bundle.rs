@@ -49,12 +49,6 @@ impl SignedArtifactBundle {
         })?;
         Bundle::verify_bundle(&bundle.rekor_bundle, rekor_pub_key).map(|_| bundle)
     }
-
-    /// Verifies the passed-in blob against the signature in this
-    /// SignedArtifactBundle.
-    pub fn verify_blob(&self, blob: &[u8]) -> Result<()> {
-        crate::cosign::verify_blob(&self.cert, &self.base64_signature, blob)
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

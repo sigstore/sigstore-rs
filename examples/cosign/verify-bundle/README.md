@@ -3,12 +3,13 @@ This example shows how to verify a blob, using a bundle that was created by the
 
 ### Create the artifact to be signed.
 ```console
+cd examples/cosign/verify-bundle
 echo something > artifact.txt
 ```
 
 ### Sign the artifact.txt file using cosign
 ```
-COSIGN_EXPERIMENTAL=1 cosign sign-blob --bundle=artifact.bundle artifact.txt
+cosign sign-blob --bundle=artifact.bundle artifact.txt
 ```
 
 ### Verify using sigstore-rs:
