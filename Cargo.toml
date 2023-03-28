@@ -65,7 +65,7 @@ lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
 openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ], optional = true}
-p256 = "0.12"
+p256 = "0.13"
 p384 = "0.12"
 webbrowser = "0.8.4"
 pem = "1.0.2"
