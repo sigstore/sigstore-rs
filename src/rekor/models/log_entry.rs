@@ -1,5 +1,4 @@
 use crate::errors::SigstoreError;
-use crate::rekor::models::hashedrekord::Spec;
 use crate::rekor::TreeSize;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 
@@ -7,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Error, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
+
+use super::{
+    AlpineAllOf, HashedrekordAllOf, HelmAllOf, IntotoAllOf, JarAllOf, RekordAllOf, Rfc3161AllOf,
+    RpmAllOf, TufAllOf,
+};
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -39,14 +43,25 @@ impl FromStr for LogEntry {
     }
 }
 
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Body {
-    #[serde(rename = "kind")]
-    pub kind: String,
-    #[serde(rename = "apiVersion")]
-    pub api_version: String,
-    #[serde(rename = "spec")]
-    pub spec: Spec,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+#[allow(non_camel_case_types)]
+pub enum Body {
+    alpine(AlpineAllOf),
+    helm(HelmAllOf),
+    jar(JarAllOf),
+    rfc3161(Rfc3161AllOf),
+    rpm(RpmAllOf),
+    tuf(TufAllOf),
+    intoto(IntotoAllOf),
+    hashedrekord(HashedrekordAllOf),
+    rekord(RekordAllOf),
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Self::hashedrekord(Default::default())
+    }
 }
 
 fn decode_body(s: &str) -> Result<Body, SigstoreError> {
