@@ -46,9 +46,9 @@
 //!   let mut client = sigstore::cosign::ClientBuilder::default()
 //!     .build()
 //!     .expect("Unexpected failure while building Client");
-//!   let image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:v0.1.0";
+//!   let image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:v0.1.0".parse().unwrap();
 //!   let (cosign_signature_image, source_image_digest) = client.triangulate(
-//!     image,
+//!     &image,
 //!     auth
 //!   ).await.expect("Unexpected failure while using triangulate");
 //! }
@@ -95,7 +95,8 @@
 //!     .expect("Unexpected failure while building Client");
 //!
 //!   // Obtained via `triangulate`
-//!   let cosign_image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e.sig";
+//!   let cosign_image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e.sig"
+//!     .parse().unwrap();
 //!   // Obtained via `triangulate`
 //!   let source_image_digest = "sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e";
 //!
@@ -103,7 +104,7 @@
 //!   let signature_layers = client.trusted_signature_layers(
 //!     auth,
 //!     source_image_digest,
-//!     cosign_image,
+//!     &cosign_image,
 //!   ).await.expect("Could not obtain signature layers");
 //!
 //!   // Define verification constraints

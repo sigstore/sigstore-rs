@@ -14,11 +14,10 @@
 // limitations under the License.
 
 use docker_credential::{CredentialRetrievalError, DockerCredential};
-use oci_distribution::Reference;
 use sigstore::cosign::constraint::{AnnotationMarker, PrivateKeySigner};
 use sigstore::cosign::{Constraint, CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
-use sigstore::registry::{Auth, ClientConfig, ClientProtocol};
+use sigstore::registry::{Auth, ClientConfig, ClientProtocol, OciReference};
 use std::convert::TryFrom;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
@@ -60,7 +59,7 @@ struct Cli {
 
     /// Name of the image to verify
     #[clap(short, long)]
-    image: String,
+    image: OciReference,
 
     /// Whether the registry uses HTTP
     #[clap(long)]
@@ -80,17 +79,14 @@ async fn run_app(cli: &Cli) -> anyhow::Result<()> {
         sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
     let mut client = client_builder.build()?;
 
-    let image: &str = cli.image.as_str();
+    let image = &cli.image;
 
     let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
     debug!(cosign_signature_image= ?cosign_signature_image, source_image_digest= ?source_image_digest);
 
     let mut signature_layer = SignatureLayer::new_unsigned(image, &source_image_digest)?;
 
-    // Try to get the auth of the image reference
-    let reference =
-        Reference::try_from(cosign_signature_image.clone()).expect("build image Reference failed");
-    let auth = build_auth(&reference);
+    let auth = build_auth(&cosign_signature_image);
     debug!(auth = ?auth, "use auth");
 
     if !cli.annotations.is_empty() {
@@ -141,7 +137,7 @@ async fn run_app(cli: &Cli) -> anyhow::Result<()> {
 /// auth.
 ///
 /// Any error will return an `Anonymous`.
-fn build_auth(reference: &oci_distribution::Reference) -> Auth {
+fn build_auth(reference: &OciReference) -> Auth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')

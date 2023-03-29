@@ -17,6 +17,8 @@
 //! the Container signature format described
 //! [here](https://github.com/containers/image/blob/a5061e5a5f00333ea3a92e7103effd11c6e2f51d/docs/containers-signature.5.md#json-data-format).
 
+use crate::registry::OciReference;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, fmt};
@@ -47,7 +49,7 @@ impl fmt::Display for SimpleSigning {
 impl SimpleSigning {
     /// Create a new simple signing payload due to the given image reference
     /// and manifest_digest
-    pub fn new(image_ref: &str, manifest_digest: &str) -> Self {
+    pub fn new(image_ref: &OciReference, manifest_digest: &str) -> Self {
         Self {
             critical: Critical {
                 type_name: CRITICAL_TYPE_NAME.to_string(),
