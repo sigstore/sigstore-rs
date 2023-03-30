@@ -256,6 +256,23 @@ pub fn verify_blob(cert: &str, signature: &str, blob: &[u8]) -> Result<()> {
     Ok(())
 }
 
+///
+/// Verifies the signature produced by cosign when signing the given blob via the `cosign sign-blob` command
+///
+/// The parameters:
+/// * `public_key`: the public key used to verify the signature
+/// * `signature`: the base64 encoded signature of the blob that has to be verified
+/// * `blob`: the contents of the blob
+///
+/// This function returns `Ok())` when the given signature has been verified, otherwise returns an `Err`.
+pub fn verify_blob_with_public_key(public_key: &str, signature: &str, blob: &[u8]) -> Result<()> {
+    let ver_key =
+        CosignVerificationKey::try_from_pem(public_key.as_bytes()).expect("conversion failed");
+    let signature = Signature::Base64Encoded(signature.as_bytes());
+    ver_key.verify_signature(signature, blob)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
