@@ -64,6 +64,6 @@ pub async fn main() {
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
     match Client::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
         Ok(_) => println!("Verification succeeded"),
-        Err(_) => eprintln!("Verification failed"),
+        Err(e) => eprintln!("Verification failed: {}", e),
     }
 }
