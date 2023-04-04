@@ -15,6 +15,8 @@
 
 use clap::Parser;
 use sigstore::cosign::bundle::SignedArtifactBundle;
+use sigstore::cosign::client::Client;
+use sigstore::cosign::CosignCapabilities;
 use sigstore::crypto::{CosignVerificationKey, SigningScheme};
 use std::fs;
 use tracing_subscriber::prelude::*;
@@ -60,7 +62,7 @@ pub async fn main() {
     let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
 
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
-    match sigstore::cosign::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
+    match Client::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
         Ok(_) => println!("Verification succeeded"),
         Err(_) => eprintln!("Verification failed"),
     }
