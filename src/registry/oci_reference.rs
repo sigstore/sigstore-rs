@@ -17,7 +17,7 @@ use crate::errors::SigstoreError;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-/// Reference provides a general type to represent any way of referencing images within an OCI registry.
+/// `OciReference` provides a general type to represent any way of referencing images within an OCI registry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OciReference {
     pub(crate) oci_reference: oci_distribution::Reference,
