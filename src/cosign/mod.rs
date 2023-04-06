@@ -160,7 +160,7 @@ pub trait CosignCapabilities {
             SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}"))
         })?;
         let spki = cert.tbs_certificate.subject_public_key_info;
-        let ver_key = CosignVerificationKey::try_from(&spki).expect("conversion failed");
+        let ver_key = CosignVerificationKey::try_from(&spki)?;
         let signature = Signature::Base64Encoded(signature.as_bytes());
         ver_key.verify_signature(signature, blob)?;
         Ok(())
@@ -176,8 +176,7 @@ pub trait CosignCapabilities {
     ///
     /// This function returns `Ok())` when the given signature has been verified, otherwise returns an `Err`.
     fn verify_blob_with_public_key(public_key: &str, signature: &str, blob: &[u8]) -> Result<()> {
-        let ver_key =
-            CosignVerificationKey::try_from_pem(public_key.as_bytes()).expect("conversion failed");
+        let ver_key = CosignVerificationKey::try_from_pem(public_key.as_bytes())?;
         let signature = Signature::Base64Encoded(signature.as_bytes());
         ver_key.verify_signature(signature, blob)?;
         Ok(())
