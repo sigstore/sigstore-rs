@@ -21,6 +21,11 @@ pub(crate) mod oci_client;
 #[cfg(feature = "cosign")]
 pub(crate) use oci_client::*;
 
+#[cfg(feature = "cosign")]
+pub mod oci_reference;
+#[cfg(feature = "cosign")]
+pub use oci_reference::OciReference;
+
 #[cfg(all(feature = "cosign", feature = "cached-client"))]
 pub(crate) mod oci_caching_client;
 #[cfg(all(feature = "cosign", feature = "cached-client"))]

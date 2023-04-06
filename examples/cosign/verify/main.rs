@@ -21,7 +21,7 @@ use sigstore::cosign::verification_constraint::{
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
-use sigstore::registry::{ClientConfig, ClientProtocol};
+use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
 use sigstore::tuf::SigstoreRepository;
 use std::boxed::Box;
 use std::convert::TryFrom;
@@ -101,7 +101,7 @@ struct Cli {
     loops: u32,
 
     /// Name of the image to verify
-    image: String,
+    image: OciReference,
 
     /// Whether the registry uses HTTP
     #[clap(long)]
@@ -227,7 +227,7 @@ async fn run_app(
         }
     }
 
-    let image: &str = cli.image.as_str();
+    let image = &cli.image;
 
     let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
 

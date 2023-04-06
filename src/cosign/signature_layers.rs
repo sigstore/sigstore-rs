@@ -33,6 +33,7 @@ use super::constants::{
     SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION,
 };
 use crate::crypto::certificate_pool::CertificatePool;
+use crate::registry::oci_reference::OciReference;
 use crate::{
     cosign::simple_signing::SimpleSigning,
     crypto::{self, CosignVerificationKey, Signature},
@@ -192,7 +193,9 @@ impl SignatureLayer {
     /// use sigstore::crypto::SigningScheme;
     ///
     /// async fn func() {
-    ///     let mut signature_layer = SignatureLayer::new_unsigned("example/test", "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").expect("create SignatureLayer failed");
+    ///     let mut signature_layer = SignatureLayer::new_unsigned(
+    ///         &"example/test".parse().unwrap(),
+    ///         "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").expect("create SignatureLayer failed");
     ///     // Now the SignatureLayer does not have a signature, we need
     ///     // to generate one
     ///     let signer = SigningScheme::ECDSA_P256_SHA256_ASN1.create_signer().expect("create signer failed");
@@ -205,7 +208,7 @@ impl SignatureLayer {
     /// }
     ///
     /// ```
-    pub fn new_unsigned(image_ref: &str, manifest_digest: &str) -> Result<Self> {
+    pub fn new_unsigned(image_ref: &OciReference, manifest_digest: &str) -> Result<Self> {
         let simple_signing = SimpleSigning::new(image_ref, manifest_digest);
 
         let payload = serde_json::to_vec(&simple_signing)?;
