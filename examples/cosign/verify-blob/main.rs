@@ -13,28 +13,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+extern crate clap;
+extern crate sigstore;
 use clap::Parser;
-use sigstore::cosign::bundle::SignedArtifactBundle;
 use sigstore::cosign::client::Client;
 use sigstore::cosign::CosignCapabilities;
-use sigstore::crypto::{CosignVerificationKey, SigningScheme};
+
+extern crate tracing_subscriber;
 use std::fs;
+use std::path::PathBuf;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
-    /// Path to bundle file
+    /// The certificate generate from the `cosign sign-blob` command
     #[clap(short, long)]
-    bundle: String,
+    certificate: PathBuf,
 
-    /// Path to artifact to be verified
-    blob: String,
-
-    /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
+    /// The signature generated from the `cosign sign-blob` command
     #[clap(long, required(false))]
-    rekor_pub_key: String,
+    signature: PathBuf,
+
+    /// The blob to verify
+    blob: String,
 
     /// Enable verbose mode
     #[clap(short, long)]
@@ -53,17 +56,12 @@ pub async fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    let rekor_pub_pem =
-        fs::read_to_string(&cli.rekor_pub_key).expect("error reading rekor's public key");
-    let rekor_pub_key =
-        CosignVerificationKey::from_pem(rekor_pub_pem.as_bytes(), &SigningScheme::default())
-            .expect("Cannot create Rekor verification key");
-    let bundle_json = fs::read_to_string(&cli.bundle).expect("error reading bundle json file");
+    let certificate = fs::read_to_string(&cli.certificate).expect("error reading certificate");
+    let signature = fs::read_to_string(&cli.signature).expect("error reading signature");
     let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
 
-    let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
-    match Client::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
+    match Client::verify_blob(&certificate, &signature, &blob) {
         Ok(_) => println!("Verification succeeded"),
-        Err(e) => eprintln!("Verification failed: {}", e),
+        Err(e) => eprintln!("Verification failed {:?}", e),
     }
 }
