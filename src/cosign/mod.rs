@@ -170,7 +170,7 @@ pub trait CosignCapabilities {
     /// Verifies the signature produced by cosign when signing the given blob via the `cosign sign-blob` command
     ///
     /// The parameters:
-    /// * `public_key`: the public key used to verify the signature
+    /// * `public_key`: the public key used to verify the signature, PEM encoded
     /// * `signature`: the base64 encoded signature of the blob that has to be verified
     /// * `blob`: the contents of the blob
     ///
