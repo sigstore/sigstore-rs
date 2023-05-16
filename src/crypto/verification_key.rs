@@ -329,7 +329,7 @@ impl CosignVerificationKey {
 
 #[cfg(test)]
 mod tests {
-    use der::Decode;
+    use x509_cert::der::Decode;
     use x509_cert::Certificate;
 
     use super::*;

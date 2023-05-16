@@ -82,7 +82,7 @@ async fn main() {
     .arg(Arg::new("key_format")
              .long("key_format")
              .value_name("KEY_FORMAT")
-             .help("Accepted formats are : pgp / x509 / minsign / ssh / tuf"))  
+             .help("Accepted formats are : pgp / x509 / minsign / ssh / tuf"))
     .arg(Arg::new("signature")
              .long("signature")
              .value_name("SIGNATURE")
