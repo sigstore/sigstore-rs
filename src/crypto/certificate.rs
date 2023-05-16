@@ -126,7 +126,7 @@ mod tests {
     use crate::crypto::tests::*;
 
     use chrono::{Duration, Utc};
-    use der::Decode;
+    use x509_cert::der::Decode;
 
     #[test]
     fn verify_cert_key_usages_success() -> anyhow::Result<()> {
