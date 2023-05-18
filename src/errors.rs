@@ -207,6 +207,9 @@ pub enum SigstoreError {
     RSAError(#[from] rsa::errors::Error),
 
     #[error(transparent)]
+    RSAPKCS1Error(#[from] rsa::pkcs1::Error),
+
+    #[error(transparent)]
     PKCS1Error(#[from] pkcs1::Error),
 
     #[error(transparent)]
