@@ -20,9 +20,9 @@
 //! for golang version.
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use crypto_secretbox::aead::{AeadMut, KeyInit};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use xsalsa20poly1305::aead::{AeadMut, KeyInit};
 
 use crate::errors::*;
 
@@ -157,10 +157,10 @@ impl SecretBoxCipher {
             ));
         }
         self.encrypted = true;
-        let nonce = xsalsa20poly1305::Nonce::from_slice(&self.nonce);
-        let key = xsalsa20poly1305::Key::from_slice(key);
+        let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        let key = crypto_secretbox::Key::from_slice(key);
 
-        let mut cipher = xsalsa20poly1305::XSalsa20Poly1305::new(key);
+        let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
         cipher
             .encrypt(nonce, plaintext)
             .map_err(|e| SigstoreError::PrivateKeyEncryptError(e.to_string()))
@@ -168,10 +168,10 @@ impl SecretBoxCipher {
 
     /// Unseal the ciphertext using the key
     fn decrypt(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        let nonce = xsalsa20poly1305::Nonce::from_slice(&self.nonce);
-        let key = xsalsa20poly1305::Key::from_slice(key);
+        let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        let key = crypto_secretbox::Key::from_slice(key);
 
-        let mut cipher = xsalsa20poly1305::XSalsa20Poly1305::new(key);
+        let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
         cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| SigstoreError::PrivateKeyEncryptError(e.to_string()))
