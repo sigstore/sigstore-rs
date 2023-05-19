@@ -15,6 +15,7 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
+use ed25519::pkcs8::DecodePublicKey as ED25519DecodePublicKey;
 use pkcs8::{DecodePublicKey, SubjectPublicKeyInfo};
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
@@ -74,18 +75,20 @@ impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
         match algorithm {
             ID_EC_PUBLIC_KEY => match public_key_der.len() {
                 65 => Ok(CosignVerificationKey::ECDSA_P256_SHA256_ASN1(
-                    ecdsa::VerifyingKey::try_from(*subject_pub_key_info).map_err(|e| {
-                        SigstoreError::PKCS8SpkiError(format!(
-                            "Ecdsa-P256 from der bytes to public key failed: {e}"
-                        ))
-                    })?,
+                    ecdsa::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)
+                        .map_err(|e| {
+                            SigstoreError::PKCS8SpkiError(format!(
+                                "Ecdsa-P256 from der bytes to public key failed: {e}"
+                            ))
+                        })?,
                 )),
                 97 => Ok(CosignVerificationKey::ECDSA_P384_SHA384_ASN1(
-                    ecdsa::VerifyingKey::try_from(*subject_pub_key_info).map_err(|e| {
-                        SigstoreError::PKCS8SpkiError(format!(
-                            "Ecdsa-P384 from der bytes to public key failed: {e}"
-                        ))
-                    })?,
+                    ecdsa::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)
+                        .map_err(|e| {
+                            SigstoreError::PKCS8SpkiError(format!(
+                                "Ecdsa-P384 from der bytes to public key failed: {e}"
+                            ))
+                        })?,
                 )),
                 _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
                     "EC with size {} is not supported",
@@ -106,7 +109,7 @@ impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
             //
             #[cfg(feature = "cosign")]
             ED25519 => Ok(CosignVerificationKey::ED25519(
-                ed25519_dalek::VerifyingKey::try_from(*subject_pub_key_info)?,
+                ed25519_dalek::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)?,
             )),
             _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
                 "Key with algorithm OID {} is not supported",
