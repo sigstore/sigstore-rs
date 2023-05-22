@@ -2,7 +2,7 @@
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
 version = "0.6.0"
-edition = "2018"
+edition = "2021"
 authors = [
   "sigstore-rs developers",
 ]
