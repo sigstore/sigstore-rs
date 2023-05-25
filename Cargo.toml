@@ -82,7 +82,7 @@ elliptic-curve = { version = "0.12.2", features = ["arithmetic", "pem"] }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
-openidconnect = { version = "2.3", default-features = false, features = [
+openidconnect = { version = "3.0", default-features = false, features = [
   "reqwest",
 ], optional = true }
 p256 = "0.12"
