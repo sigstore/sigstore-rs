@@ -108,7 +108,12 @@ impl ScryptKDF {
     /// Derivate a new key from the given password
     fn key(&self, password: &[u8]) -> Result<Vec<u8>> {
         let log_n = (self.params.n as f64).log2() as u8;
-        let params = scrypt::Params::new(log_n, self.params.r, self.params.p)?;
+        let params = scrypt::Params::new(
+            log_n,
+            self.params.r,
+            self.params.p,
+            scrypt::Params::RECOMMENDED_LEN,
+        )?;
         let mut res = Vec::new();
         res.resize(BOX_KEY_SIZE, 0x00);
         scrypt::scrypt(password, &self.salt, &params, &mut res)?;
