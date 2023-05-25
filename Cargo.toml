@@ -3,9 +3,7 @@ name = "sigstore"
 description = "An experimental crate to interact with sigstore"
 version = "0.6.0"
 edition = "2021"
-authors = [
-  "sigstore-rs developers",
-]
+authors = ["sigstore-rs developers"]
 license = "Apache-2.0"
 readme = "README.md"
 
@@ -13,40 +11,60 @@ readme = "README.md"
 default = ["full-native-tls", "cached-client", "tuf"]
 wasm = ["getrandom/js"]
 
-full-native-tls = ["fulcio-native-tls", "rekor-native-tls", "cosign-native-tls", "mock-client-native-tls"]
-full-rustls-tls = ["fulcio-rustls-tls", "rekor-rustls-tls", "cosign-rustls-tls", "mock-client-rustls-tls"]
+full-native-tls = [
+  "fulcio-native-tls",
+  "rekor-native-tls",
+  "cosign-native-tls",
+  "mock-client-native-tls",
+]
+full-rustls-tls = [
+  "fulcio-rustls-tls",
+  "rekor-rustls-tls",
+  "cosign-rustls-tls",
+  "mock-client-rustls-tls",
+]
 
 # This features is used by tests that use docker to create a registry
 test-registry = []
 
-fulcio-native-tls = [ "oauth-native-tls", "reqwest/native-tls", "fulcio" ]
-fulcio-rustls-tls = [ "oauth-rustls-tls", "reqwest/rustls-tls", "fulcio" ]
+fulcio-native-tls = ["oauth-native-tls", "reqwest/native-tls", "fulcio"]
+fulcio-rustls-tls = ["oauth-rustls-tls", "reqwest/rustls-tls", "fulcio"]
 fulcio = []
 
-oauth-native-tls = [ "openidconnect/native-tls", "oauth" ]
-oauth-rustls-tls = [ "openidconnect/rustls-tls", "oauth" ]
+oauth-native-tls = ["openidconnect/native-tls", "oauth"]
+oauth-rustls-tls = ["openidconnect/rustls-tls", "oauth"]
 oauth = []
 
-rekor-native-tls = [ "reqwest/native-tls", "rekor"]
-rekor-rustls-tls = [ "reqwest/rustls-tls", "rekor" ]
+rekor-native-tls = ["reqwest/native-tls", "rekor"]
+rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-tuf = [ "tough", "regex" ]
+tuf = ["tough", "regex"]
 
-cosign-native-tls = [ "oci-distribution/native-tls", "cert", "cosign", "registry-native-tls" ]
-cosign-rustls-tls = [ "oci-distribution/rustls-tls", "cert", "cosign", "registry-rustls-tls" ]
+cosign-native-tls = [
+  "oci-distribution/native-tls",
+  "cert",
+  "cosign",
+  "registry-native-tls",
+]
+cosign-rustls-tls = [
+  "oci-distribution/rustls-tls",
+  "cert",
+  "cosign",
+  "registry-rustls-tls",
+]
 cosign = []
 cert = []
 
-registry-native-tls = [ "oci-distribution/native-tls", "registry" ]
-registry-rustls-tls = [ "oci-distribution/rustls-tls", "registry" ]
+registry-native-tls = ["oci-distribution/native-tls", "registry"]
+registry-rustls-tls = ["oci-distribution/rustls-tls", "registry"]
 registry = []
 
-mock-client-native-tls = [ "oci-distribution/native-tls", "mock-client" ]
-mock-client-rustls-tls = [ "oci-distribution/rustls-tls", "mock-client" ]
+mock-client-native-tls = ["oci-distribution/native-tls", "mock-client"]
+mock-client-rustls-tls = ["oci-distribution/rustls-tls", "mock-client"]
 mock-client = []
 
-cached-client = [ "cached" ]
+cached-client = ["cached"]
 
 [dependencies]
 async-trait = "0.1.52"
@@ -57,37 +75,51 @@ chrono = { version = "0.4.23" }
 const-oid = "0.9.1"
 der = "0.7.5"
 digest = { version = "0.10.3", default-features = false }
-ecdsa = { version = "0.15", features = [ "pkcs8", "digest", "der" ] }
-ed25519 = { version = "=2.1", features = [ "alloc" ] }
-ed25519-dalek = { version = "2.0.0-pre.0", features = [ "pkcs8", "rand_core" ] }
-elliptic-curve = { version = "0.12.2", features = [ "arithmetic", "pem" ] }
+ecdsa = { version = "0.15", features = ["pkcs8", "digest", "der"] }
+ed25519 = { version = "2.2.1", features = ["alloc"] }
+ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
+elliptic-curve = { version = "0.12.2", features = ["arithmetic", "pem"] }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
-openidconnect = { version = "2.3", default-features = false, features = [ "reqwest" ], optional = true}
+openidconnect = { version = "2.3", default-features = false, features = [
+  "reqwest",
+], optional = true }
 p256 = "0.12"
 p384 = "0.12"
 webbrowser = "0.8.4"
 pem = "1.0.2"
-picky = { version = "7.0.0-rc.5", default-features = false, features = [ "x509", "ec" ] }
-pkcs1 = { version = "0.7.5", features = [ "std" ] }
-pkcs8 = { version = "0.9.0", features = ["pem", "alloc", "pkcs5", "encryption"] }
-rand = { version = "0.8.5", features = [ "getrandom", "std" ] }
+picky = { version = "7.0.0-rc.5", default-features = false, features = [
+  "x509",
+  "ec",
+] }
+pkcs1 = { version = "0.7.5", features = ["std"] }
+pkcs8 = { version = "0.9.0", features = [
+  "pem",
+  "alloc",
+  "pkcs5",
+  "encryption",
+] }
+rand = { version = "0.8.5", features = ["getrandom", "std"] }
 getrandom = "0.2.8"
 regex = { version = "1.5.5", optional = true }
-reqwest = { version = "0.11", default-features = false, features = ["json", "multipart"], optional = true}
+reqwest = { version = "0.11", default-features = false, features = [
+  "json",
+  "multipart",
+], optional = true }
 rsa = "0.8.2"
 scrypt = "0.11.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = { version = "2.0" }
+spki = { version = "0.7.2", features = ["pem", "std"] }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
-tough = { version = "0.13", features = [ "http" ], optional = true }
+tough = { version = "0.13", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
-x509-cert = { version = "0.1.1", features = [ "pem", "std" ] }
+x509-cert = { version = "0.1.1", features = ["pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
 

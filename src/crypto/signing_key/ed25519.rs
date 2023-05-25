@@ -60,11 +60,11 @@
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature),message).is_ok());
 //! ```
 
+use ed25519::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use std::convert::TryFrom;
 
 use ed25519::KeypairBytes;
 use ed25519_dalek::{Signer as _, SigningKey};
-use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 
 use crate::{
     crypto::{verification_key::CosignVerificationKey, SigningScheme},
@@ -110,9 +110,10 @@ impl Ed25519Keys {
         match &key.tag[..] {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(&key.contents, password)?;
-                let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
-                })?;
+                let pkcs8 =
+                    ed25519_dalek::pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
+                        SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
+                    })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
                         "Convert from pkcs8 pem to ed25519 private key failed: {e}"
@@ -135,9 +136,10 @@ impl Ed25519Keys {
 
         match label {
             PRIVATE_KEY_PEM_LABEL => {
-                let pkcs8 = pkcs8::PrivateKeyInfo::try_from(document.as_bytes()).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
-                })?;
+                let pkcs8 = ed25519_dalek::pkcs8::PrivateKeyInfo::try_from(document.as_bytes())
+                    .map_err(|e| {
+                        SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
+                    })?;
                 let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
                     SigstoreError::PKCS8Error(format!(
                         "Convert from pkcs8 pem to ed25519 private key failed: {e}"
@@ -223,7 +225,9 @@ impl KeyPair for Ed25519Keys {
     /// Return the private key in pkcs8 PEM-encoded format.
     fn private_key_to_pem(&self) -> Result<zeroize::Zeroizing<String>> {
         self.signing_key
-            .to_pkcs8_pem(pkcs8::LineEnding::LF)
+            .to_pkcs8_der()
+            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?
+            .to_pem(PRIVATE_KEY_PEM_LABEL, pkcs8::LineEnding::LF)
             .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
     }
 
