@@ -161,7 +161,7 @@ pub trait CosignCapabilities {
     fn verify_blob(cert: &str, signature: &str, blob: &[u8]) -> Result<()> {
         let cert = BASE64_STD_ENGINE.decode(cert)?;
         let pem = pem::parse(cert)?;
-        let cert = Certificate::from_der(&pem.contents).map_err(|e| {
+        let cert = Certificate::from_der(pem.contents()).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}"))
         })?;
         let spki = cert.tbs_certificate.subject_public_key_info;

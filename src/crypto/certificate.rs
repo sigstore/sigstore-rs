@@ -135,7 +135,7 @@ mod tests {
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
         assert!(verify_key_usages(&cert).is_ok());
 
         Ok(())
@@ -154,7 +154,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
         let found = match err {
@@ -179,7 +179,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
         let found = match err {
@@ -205,7 +205,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let error = verify_has_san(&cert).expect_err("Didn't get an error");
         let found = match error {
@@ -224,7 +224,7 @@ mod tests {
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         assert!(verify_validity(&cert).is_ok());
 
@@ -245,7 +245,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_validity(&cert).expect_err("Was expecting an error");
         let found = match err {
@@ -273,7 +273,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         assert!(verify_expiration(&cert, integrated_time.timestamp(),).is_ok());
 
@@ -296,7 +296,7 @@ mod tests {
         )?;
         let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = x509_cert::Certificate::from_der(&pem.contents)?;
+        let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_expiration(&cert, integrated_time.timestamp())
             .expect_err("Was expecting an error");

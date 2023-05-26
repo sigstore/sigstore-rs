@@ -87,7 +87,7 @@ openidconnect = { version = "2.3", default-features = false, features = [
 p256 = "0.13.2"
 p384 = "0.13"
 webbrowser = "0.8.4"
-pem = "1.0.2"
+pem = "2.0"
 picky = { version = "7.0.0-rc.5", default-features = false, features = [
   "x509",
   "ec",

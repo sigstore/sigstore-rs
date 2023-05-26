@@ -21,7 +21,7 @@ async fn main() {
 
         let pems = pem::parse_many(cert.as_ref()).expect("parse pem failed");
         for pem in &pems {
-            let cert = Certificate::from_der(&pem.contents).expect("parse certificate from der");
+            let cert = Certificate::from_der(pem.contents()).expect("parse certificate from der");
 
             let (_, san) = cert
                 .tbs_certificate

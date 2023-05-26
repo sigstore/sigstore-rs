@@ -144,9 +144,9 @@ where
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(private_key)?;
-        match &key.tag[..] {
+        match key.tag() {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
-                let der = kdf::decrypt(&key.contents, password)?;
+                let der = kdf::decrypt(key.contents(), password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
                     SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
@@ -249,14 +249,11 @@ where
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>> {
         let der = self.private_key_to_der()?;
         let pem = match password.len() {
-            0 => pem::Pem {
-                tag: PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: der.to_vec(),
-            },
-            _ => pem::Pem {
-                tag: SIGSTORE_PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: kdf::encrypt(&der, password)?,
-            },
+            0 => pem::Pem::new(PRIVATE_KEY_PEM_LABEL, der.to_vec()),
+            _ => pem::Pem::new(
+                SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+                kdf::encrypt(&der, password)?,
+            ),
         };
         let pem = pem::encode(&pem);
         Ok(zeroize::Zeroizing::new(pem))

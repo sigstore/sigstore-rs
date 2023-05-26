@@ -349,7 +349,7 @@ fn parse_cert_bundle(bundle_path: &str) -> Result<Vec<sigstore::registry::Certif
         .iter()
         .map(|pem| sigstore::registry::Certificate {
             encoding: sigstore::registry::CertificateEncoding::Der,
-            data: pem.contents.clone(),
+            data: pem.contents().to_vec(),
         })
         .collect())
 }

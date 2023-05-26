@@ -232,7 +232,7 @@ impl CosignVerificationKey {
     /// from the DER-encoded bytes.
     pub fn from_pem(pem_data: &[u8], signing_scheme: &SigningScheme) -> Result<Self> {
         let key_pem = pem::parse(pem_data)?;
-        Self::from_der(key_pem.contents.as_slice(), signing_scheme)
+        Self::from_der(key_pem.contents(), signing_scheme)
     }
 
     /// Builds a [`CosignVerificationKey`] from PEM-encoded public key data. This function will
@@ -243,7 +243,7 @@ impl CosignVerificationKey {
     /// * `Ed25519 public key`: `Ed25519`
     pub fn try_from_pem(pem_data: &[u8]) -> Result<Self> {
         let key_pem = pem::parse(pem_data)?;
-        Self::try_from_der(key_pem.contents.as_slice())
+        Self::try_from_der(key_pem.contents())
     }
 
     /// Builds a `CosignVerificationKey` from [`SigStoreSigner`]. The methods will derive
@@ -451,7 +451,7 @@ DwIDAQAB
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(&pem.contents)?;
+        let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
 
         let cosign_verification_key =
@@ -478,7 +478,7 @@ DwIDAQAB
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(&pem.contents)?;
+        let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
 
         let cosign_verification_key =
@@ -505,7 +505,7 @@ DwIDAQAB
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(&pem.contents)?;
+        let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
 
         let cosign_verification_key =
@@ -532,7 +532,7 @@ DwIDAQAB
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(&pem.contents)?;
+        let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
 
         let cosign_verification_key =
@@ -560,7 +560,7 @@ DwIDAQAB
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
         let issued_cert_pem = issued_cert.cert.to_pem()?;
         let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(&pem.contents)?;
+        let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
 
         let err = CosignVerificationKey::try_from(&spki);
