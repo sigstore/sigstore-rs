@@ -16,11 +16,11 @@
 use const_oid::ObjectIdentifier;
 use digest::Digest;
 use oci_distribution::client::ImageLayer;
-use pkcs8::der::Decode;
 use serde::Serialize;
 use std::convert::TryFrom;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, info, warn};
+use x509_cert::der::DecodePem;
 use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::Certificate;
@@ -433,9 +433,8 @@ impl CertificateSignature {
         fulcio_cert_pool: &CertificatePool,
         trusted_bundle: &Bundle,
     ) -> Result<Self> {
-        let pem = pem::parse(cert_raw)?;
-        let cert = Certificate::from_der(&pem.contents)
-            .map_err(|e| SigstoreError::X509Error(format!("parse from der: {e}")))?;
+        let cert = Certificate::from_pem(&cert_raw)
+            .map_err(|e| SigstoreError::X509Error(format!("parse from pem: {e}")))?;
         let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
@@ -445,7 +444,12 @@ impl CertificateSignature {
 
         let subject = CertificateSubject::from_certificate(&cert)?;
         let verification_key =
-            CosignVerificationKey::try_from(&cert.tbs_certificate.subject_public_key_info)?;
+            CosignVerificationKey::try_from(&cert.tbs_certificate.subject_public_key_info)
+                .map_err(|e| {
+                    SigstoreError::X509Error(format!(
+                        "cannot extract public key from certificate: {e}"
+                    ))
+                })?;
 
         let issuer = get_cert_extension_by_oid(&cert, SIGSTORE_ISSUER_OID, "Issuer")?;
 
@@ -506,7 +510,7 @@ fn get_cert_extension_by_oid(
         .iter()
         .find(|ext| ext.extn_id == ext_oid)
         .map(|ext| {
-            String::from_utf8(ext.extn_value.to_vec()).map_err(|_| {
+            String::from_utf8(ext.extn_value.clone().into_bytes()).map_err(|_| {
                 SigstoreError::X509Error(format!(
                     "Certificate's extension Sigstore {ext_oid_name} is not UTF8 compatible"
                 ))

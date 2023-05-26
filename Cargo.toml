@@ -73,20 +73,21 @@ cached = { version = "0.42.0", optional = true }
 cfg-if = "1.0.0"
 chrono = { version = "0.4.23" }
 const-oid = "0.9.1"
+# TODO: consume via x509-cert?
 der = "0.7.5"
 digest = { version = "0.10.3", default-features = false }
-ecdsa = { version = "0.15", features = ["pkcs8", "digest", "der"] }
+ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
 ed25519 = { version = "2.2.1", features = ["alloc"] }
 ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
-elliptic-curve = { version = "0.12.2", features = ["arithmetic", "pem"] }
+elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.9", default-features = false, optional = true }
 olpc-cjson = "0.1"
 openidconnect = { version = "2.3", default-features = false, features = [
   "reqwest",
 ], optional = true }
-p256 = "0.12"
-p384 = "0.12"
+p256 = "0.13.2"
+p384 = "0.13"
 webbrowser = "0.8.4"
 pem = "1.0.2"
 picky = { version = "7.0.0-rc.5", default-features = false, features = [
@@ -94,7 +95,7 @@ picky = { version = "7.0.0-rc.5", default-features = false, features = [
   "ec",
 ] }
 pkcs1 = { version = "0.7.5", features = ["std"] }
-pkcs8 = { version = "0.9.0", features = [
+pkcs8 = { version = "0.10.2", features = [
   "pem",
   "alloc",
   "pkcs5",
@@ -107,19 +108,20 @@ reqwest = { version = "0.11", default-features = false, features = [
   "json",
   "multipart",
 ], optional = true }
-rsa = "0.8.2"
+rsa = "0.9.2"
 scrypt = "0.11.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = { version = "2.0" }
+# TODO: consume via x509-cert?
 spki = { version = "0.7.2", features = ["pem", "std"] }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
 tough = { version = "0.13", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
-x509-cert = { version = "0.1.1", features = ["pem", "std"] }
+x509-cert = { version = "0.2.2", features = ["pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
 

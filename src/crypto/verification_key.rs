@@ -15,12 +15,13 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
+use der::referenced::OwnedToRef;
 use ed25519::pkcs8::DecodePublicKey as ED25519DecodePublicKey;
-use pkcs8::{DecodePublicKey, SubjectPublicKeyInfo};
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
 use signature::{DigestVerifier, Verifier};
 use std::convert::TryFrom;
+use x509_cert::spki::SubjectPublicKeyInfoOwned;
 
 use super::{
     signing_key::{KeyPair, SigStoreSigner},
@@ -66,42 +67,45 @@ pub enum CosignVerificationKey {
 ///   * ECDSA P-256: assumes the SHA-256 digest algorithm is used
 ///   * ECDSA P-384: assumes the SHA-384 digest algorithm is used
 ///   * RSA: assumes PKCS1 padding is used
-impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
+impl TryFrom<&SubjectPublicKeyInfoOwned> for CosignVerificationKey {
     type Error = SigstoreError;
 
-    fn try_from(subject_pub_key_info: &SubjectPublicKeyInfo<'a>) -> Result<Self> {
+    fn try_from(subject_pub_key_info: &SubjectPublicKeyInfoOwned) -> Result<Self> {
         let algorithm = subject_pub_key_info.algorithm.oid;
-        let public_key_der = subject_pub_key_info.subject_public_key;
+        let public_key_der = &subject_pub_key_info.subject_public_key;
         match algorithm {
-            ID_EC_PUBLIC_KEY => match public_key_der.len() {
-                65 => Ok(CosignVerificationKey::ECDSA_P256_SHA256_ASN1(
-                    ecdsa::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)
-                        .map_err(|e| {
-                            SigstoreError::PKCS8SpkiError(format!(
-                                "Ecdsa-P256 from der bytes to public key failed: {e}"
-                            ))
-                        })?,
-                )),
-                97 => Ok(CosignVerificationKey::ECDSA_P384_SHA384_ASN1(
-                    ecdsa::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)
-                        .map_err(|e| {
-                            SigstoreError::PKCS8SpkiError(format!(
-                                "Ecdsa-P384 from der bytes to public key failed: {e}"
-                            ))
-                        })?,
-                )),
-                _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
-                    "EC with size {} is not supported",
-                    // asn.1 encode caused different length
-                    (public_key_der.len() - 1) * 4
-                ))),
-            },
+            ID_EC_PUBLIC_KEY => {
+                match public_key_der.raw_bytes().len() {
+                    65 => Ok(CosignVerificationKey::ECDSA_P256_SHA256_ASN1(
+                        ecdsa::VerifyingKey::try_from(subject_pub_key_info.owned_to_ref())
+                            .map_err(|e| {
+                                SigstoreError::PKCS8SpkiError(format!(
+                                    "Ecdsa-P256 from der bytes to public key failed: {e}"
+                                ))
+                            })?,
+                    )),
+                    97 => Ok(CosignVerificationKey::ECDSA_P384_SHA384_ASN1(
+                        ecdsa::VerifyingKey::try_from(subject_pub_key_info.owned_to_ref())
+                            .map_err(|e| {
+                                SigstoreError::PKCS8SpkiError(format!(
+                                    "Ecdsa-P384 from der bytes to public key failed: {e}"
+                                ))
+                            })?,
+                    )),
+                    _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
+                        "EC with size {} is not supported",
+                        // asn.1 encode caused different length
+                        (public_key_der.raw_bytes().len() - 1) * 4
+                    ))),
+                }
+            }
             RSA_ENCRYPTION => {
-                let pubkey = rsa::RsaPublicKey::try_from(*subject_pub_key_info).map_err(|e| {
-                    SigstoreError::PKCS8SpkiError(format!(
-                        "RSA from der bytes to public key failed: {e}"
-                    ))
-                })?;
+                let pubkey = rsa::RsaPublicKey::try_from(subject_pub_key_info.owned_to_ref())
+                    .map_err(|e| {
+                        SigstoreError::PKCS8SpkiError(format!(
+                            "RSA from der bytes to public key failed: {e}"
+                        ))
+                    })?;
                 Ok(CosignVerificationKey::RSA_PKCS1_SHA256(
                     pkcs1v15::VerifyingKey::<sha2::Sha256>::from(pubkey),
                 ))
@@ -109,7 +113,7 @@ impl<'a> TryFrom<&SubjectPublicKeyInfo<'a>> for CosignVerificationKey {
             //
             #[cfg(feature = "cosign")]
             ED25519 => Ok(CosignVerificationKey::ED25519(
-                ed25519_dalek::VerifyingKey::try_from(subject_pub_key_info.subject_public_key)?,
+                ed25519_dalek::VerifyingKey::try_from(subject_pub_key_info.owned_to_ref())?,
             )),
             _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
                 "Key with algorithm OID {} is not supported",
@@ -152,7 +156,7 @@ impl CosignVerificationKey {
                 ))
             }
             SigningScheme::RSA_PKCS1_SHA256(_) => {
-                CosignVerificationKey::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new_with_prefix(
+                CosignVerificationKey::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
                             "read rsa public key from der failed: {e}"
@@ -161,7 +165,7 @@ impl CosignVerificationKey {
                 ))
             }
             SigningScheme::RSA_PKCS1_SHA384(_) => {
-                CosignVerificationKey::RSA_PKCS1_SHA384(pkcs1v15::VerifyingKey::new_with_prefix(
+                CosignVerificationKey::RSA_PKCS1_SHA384(pkcs1v15::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
                             "read rsa public key from der failed: {e}"
@@ -170,7 +174,7 @@ impl CosignVerificationKey {
                 ))
             }
             SigningScheme::RSA_PKCS1_SHA512(_) => {
-                CosignVerificationKey::RSA_PKCS1_SHA512(pkcs1v15::VerifyingKey::new_with_prefix(
+                CosignVerificationKey::RSA_PKCS1_SHA512(pkcs1v15::VerifyingKey::new(
                     rsa::RsaPublicKey::from_public_key_der(der_data).map_err(|e| {
                         SigstoreError::PKCS8SpkiError(format!(
                             "read rsa public key from der failed: {e}"
@@ -216,9 +220,7 @@ impl CosignVerificationKey {
                 ed25519bytes.as_ref(),
             )?))
         } else if let Ok(rsapk) = rsa::RsaPublicKey::from_public_key_der(der_data) {
-            Ok(Self::RSA_PKCS1_SHA256(
-                pkcs1v15::VerifyingKey::new_with_prefix(rsapk),
-            ))
+            Ok(Self::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(rsapk)))
         } else {
             Err(SigstoreError::InvalidKeyFormat {
                 error: "Failed to parse the public key.".to_string(),
