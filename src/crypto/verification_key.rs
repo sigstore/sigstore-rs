@@ -15,13 +15,12 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
-use der::referenced::OwnedToRef;
 use ed25519::pkcs8::DecodePublicKey as ED25519DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
 use signature::{DigestVerifier, Verifier};
 use std::convert::TryFrom;
-use x509_cert::spki::SubjectPublicKeyInfoOwned;
+use x509_cert::{der::referenced::OwnedToRef, spki::SubjectPublicKeyInfoOwned};
 
 use super::{
     signing_key::{KeyPair, SigStoreSigner},
