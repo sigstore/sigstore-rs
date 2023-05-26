@@ -429,16 +429,16 @@ impl CertificateSignature {
     /// Ensures the given certificate can be trusted, then extracts
     /// its details and returns them as a `CertificateSignature` object
     pub(crate) fn from_certificate(
-        cert_raw: &[u8],
+        cert_pem: &[u8],
         fulcio_cert_pool: &CertificatePool,
         trusted_bundle: &Bundle,
     ) -> Result<Self> {
-        let cert = Certificate::from_pem(&cert_raw)
+        let cert = Certificate::from_pem(cert_pem)
             .map_err(|e| SigstoreError::X509Error(format!("parse from pem: {e}")))?;
         let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
-        fulcio_cert_pool.verify_pem_cert(cert_raw)?;
+        fulcio_cert_pool.verify_pem_cert(cert_pem)?;
 
         crypto::certificate::is_trusted(&cert, integrated_time)?;
 
