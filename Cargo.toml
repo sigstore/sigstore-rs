@@ -107,7 +107,7 @@ reqwest = { version = "0.11", default-features = false, features = [
   "json",
   "multipart",
 ], optional = true }
-rsa = "0.8.2"
+rsa = "0.9.2"
 scrypt = "0.11.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
