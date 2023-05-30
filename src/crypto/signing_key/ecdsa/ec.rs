@@ -73,7 +73,10 @@ use digest::{
     },
     Digest, FixedOutput, FixedOutputReset,
 };
-use ecdsa::{hazmat::SignPrimitive, PrimeCurve, SignatureSize, SigningKey};
+use ecdsa::{
+    hazmat::{DigestPrimitive, SignPrimitive},
+    PrimeCurve, SignatureSize, SigningKey,
+};
 use elliptic_curve::{
     bigint::ArrayEncoding,
     generic_array::ArrayLength,
@@ -81,10 +84,9 @@ use elliptic_curve::{
     sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint},
     subtle::CtOption,
     zeroize::Zeroizing,
-    AffineArithmetic, AffinePoint, Curve, FieldSize, ProjectiveArithmetic, PublicKey, Scalar,
-    SecretKey,
+    AffinePoint, Curve, CurveArithmetic, FieldBytesSize, PublicKey, Scalar, SecretKey,
 };
-use pkcs8::{der::Encode, AssociatedOid, DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
+use pkcs8::{AssociatedOid, DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use signature::DigestSigner;
 
 use crate::{
@@ -110,7 +112,7 @@ use super::ECDSAKeys;
 #[derive(Clone, Debug)]
 pub struct EcdsaKeys<C>
 where
-    C: Curve + ProjectiveArithmetic + pkcs8::AssociatedOid,
+    C: Curve + CurveArithmetic + pkcs8::AssociatedOid,
 {
     ec_seckey: SecretKey<C>,
     public_key: PublicKey<C>,
@@ -118,9 +120,9 @@ where
 
 impl<C> EcdsaKeys<C>
 where
-    C: Curve + AssociatedOid + ProjectiveArithmetic + PrimeCurve,
+    C: Curve + AssociatedOid + CurveArithmetic + PrimeCurve,
     AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
-    FieldSize<C>: ModulusSize,
+    FieldBytesSize<C>: ModulusSize,
 {
     /// Create a new `EcdsaKeys` Object, the generic parameter indicates
     /// the elliptic curve. Please refer to
@@ -128,7 +130,7 @@ where
     /// The secret key (private key) will be randomly
     /// generated.
     pub fn new() -> Result<Self> {
-        let ec_seckey: SecretKey<C> = SecretKey::random(rand::rngs::OsRng);
+        let ec_seckey: SecretKey<C> = SecretKey::random(&mut rand::rngs::OsRng);
 
         let public_key = ec_seckey.public_key();
         Ok(EcdsaKeys {
@@ -142,9 +144,9 @@ where
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(private_key)?;
-        match &key.tag[..] {
+        match key.tag() {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
-                let der = kdf::decrypt(&key.contents, password)?;
+                let der = kdf::decrypt(key.contents(), password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
                     SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
@@ -207,9 +209,9 @@ where
 
 impl<C> KeyPair for EcdsaKeys<C>
 where
-    C: Curve + AssociatedOid + ProjectiveArithmetic + PrimeCurve,
+    C: Curve + AssociatedOid + CurveArithmetic + PrimeCurve,
     AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
-    FieldSize<C>: ModulusSize,
+    FieldBytesSize<C>: ModulusSize,
 {
     /// Return the public key in PEM-encoded SPKI format.
     fn public_key_to_pem(&self) -> Result<String> {
@@ -247,16 +249,11 @@ where
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<Zeroizing<String>> {
         let der = self.private_key_to_der()?;
         let pem = match password.len() {
-            0 => pem::Pem {
-                tag: PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: der
-                    .to_vec()
-                    .map_err(|e| SigstoreError::PKCS8DerError(e.to_string()))?,
-            },
-            _ => pem::Pem {
-                tag: SIGSTORE_PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: kdf::encrypt(&der, password)?,
-            },
+            0 => pem::Pem::new(PRIVATE_KEY_PEM_LABEL, der.to_vec()),
+            _ => pem::Pem::new(
+                SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+                kdf::encrypt(&der, password)?,
+            ),
         };
         let pem = pem::encode(&pem);
         Ok(zeroize::Zeroizing::new(pem))
@@ -285,11 +282,11 @@ where
 #[derive(Clone, Debug)]
 pub struct EcdsaSigner<C, D>
 where
-    C: PrimeCurve + ProjectiveArithmetic + AssociatedOid,
-    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::UInt> + SignPrimitive<C>,
-    C::UInt: for<'a> From<&'a Scalar<C>>,
+    C: PrimeCurve + CurveArithmetic + AssociatedOid,
+    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::Uint> + SignPrimitive<C>,
+    C::Uint: for<'a> From<&'a Scalar<C>>,
     SignatureSize<C>: ArrayLength<u8>,
-    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldSize<C>> + FixedOutputReset,
+    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldBytesSize<C>> + FixedOutputReset,
 {
     signing_key: SigningKey<C>,
     ecdsa_keys: EcdsaKeys<C>,
@@ -298,13 +295,13 @@ where
 
 impl<C, D> EcdsaSigner<C, D>
 where
-    C: PrimeCurve + ProjectiveArithmetic + AssociatedOid,
-    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::UInt> + SignPrimitive<C>,
+    C: PrimeCurve + CurveArithmetic + AssociatedOid,
+    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::Uint> + SignPrimitive<C>,
     AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
-    FieldSize<C>: ModulusSize,
-    C::UInt: for<'a> From<&'a Scalar<C>>,
+    FieldBytesSize<C>: ModulusSize,
+    C::Uint: for<'a> From<&'a Scalar<C>>,
     SignatureSize<C>: ArrayLength<u8>,
-    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldSize<C>> + FixedOutputReset,
+    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldBytesSize<C>> + FixedOutputReset,
 {
     /// Create a new `EcdsaSigner` from the given `EcdsaKeys` and `SignatureDigestAlgorithm`
     pub fn from_ecdsa_keys(ecdsa_keys: &EcdsaKeys<C>) -> Result<Self> {
@@ -332,20 +329,21 @@ where
 
 impl<C, D> Signer for EcdsaSigner<C, D>
 where
-    C: PrimeCurve + ProjectiveArithmetic + AssociatedOid,
-    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::UInt> + SignPrimitive<C>,
+    C: PrimeCurve + CurveArithmetic + AssociatedOid + DigestPrimitive,
+    Scalar<C>: Invert<Output = CtOption<Scalar<C>>> + Reduce<C::Uint> + SignPrimitive<C>,
     SigningKey<C>: ecdsa::signature::Signer<ecdsa::Signature<C>>,
-    C::UInt: for<'a> From<&'a Scalar<C>>,
-    <<<C as Curve>::UInt as ArrayEncoding>::ByteSize as Add>::Output:
+    C::Uint: for<'a> From<&'a Scalar<C>>,
+    <<C as Curve>::FieldBytesSize as Add>::Output:
         Add<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B1>>,
-    <<<<C as Curve>::UInt as ArrayEncoding>::ByteSize as Add>::Output as Add<
+    <<<C as Curve>::FieldBytesSize as Add>::Output as Add<
         UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B1>,
     >>::Output: ArrayLength<u8>,
     SignatureSize<C>: ArrayLength<u8>,
-    <<C as Curve>::UInt as ArrayEncoding>::ByteSize: ModulusSize,
-    <C as AffineArithmetic>::AffinePoint: ToEncodedPoint<C>,
-    <C as AffineArithmetic>::AffinePoint: FromEncodedPoint<C>,
-    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldSize<C>> + FixedOutputReset,
+    <<C as Curve>::Uint as ArrayEncoding>::ByteSize: ModulusSize,
+    <C as Curve>::FieldBytesSize: ModulusSize,
+    <C as CurveArithmetic>::AffinePoint: ToEncodedPoint<C>,
+    <C as CurveArithmetic>::AffinePoint: FromEncodedPoint<C>,
+    D: Digest + BlockSizeUser + FixedOutput<OutputSize = FieldBytesSize<C>> + FixedOutputReset,
 {
     /// Sign the given message, and generate a signature.
     /// The message will firstly be hashed with the given
@@ -356,9 +354,9 @@ where
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
         let mut hasher = D::new();
         digest::Digest::update(&mut hasher, msg);
-        let sig = self.signing_key.try_sign_digest(hasher)?.to_der();
+        let (sig, _recovery_id) = self.signing_key.try_sign_digest(hasher)?;
 
-        Ok(sig.as_bytes().to_vec())
+        Ok(sig.to_der().to_bytes().to_vec())
     }
 
     /// Return the ref to the keypair inside the signer

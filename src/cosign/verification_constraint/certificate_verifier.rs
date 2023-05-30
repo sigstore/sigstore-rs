@@ -35,7 +35,7 @@ impl CertificateVerifier {
         cert_chain: Option<&[crate::registry::Certificate]>,
     ) -> Result<Self> {
         let pem = pem::parse(cert_bytes)?;
-        Self::from_der(&pem.contents, require_rekor_bundle, cert_chain)
+        Self::from_der(pem.contents(), require_rekor_bundle, cert_chain)
     }
 
     /// Create a new instance of `CertificateVerifier` using the DER encoded

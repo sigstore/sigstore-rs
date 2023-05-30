@@ -90,9 +90,9 @@ impl RSAKeys {
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
     pub fn from_encrypted_pem(encrypted_pem: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(encrypted_pem)?;
-        match &key.tag[..] {
+        match key.tag() {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
-                let der = kdf::decrypt(&key.contents, password)?;
+                let der = kdf::decrypt(key.contents(), password)?;
                 let pkcs8 = pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
                     SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
                 })?;
@@ -183,19 +183,19 @@ impl RSAKeys {
             PaddingScheme::PKCS1v15 => match digest_algorithm {
                 DigestAlgorithm::Sha256 => {
                     SigStoreSigner::RSA_PKCS1_SHA256(RSASigner::RSA_PKCS1_SHA256(
-                        SigningKey::<sha2::Sha256>::new_with_prefix(private_key),
+                        SigningKey::<sha2::Sha256>::new(private_key),
                         self.clone(),
                     ))
                 }
                 DigestAlgorithm::Sha384 => {
                     SigStoreSigner::RSA_PKCS1_SHA384(RSASigner::RSA_PKCS1_SHA384(
-                        SigningKey::<sha2::Sha384>::new_with_prefix(private_key),
+                        SigningKey::<sha2::Sha384>::new(private_key),
                         self.clone(),
                     ))
                 }
                 DigestAlgorithm::Sha512 => {
                     SigStoreSigner::RSA_PKCS1_SHA512(RSASigner::RSA_PKCS1_SHA512(
-                        SigningKey::<sha2::Sha512>::new_with_prefix(private_key),
+                        SigningKey::<sha2::Sha512>::new(private_key),
                         self.clone(),
                     ))
                 }
@@ -234,14 +234,11 @@ impl KeyPair for RSAKeys {
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<zeroize::Zeroizing<String>> {
         let der = self.private_key_to_der()?;
         let pem = match password.len() {
-            0 => pem::Pem {
-                tag: PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: der.to_vec(),
-            },
-            _ => pem::Pem {
-                tag: SIGSTORE_PRIVATE_KEY_PEM_LABEL.to_string(),
-                contents: kdf::encrypt(&der, password)?,
-            },
+            0 => pem::Pem::new(PRIVATE_KEY_PEM_LABEL, der.to_vec()),
+            _ => pem::Pem::new(
+                SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+                kdf::encrypt(&der, password)?,
+            ),
         };
         let pem = pem::encode(&pem);
         Ok(zeroize::Zeroizing::new(pem))
