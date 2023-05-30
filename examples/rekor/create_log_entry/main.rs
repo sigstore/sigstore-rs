@@ -46,7 +46,7 @@ async fn main() {
     /*
 
     Creates an entry in the transparency log. If no command line arguments is provided,
-    the pram will generate a key pair, download the file available at URL constant, sign it
+    the program will generate a key pair, download the file available at URL constant, sign it
     and create an entry in the transparency log. In the other hand, if the user sets the
     command line flags, the program will use that info to create the entry. Therefore,
     if the user use information of an entry already present in the transparency log, this
@@ -84,7 +84,7 @@ async fn main() {
     )
 
     This is because an equivalent entry with the provided meta data already exists in the transparency log.
-    When you use the example code to create a new entry with fresh set of input values or levaing the program
+    When you use the example code to create a new entry with fresh set of input values or leaving the program
     to generate the required data, you should be able to run the code without any errors. See an example:
 
     Example command :
