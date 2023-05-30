@@ -1,3 +1,80 @@
+# v0.7.0
+
+## What's Changed
+* Fix typo in SignatureLayer::new doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/170
+* feat: replace example dependency docker_credential by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/172
+* Clean up readme by @lukehinds in https://github.com/sigstore/sigstore-rs/pull/173
+* chore(deps): Update rstest requirement from 0.15.0 to 0.16.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/174
+* Fix typo in simple_signing.rs by @danbev in https://github.com/sigstore/sigstore-rs/pull/175
+* Introduce SignedArtifactBundle by @danbev in https://github.com/sigstore/sigstore-rs/pull/171
+* chore(deps): Update base64 requirement from 0.13.0 to 0.20.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/177
+* chore(deps): Bump actions/checkout from 3.1.0 to 3.2.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/180
+* chore(deps): Update serial_test requirement from 0.9.0 to 0.10.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/182
+* chore(deps): Update cached requirement from 0.40.0 to 0.41.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/181
+* Fix typo in SecretBoxCipher doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/179
+* chore(deps): Update cached requirement from 0.41.0 to 0.42.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/185
+* chore(deps): Bump actions/checkout from 3.2.0 to 3.3.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/183
+* chore(deps): Update base64 requirement from 0.20.0 to 0.21.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/184
+* Add cosign verify-bundle example by @danbev in https://github.com/sigstore/sigstore-rs/pull/186
+* Fix incorrect base64_signature doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/188
+* Fix typos in tuf/mod.rs by @danbev in https://github.com/sigstore/sigstore-rs/pull/195
+* chore(deps): Update serial_test requirement from 0.10.0 to 1.0.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/200
+* fix: show actual response status field by @ctron in https://github.com/sigstore/sigstore-rs/pull/197
+* Update target -> target_name for consistency by @danbev in https://github.com/sigstore/sigstore-rs/pull/196
+* fix: make the fields accessible by @ctron in https://github.com/sigstore/sigstore-rs/pull/202
+* Add verify-bundle example to README.md by @danbev in https://github.com/sigstore/sigstore-rs/pull/203
+* fix: make fields of hash accessible by @ctron in https://github.com/sigstore/sigstore-rs/pull/205
+* Improve public key output and add file output by @Gronner in https://github.com/sigstore/sigstore-rs/pull/194
+* Add TokenProvider::Static doc comment by @danbev in https://github.com/sigstore/sigstore-rs/pull/208
+* Changed the type of LogEntry.body from String to Body by @Neccolini in https://github.com/sigstore/sigstore-rs/pull/207
+* Fix errors/warnings reported by clippy by @danbev in https://github.com/sigstore/sigstore-rs/pull/210
+* Add fine-grained features to control the compilation by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/189
+* fix: bring tuf feature out of rekor and add related docs by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/211
+* chore: update crypto deps by @flavio in https://github.com/sigstore/sigstore-rs/pull/204
+* Replace `x509-parser` with `x509-cert` by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/212
+* Fix: Wrong parameter order inside documentation example. by @vembacher in https://github.com/sigstore/sigstore-rs/pull/215
+* Remove lines about timestamp in lib.rs by @naveensrinivasan in https://github.com/sigstore/sigstore-rs/pull/213
+* Fix ed25519 version conflict by @vembacher in https://github.com/sigstore/sigstore-rs/pull/223
+* Support compiling to wasm32 architectures by @lulf in https://github.com/sigstore/sigstore-rs/pull/221
+* Fix link to contributor doc in readme by @oliviacrain in https://github.com/sigstore/sigstore-rs/pull/225
+* refactor: derive `Clone` trait by @flavio in https://gitub.com/sigstore/sigstore-rs/pull/227
+* fix: correct typo in verify/main.rs by @danbev in https://github.com/sigstore/sigstore-rs/pull/228
+* chore(deps): Update tough requirement from 0.12 to 0.13 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/237
+* chore(deps): Bump actions/checkout from 3.3.0 to 3.4.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/240
+* dep: update picky version to git rid of `ring` by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/226
+* chore(deps): Bump actions/checkout from 3.4.0 to 3.5.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/245
+* fix: make LogEntry Body an enum by @danbev in https://github.com/sigstore/sigstore-rs/pull/244
+* Add verify-blob example by @danbev in https://github.com/sigstore/sigstore-rs/pull/239
+* Introduce Newtype `OciReference` into API for OCI image references. by @vembacher in https://github.com/sigstore/sigstore-rs/pull/216
+* Swap over to using CDN to fetch TUF metadata by @haydentherapper in https://github.com/sigstore/sigstore-rs/pull/251
+* chore(deps): Bump actions/checkout from 3.5.0 to 3.5.2 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/252
+* upgrade 'der' to 0.7.5 by @dmitris in https://github.com/sigstore/sigstore-rs/pull/257
+* remove unused 'clock' feature for chrono by @dmitris in https://github.com/sigstore/sigstore-rs/pull/258
+* update pkcs1 from 0.4.0 to 0.7.5 by @dmitris in https://github.com/sigstore/sigstore-rs/pull/260
+* use 2021 Rust edition by @dmitris in https://github.com/sigstore/sigstore-rs/pull/261
+* chore(deps): Update serial_test requirement from 1.0.0 to 2.0.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/264
+* update scrypt to 0.11.0, adapt for API change (fix #231) by @dmitris in https://github.com/sigstore/sigstore-rs/pull/268
+* upgrade ed25519-dalek to 2.0.0-rc.2 by @dmitris in https://github.com/sigstore/sigstore-rs/pull/263
+* chore(deps): Update openidconnect requirement from 2.3 to 3.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/265
+* chore(deps): Update rstest requirement from 0.16.0 to 0.17.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/271
+* Update crypto deps by @flavio in https://github.com/sigstore/sigstore-rs/pull/269
+* Update create_log_entry example to create key pair. by @jvanz in https://github.com/sigstore/sigstore-rs/pull/206
+
+## New Contributors
+* @ctron made their first contribution in https://github.com/sigstore/sigstore-rs/pull/197
+* @Gronner made their first contribution in https://github.com/sigstore/sigstore-rs/pull/194
+* @Neccolini made their first contribution in https://github.com/sigstore/sigstore-rs/pull/207
+* @vembacher made their first contribution in https://github.com/sigstore/sigstore-rs/pull/215
+* @naveensrinivasan made their first contribution in https://github.com/sigstore/sigstore-rs/pull/213
+* @lulf made their first contribution in https://github.com/sigstore/sigstore-rs/pull/221
+* @oliviacrain made their first contribution in https://github.com/sigstore/sigstore-rs/pull/225
+* @haydentherapper made their first contribution in https://github.com/sigstore/sigstore-rs/pull/251
+* @dmitris made their first contribution in https://github.com/sigstore/sigstore-rs/pull/257
+* @jvanz made their first contribution in https://github.com/sigstore/sigstore-rs/pull/206
+
+**Full Changelog**: https://github.com/sigstore/sigstore-rs/compare/v0.6.0...v0.7.0h
+
+
 # v0.6.0
 
 ## Fixes
