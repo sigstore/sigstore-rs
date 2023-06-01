@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::ClientCapabilities;
+use super::{ClientCapabilities, ClientCapabilitiesDeps};
 use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
@@ -27,7 +27,10 @@ pub(crate) struct OciClient {
     pub registry_client: oci_distribution::Client,
 }
 
-#[async_trait(?Send)]
+impl ClientCapabilitiesDeps for OciClient {}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ClientCapabilities for OciClient {
     async fn fetch_manifest_digest(
         &mut self,

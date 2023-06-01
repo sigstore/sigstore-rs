@@ -35,9 +35,30 @@ use crate::errors::Result;
 
 use async_trait::async_trait;
 
-#[async_trait(?Send)]
+/// Workaround to ensure the `Send + Sync` supertraits are
+/// required by ClientCapabilities only when the target
+/// architecture is NOT wasm32.
+///
+/// This intermediate trait has been created to avoid
+/// to define ClientCapabilities twice (one with `#[cfg(target_arch = "wasm32")]`,
+/// the other with `#[cfg(not(target_arch = "wasm32"))]`
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) trait ClientCapabilitiesDeps: Send + Sync {}
+
+/// Workaround to ensure the `Send + Sync` supertraits are
+/// required by ClientCapabilities only when the target
+/// architecture is NOT wasm32.
+///
+/// This intermediate trait has been created to avoid
+/// to define ClientCapabilities twice (one with `#[cfg(target_arch = "wasm32")]`,
+/// the other with `#[cfg(not(target_arch = "wasm32"))]`
+#[cfg(target_arch = "wasm32")]
+pub(crate) trait ClientCapabilitiesDeps {}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 /// Capabilities that are expected to be provided by a registry client
-pub(crate) trait ClientCapabilities {
+pub(crate) trait ClientCapabilities: ClientCapabilitiesDeps {
     async fn fetch_manifest_digest(
         &mut self,
         image: &oci_distribution::Reference,

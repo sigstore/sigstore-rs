@@ -33,7 +33,10 @@ pub(crate) mod test {
         pub push_response: Option<anyhow::Result<PushResponse>>,
     }
 
-    #[async_trait(?Send)]
+    impl crate::registry::ClientCapabilitiesDeps for MockOciClient {}
+
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
     impl crate::registry::ClientCapabilities for MockOciClient {
         async fn fetch_manifest_digest(
             &mut self,

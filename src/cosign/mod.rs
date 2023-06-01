@@ -71,7 +71,9 @@ use crate::registry::oci_reference::OciReference;
 pub use payload::simple_signing;
 
 pub mod constraint;
-#[async_trait(?Send)]
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 /// Cosign Abilities that have to be implemented by a
 /// Cosign client
 pub trait CosignCapabilities {
