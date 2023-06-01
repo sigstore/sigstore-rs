@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::ClientCapabilities;
+use super::{ClientCapabilities, ClientCapabilitiesDeps};
 use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
@@ -240,7 +240,10 @@ async fn pull_manifest_cached(
         .map(cached::Return::new)
 }
 
-#[async_trait(?Send)]
+impl ClientCapabilitiesDeps for OciCachingClient {}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ClientCapabilities for OciCachingClient {
     async fn fetch_manifest_digest(
         &mut self,
