@@ -1,3 +1,10 @@
+# v0.7.1
+
+## What's Changed
+* fix: ensure cosign client can be sent between threads by @flavio in https://github.com/sigstore/sigstore-rs/pull/275
+
+**Full Changelog**: https://github.com/sigstore/sigstore-rs/compare/v0.7.0...v0.7.1
+
 # v0.7.0
 
 ## What's Changed
