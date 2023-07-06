@@ -1,3 +1,12 @@
+# v0.7.2
+
+## What's Changed
+* chore(deps): Update cached requirement from 0.42.0 to 0.44.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/277
+* chore(deps): Bump actions/checkout from 3.5.2 to 3.5.3 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/278
+* chore(deps): update picky dependency by @flavio in https://github.com/sigstore/sigstore-rs/pull/279
+
+**Full Changelog**: https://github.com/sigstore/sigstore-rs/compare/v0.7.1...v0.7.2
+
 # v0.7.1
 
 ## What's Changed
