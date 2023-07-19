@@ -17,6 +17,10 @@ use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 
+use crate::crypto::CosignVerificationKey;
+use crate::errors::SigstoreError::UnexpectedError;
+use crate::rekor::models::InclusionProof;
+use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Error, Value};
 use std::collections::HashMap;
@@ -50,7 +54,7 @@ impl FromStr for LogEntry {
                 decode_body(body.as_str().expect("Failed to parse Body"))
                     .expect("Failed to decode Body"),
             )
-            .expect("Serialization failed");
+                .expect("Serialization failed");
             *body = json!(decoded_body);
         });
         let log_entry_str = serde_json::to_string(&log_entry_map)?;
@@ -100,6 +104,25 @@ pub struct Verification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inclusion_proof: Option<InclusionProof>,
     pub signed_entry_timestamp: String,
+}
+
+impl LogEntry {
+    pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+        self.verification
+            .inclusion_proof
+            .as_ref()
+            .ok_or(UnexpectedError("missing inclusion proof".to_string()))
+            .and_then(|proof| {
+                // encode as canonical JSON
+                let mut encoded_entry = Vec::new();
+                let mut ser = serde_json::Serializer::with_formatter(
+                    &mut encoded_entry,
+                    CanonicalFormatter::new(),
+                );
+                self.serialize(&mut ser)?;
+                proof.verify(&encoded_entry, rekor_key)
+            })
+    }
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
