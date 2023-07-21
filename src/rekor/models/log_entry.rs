@@ -119,7 +119,7 @@ impl LogEntry {
                     &mut encoded_entry,
                     CanonicalFormatter::new(),
                 );
-                self.serialize(&mut ser)?;
+                self.body.serialize(&mut ser)?;
                 proof.verify(&encoded_entry, rekor_key)
             })
     }

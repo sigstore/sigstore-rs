@@ -1,8 +1,11 @@
+use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
 use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::SigstoreError;
+use crate::errors::SigstoreError::{ConsistencyProofError, UnexpectedError};
 use crate::rekor::models::checkpoint::ParseCheckpointError::*;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use digest::Output;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -152,6 +155,35 @@ impl SignedCheckpoint {
             Signature::Raw(&self.signature.raw),
             self.note.marshal().as_bytes(),
         )
+    }
+
+    /// Checks if the checkpoint and inclusion proof are valid together.
+    pub(crate) fn valid_consistency_proof(
+        &self,
+        proof_root_hash: &Output<Rfc6269Default>,
+        proof_tree_size: u64,
+    ) -> Result<(), SigstoreError> {
+        // Delegate implementation as trivial consistency proof.
+        Rfc6269Default::verify_consistency(
+            self.note.size as usize,
+            proof_tree_size as usize,
+            &[],
+            &self.note.hash.into(),
+            proof_root_hash,
+        )
+        .map_err(ConsistencyProofError)
+    }
+
+    /// Verifies that the checkpoint can be used for an inclusion proof with this root hash.
+    pub(crate) fn valid_inclusion_proof(
+        &self,
+        proof_root_hash: &Output<Rfc6269Default>,
+    ) -> Result<(), SigstoreError> {
+        Rfc6269Default::verify_match(proof_root_hash, &self.note.hash.into()).map_err(|_| {
+            UnexpectedError(
+                "consistency proof root hash does not match checkpoint root hash".to_string(),
+            )
+        })
     }
 }
 
