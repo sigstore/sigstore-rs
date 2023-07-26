@@ -80,7 +80,7 @@ impl InclusionProof {
         let root_hash = hex_to_hash_output(&self.root_hash)?;
 
         // check if the inclusion and checkpoint match
-        checkpoint.valid_inclusion_proof(&root_hash)?;
+        checkpoint.is_valid_for_proof(&root_hash, self.tree_size as u64)?;
 
         Rfc6269Default::verify_inclusion(
             self.log_index as usize,

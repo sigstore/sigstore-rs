@@ -59,10 +59,8 @@ impl LogInfo {
         // verify checkpoint is signed by log
         self.signed_tree_head.verify_signature(rekor_key)?;
 
-        self.signed_tree_head.valid_consistency_proof(
-            &hex_to_hash_output(&self.root_hash)?,
-            self.tree_size as u64,
-        )?;
+        self.signed_tree_head
+            .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size as u64)?;
         consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
         Ok(())
     }
