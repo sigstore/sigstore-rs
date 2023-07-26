@@ -71,7 +71,7 @@ async-trait = "0.1.52"
 base64 = "0.21.0"
 cached = { version = "0.44.0", optional = true }
 cfg-if = "1.0.0"
-chrono = { version = "0.4.23" }
+chrono = { version = "0.4.23", default-features = false }
 const-oid = "0.9.1"
 digest = { version = "0.10.3", default-features = false }
 ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
