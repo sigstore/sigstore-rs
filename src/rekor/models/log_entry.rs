@@ -107,6 +107,37 @@ pub struct Verification {
 }
 
 impl LogEntry {
+    /// Verifies that the log entry was included by a log in possession of `rekor_key`.
+    ///
+    /// Example:
+    /// ```rust
+    /// use sigstore::rekor::apis::configuration::Configuration;
+    /// use sigstore::rekor::apis::pubkey_api::get_public_key;
+    /// use sigstore::rekor::apis::tlog_api::get_log_info;
+    /// use sigstore::crypto::{CosignVerificationKey, SigningScheme};
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     use sigstore::rekor::apis::entries_api::get_log_entry_by_index;
+    ///     let rekor_config = Configuration::default();
+    ///     // Important: in practice obtain the rekor key via TUF repo or another secure channel!
+    ///     let rekor_key = get_public_key(&rekor_config, None)
+    ///         .await
+    ///         .expect("failed to fetch pubkey from remote log");
+    ///     let rekor_key =  CosignVerificationKey::from_pem(
+    ///         rekor_key.as_bytes(),
+    ///         &SigningScheme::ECDSA_P256_SHA256_ASN1,
+    ///     ).expect("failed to parse rekor key");
+    ///
+    ///     // fetch log info and then the most recent entry
+    ///     let log_info = get_log_info(&rekor_config)
+    ///         .await
+    ///         .expect("failed to fetch log info");
+    ///     let entry = get_log_entry_by_index(&rekor_config, (log_info.tree_size - 1) as i32)
+    ///         .await.expect("failed to fetch log entry");
+    ///     entry.verify_inclusion(&rekor_key)
+    ///         .expect("failed to verify inclusion");
+    /// }
+    /// ```
     pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
         self.verification
             .inclusion_proof

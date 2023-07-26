@@ -48,7 +48,49 @@ impl LogInfo {
             inactive_shards: None,
         }
     }
-
+    /// Verify the consistency of the proof provided by the log.
+    ///
+    /// Example:
+    /// ```rust
+    /// use sigstore::crypto::{CosignVerificationKey, SigningScheme};
+    /// use sigstore::rekor::apis::configuration::Configuration;
+    /// use sigstore::rekor::apis::pubkey_api::get_public_key;
+    /// use sigstore::rekor::apis::tlog_api::{get_log_info, get_log_proof};
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let rekor_config = Configuration::default();
+    ///
+    ///     // Important: in practice obtain the rekor key via TUF repo or another secure channel!
+    ///     let rekor_key = get_public_key(&rekor_config, None)
+    ///         .await
+    ///         .expect("failed to fetch pubkey from remote log");
+    ///     let rekor_key =  CosignVerificationKey::from_pem(
+    ///         rekor_key.as_bytes(),
+    ///         &SigningScheme::ECDSA_P256_SHA256_ASN1,
+    ///     ).expect("failed to parse rekor key");
+    ///     // fetch log info twice and run consistency proof
+    ///     let log_info1 = get_log_info(&rekor_config)
+    ///         .await
+    ///         .expect("failed to fetch data from remote");
+    ///     let log_info2 = get_log_info(&rekor_config)
+    ///         .await
+    ///         .expect("failed to fetch data from remote");
+    ///
+    ///      // get a proof using log_info1 as the previous tree state
+    ///      let proof = get_log_proof(
+    ///         &rekor_config,
+    ///         log_info2.tree_size as _,
+    ///         Some(&log_info1.tree_size.to_string()),
+    ///         None,
+    ///     )
+    ///     .await.expect("failed to fetch data from remote");
+    ///      log_info2
+    ///         .verify_consistency(log_info1.tree_size as usize, &log_info1.root_hash, &proof, &rekor_key)
+    ///         .expect("failed to verify log consistency");
+    /// }
+    ///
+    /// ```
     pub fn verify_consistency(
         &self,
         old_size: usize,

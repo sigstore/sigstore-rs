@@ -28,6 +28,7 @@ impl ConsistencyProof {
         ConsistencyProof { root_hash, hashes }
     }
 
+    /// Verify this consistency proof against the given parameters.
     pub fn verify(
         &self,
         old_size: usize,
