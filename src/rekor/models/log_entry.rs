@@ -19,7 +19,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _
 
 use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError::UnexpectedError;
-use crate::rekor::models::InclusionProof;
+use crate::rekor::models::checkpoint::Checkpoint;
+use crate::rekor::models::InclusionProof as InclusionProof2;
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Error, Value};
@@ -54,7 +55,7 @@ impl FromStr for LogEntry {
                 decode_body(body.as_str().expect("Failed to parse Body"))
                     .expect("Failed to decode Body"),
             )
-                .expect("Serialization failed");
+            .expect("Serialization failed");
             *body = json!(decoded_body);
         });
         let log_entry_str = serde_json::to_string(&log_entry_map)?;
@@ -143,6 +144,19 @@ impl LogEntry {
             .inclusion_proof
             .as_ref()
             .ok_or(UnexpectedError("missing inclusion proof".to_string()))
+            .and_then(|proof| {
+                Checkpoint::from_str(&proof.checkpoint)
+                    .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
+                    .map(|checkpoint| {
+                        InclusionProof2::new(
+                            proof.log_index,
+                            proof.root_hash.clone(),
+                            proof.tree_size,
+                            proof.hashes.clone(),
+                            Some(checkpoint),
+                        )
+                    })
+            })
             .and_then(|proof| {
                 // encode as canonical JSON
                 let mut encoded_entry = Vec::new();

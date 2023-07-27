@@ -11,7 +11,7 @@
 use crate::crypto::merkle::hex_to_hash_output;
 use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError;
-use crate::rekor::models::checkpoint::SignedCheckpoint;
+use crate::rekor::models::checkpoint::Checkpoint;
 use crate::rekor::models::ConsistencyProof;
 use crate::rekor::TreeSize;
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ pub struct LogInfo {
     pub tree_size: TreeSize,
     /// The current signed tree head
     #[serde(rename = "signedTreeHead")]
-    pub signed_tree_head: SignedCheckpoint,
+    pub signed_tree_head: Checkpoint,
     /// The current treeID
     #[serde(rename = "treeID")]
     pub tree_id: Option<String>,
@@ -35,11 +35,7 @@ pub struct LogInfo {
 }
 
 impl LogInfo {
-    pub fn new(
-        root_hash: String,
-        tree_size: TreeSize,
-        signed_tree_head: SignedCheckpoint,
-    ) -> LogInfo {
+    pub fn new(root_hash: String, tree_size: TreeSize, signed_tree_head: Checkpoint) -> LogInfo {
         LogInfo {
             root_hash,
             tree_size,

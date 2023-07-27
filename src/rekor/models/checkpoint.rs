@@ -15,7 +15,7 @@ use std::str::FromStr;
 /// The `note` field stores this data,
 /// and its authenticity can be verified with the data in `signature`.
 #[derive(Debug, PartialEq, Clone, Eq)]
-pub struct SignedCheckpoint {
+pub struct Checkpoint {
     pub note: CheckpointNote,
     pub signature: CheckpointSignature,
 }
@@ -67,7 +67,7 @@ pub enum ParseCheckpointError {
     DecodeError(String),
 }
 
-impl FromStr for SignedCheckpoint {
+impl FromStr for Checkpoint {
     type Err = ParseCheckpointError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -82,7 +82,7 @@ impl FromStr for SignedCheckpoint {
         let signature = signature.parse()?;
         let note = CheckpointNote::unmarshal(note)?;
 
-        Ok(SignedCheckpoint { note, signature })
+        Ok(Checkpoint { note, signature })
     }
 }
 
@@ -139,7 +139,7 @@ impl CheckpointNote {
     }
 }
 
-impl ToString for SignedCheckpoint {
+impl ToString for Checkpoint {
     fn to_string(&self) -> String {
         let note = self.note.marshal();
         let signature = self.signature.to_string();
@@ -147,7 +147,7 @@ impl ToString for SignedCheckpoint {
     }
 }
 
-impl SignedCheckpoint {
+impl Checkpoint {
     /// This method can be used to verify that the checkpoint was issued by the log with the
     /// public key `rekor_key`.
     pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
@@ -175,7 +175,7 @@ impl SignedCheckpoint {
     }
 }
 
-impl Serialize for SignedCheckpoint {
+impl Serialize for Checkpoint {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -184,13 +184,13 @@ impl Serialize for SignedCheckpoint {
     }
 }
 
-impl<'de> Deserialize<'de> for SignedCheckpoint {
+impl<'de> Deserialize<'de> for Checkpoint {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         <String>::deserialize(deserializer).and_then(|s| {
-            SignedCheckpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
+            Checkpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
         })
     }
 }

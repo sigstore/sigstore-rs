@@ -14,7 +14,7 @@ use crate::crypto::merkle::{
 use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError;
 use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
-use crate::rekor::models::checkpoint::SignedCheckpoint;
+use crate::rekor::models::checkpoint::Checkpoint;
 use crate::rekor::TreeSize;
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ pub struct InclusionProof {
     /// A list of hashes required to compute the inclusion proof, sorted in order from leaf to root
     #[serde(rename = "hashes")]
     pub hashes: Vec<String>,
-    pub checkpoint: Option<SignedCheckpoint>,
+    pub checkpoint: Option<Checkpoint>,
 }
 
 impl InclusionProof {
@@ -41,7 +41,7 @@ impl InclusionProof {
         root_hash: String,
         tree_size: TreeSize,
         hashes: Vec<String>,
-        checkpoint: Option<SignedCheckpoint>,
+        checkpoint: Option<Checkpoint>,
     ) -> InclusionProof {
         InclusionProof {
             log_index,
