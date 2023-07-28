@@ -134,6 +134,12 @@ testcontainers = "0.14"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
 hex = "0.4.3"
 
+# conformance CLI
+
+[[example]]
+name = "conformance_suite"
+path = "examples/conformance/main.rs"
+
 # cosign example mappings
 
 [[example]]
