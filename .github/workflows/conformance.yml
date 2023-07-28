@@ -1,0 +1,17 @@
+on: [push, pull_request]
+
+name: Conformance Suite
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: sigstore/sigstore-conformance@v0.0.5
+        with:
+          entrypoint: cargo run --example conformance_suite --

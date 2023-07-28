@@ -26,10 +26,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Sign,
-    SignBundle,
-    Verify,
-    VerifyBundle,
+    Sign(Sign),
+    SignBundle(SignBundle),
+    Verify(Verify),
+    VerifyBundle(VerifyBundle),
 }
 
 #[derive(Parser, Debug)]
@@ -61,7 +61,6 @@ struct SignBundle {
     bundle: String,
 
     // The artifact to sign
-    #[clap(long)]
     artifact: String,
 }
 
@@ -84,7 +83,6 @@ struct Verify {
     certificate_oidc_issuer: String,
 
     // The path to the artifact to verify
-    #[clap(long)]
     artifact: String,
 }
 
@@ -103,7 +101,6 @@ struct VerifyBundle {
     certificate_oidc_issuer: String,
 
     // The path to the artifact to verify
-    #[clap(long)]
     artifact: String,
 }
 
