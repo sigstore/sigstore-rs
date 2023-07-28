@@ -12,6 +12,10 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - uses: sigstore/sigstore-conformance@v0.0.5
+      - uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1.0.3
         with:
-          entrypoint: cargo run --example conformance_suite --
+          command: build
+          args: --manifest-path=tests/conformance/Cargo.toml
+      - uses: sigstore/sigstore-conformance@main
+        with:
+          entrypoint: ${{ github.workspace }}/tests/conformance/target/debug/sigstore
