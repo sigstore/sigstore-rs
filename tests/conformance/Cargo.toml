@@ -9,7 +9,6 @@ license = "Apache-2.0"
 [dependencies]
 clap = { version = "4.0.8", features = ["derive"] }
 sigstore = { path = "../../" }
-tokio = { version = "1.17.0", features = ["rt"] }
 
 [[bin]]
 name = "sigstore"

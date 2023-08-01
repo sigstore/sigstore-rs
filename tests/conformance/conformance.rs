@@ -104,7 +104,6 @@ struct VerifyBundle {
     artifact: String,
 }
 
-#[tokio::main]
-pub async fn main() {
+fn main() {
     let cli = Cli::parse();
 }
