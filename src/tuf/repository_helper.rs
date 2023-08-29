@@ -271,7 +271,7 @@ mod tests {
         let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
         actual.sort();
         let mut expected: Vec<crate::registry::Certificate> =
-            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+            ["fulcio.crt.pem", "fulcio_v1.crt.pem"]
                 .iter()
                 .map(|filename| {
                     let data = fs::read(
@@ -322,7 +322,7 @@ mod tests {
         let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
         actual.sort();
         let mut expected: Vec<crate::registry::Certificate> =
-            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+            ["fulcio.crt.pem", "fulcio_v1.crt.pem"]
                 .iter()
                 .map(|filename| {
                     let data = fs::read(
@@ -379,7 +379,7 @@ mod tests {
         let mut actual = helper.fulcio_certs().expect("fulcio certs cannot be read");
         actual.sort();
         let mut expected: Vec<crate::registry::Certificate> =
-            vec!["fulcio.crt.pem", "fulcio_v1.crt.pem"]
+            ["fulcio.crt.pem", "fulcio_v1.crt.pem"]
                 .iter()
                 .map(|filename| {
                     let data = fs::read(

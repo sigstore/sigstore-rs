@@ -280,7 +280,7 @@ mod tests {
         });
         let data: Data =
             serde_json::from_value(input_json.clone()).expect("Cannot deserialize json Data");
-        let actual_json = serde_json::to_value(&data).expect("Cannot serialize Data back to JSON");
+        let actual_json = serde_json::to_value(data).expect("Cannot serialize Data back to JSON");
         assert_json_eq!(input_json, actual_json);
     }
 }
