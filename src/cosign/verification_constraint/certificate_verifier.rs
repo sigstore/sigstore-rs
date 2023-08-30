@@ -83,7 +83,7 @@ impl VerificationConstraint for CertificateVerifier {
         }
         match &signature_layer.bundle {
             Some(bundle) => {
-                let it = DateTime::<Utc>::from_utc(
+                let it = DateTime::<Utc>::from_naive_utc_and_offset(
                     NaiveDateTime::from_timestamp_opt(bundle.payload.integrated_time, 0).ok_or(
                         SigstoreError::UnexpectedError("timestamp is not legal".into()),
                     )?,
