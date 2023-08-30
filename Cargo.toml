@@ -88,7 +88,7 @@ p256 = "0.13.2"
 p384 = "0.13"
 webbrowser = "0.8.4"
 pem = "3.0"
-picky = { version = "7.0.0-rc.6", default-features = false, features = [
+picky = { version = "7.0.0-rc.8", default-features = false, features = [
   "x509",
 ] }
 pkcs1 = { version = "0.7.5", features = ["std"] }
