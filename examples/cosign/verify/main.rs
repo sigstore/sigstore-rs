@@ -140,7 +140,7 @@ async fn run_app(
 
     let cert_chain: Option<Vec<sigstore::registry::Certificate>> = match cli.cert_chain.as_ref() {
         None => None,
-        Some(cert_chain_path) => Some(parse_cert_bundle(&cert_chain_path)?),
+        Some(cert_chain_path) => Some(parse_cert_bundle(cert_chain_path)?),
     };
 
     if !frd.fulcio_certs.is_empty() {
@@ -201,12 +201,9 @@ async fn run_app(
             false
         };
 
-        let verifier = CertificateVerifier::from_pem(
-            &cert,
-            require_rekor_bundle,
-            cert_chain.as_ref().map(|v| v.as_slice()),
-        )
-        .map_err(|e| anyhow!("Cannot create certificate verifier: {}", e))?;
+        let verifier =
+            CertificateVerifier::from_pem(&cert, require_rekor_bundle, cert_chain.as_deref())
+                .map_err(|e| anyhow!("Cannot create certificate verifier: {}", e))?;
 
         verification_constraints.push(Box::new(verifier));
     }
@@ -343,7 +340,7 @@ pub async fn main() {
 fn parse_cert_bundle(bundle_path: &str) -> Result<Vec<sigstore::registry::Certificate>> {
     let data =
         fs::read(bundle_path).map_err(|e| anyhow!("Error reading {}: {}", bundle_path, e))?;
-    let pems = pem::parse_many(&data)?;
+    let pems = pem::parse_many(data)?;
 
     Ok(pems
         .iter()

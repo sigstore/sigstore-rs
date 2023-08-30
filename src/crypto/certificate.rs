@@ -91,7 +91,7 @@ pub(crate) fn verify_validity(certificate: &Certificate) -> Result<()> {
 }
 
 fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<()> {
-    let it = DateTime::<Utc>::from_utc(
+    let it = DateTime::<Utc>::from_naive_utc_and_offset(
         NaiveDateTime::from_timestamp_opt(integrated_time, 0)
             .ok_or(SigstoreError::X509Error("timestamp is not legal".into()))?,
         Utc,

@@ -59,7 +59,7 @@ pub async fn main() {
         CosignVerificationKey::from_pem(rekor_pub_pem.as_bytes(), &SigningScheme::default())
             .expect("Cannot create Rekor verification key");
     let bundle_json = fs::read_to_string(&cli.bundle).expect("error reading bundle json file");
-    let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
+    let blob = fs::read(cli.blob.as_str()).expect("error reading blob file");
 
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
     match Client::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {

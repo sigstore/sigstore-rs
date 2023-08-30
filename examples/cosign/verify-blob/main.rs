@@ -58,7 +58,7 @@ pub async fn main() {
 
     let certificate = fs::read_to_string(&cli.certificate).expect("error reading certificate");
     let signature = fs::read_to_string(&cli.signature).expect("error reading signature");
-    let blob = fs::read(&cli.blob.as_str()).expect("error reading blob file");
+    let blob = fs::read(cli.blob.as_str()).expect("error reading blob file");
 
     match Client::verify_blob(&certificate, &signature, &blob) {
         Ok(_) => println!("Verification succeeded"),
