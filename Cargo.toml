@@ -6,6 +6,7 @@ edition = "2021"
 authors = ["sigstore-rs developers"]
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/sigstore/sigstore-rs"
 
 [features]
 default = ["full-native-tls", "cached-client", "tuf"]
