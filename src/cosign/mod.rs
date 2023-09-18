@@ -286,6 +286,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::constraint::{AnnotationMarker, PrivateKeySigner};
+    use super::verification_constraint::cert_subject_email_verifier::StringVerifier;
     use super::*;
     use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
@@ -396,13 +397,13 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
-            email: email.clone(),
-            issuer: Some(issuer),
+            email: StringVerifier::ExactMatch(email.clone()),
+            issuer: Some(StringVerifier::ExactMatch(issuer)),
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email,
+            email: StringVerifier::ExactMatch(email),
             issuer: None,
         };
         constraints.push(Box::new(vc));
@@ -445,13 +446,13 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let vc = CertSubjectEmailVerifier {
-            email: wrong_email.clone(),
-            issuer: Some(issuer), // correct issuer
+            email: StringVerifier::ExactMatch(wrong_email.clone()),
+            issuer: Some(StringVerifier::ExactMatch(issuer)), // correct issuer
         };
         constraints.push(Box::new(vc));
 
         let vc = CertSubjectEmailVerifier {
-            email: wrong_email,
+            email: StringVerifier::ExactMatch(wrong_email),
             issuer: None, // missing issuer, more relaxed
         };
         constraints.push(Box::new(vc));
@@ -493,13 +494,13 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 
         let mut constraints: VerificationConstraintVec = Vec::new();
         let satisfied_constraint = CertSubjectEmailVerifier {
-            email,
-            issuer: Some(issuer),
+            email: StringVerifier::ExactMatch(email),
+            issuer: Some(StringVerifier::ExactMatch(issuer)),
         };
         constraints.push(Box::new(satisfied_constraint));
 
         let unsatisfied_constraint = CertSubjectEmailVerifier {
-            email: email_incorrect,
+            email: StringVerifier::ExactMatch(email_incorrect),
             issuer: None,
         };
         constraints.push(Box::new(unsatisfied_constraint));
