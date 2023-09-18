@@ -70,11 +70,15 @@ impl VerificationConstraint for CertSubjectUrlVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::signature_layers::tests::{
-        build_correct_signature_layer_with_certificate,
-        build_correct_signature_layer_without_bundle,
+    use crate::cosign::{
+        signature_layers::tests::{
+            build_correct_signature_layer_with_certificate,
+            build_correct_signature_layer_without_bundle,
+        },
+        verification_constraint::{
+            cert_subject_email_verifier::StringVerifier, CertSubjectEmailVerifier,
+        },
     };
-    use crate::cosign::verification_constraint::CertSubjectEmailVerifier;
 
     #[test]
     fn cert_subject_url_verifier() {
@@ -108,8 +112,8 @@ mod tests {
 
         // A Cert email verifier should also report a non match
         let vc = CertSubjectEmailVerifier {
-            email: "alice@example.com".to_string(),
-            issuer: Some(issuer),
+            email: StringVerifier::ExactMatch("alice@example.com".to_string()),
+            issuer: Some(StringVerifier::ExactMatch(issuer)),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
