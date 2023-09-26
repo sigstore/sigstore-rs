@@ -70,7 +70,7 @@ cached-client = ["cached"]
 [dependencies]
 async-trait = "0.1.52"
 base64 = "0.21.0"
-cached = { version = "0.45.1", optional = true, features = ["async"] }
+cached = { version = "0.46.0", optional = true, features = ["async"] }
 cfg-if = "1.0.0"
 chrono = { version = "0.4.27", default-features = false }
 const-oid = "0.9.1"
