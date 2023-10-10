@@ -114,8 +114,7 @@ impl ScryptKDF {
             self.params.p,
             scrypt::Params::RECOMMENDED_LEN,
         )?;
-        let mut res = Vec::new();
-        res.resize(BOX_KEY_SIZE, 0x00);
+        let mut res = vec![0; BOX_KEY_SIZE];
         scrypt::scrypt(password, &self.salt, &params, &mut res)?;
         Ok(res)
     }
