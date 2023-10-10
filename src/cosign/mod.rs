@@ -297,11 +297,7 @@ mod tests {
     use crate::crypto::{CosignVerificationKey, SigningScheme};
 
     #[cfg(feature = "test-registry")]
-    use testcontainers::{
-        clients,
-        core::WaitFor,
-        images::{self, generic::GenericImage},
-    };
+    use testcontainers::{clients, core::WaitFor};
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -674,8 +670,8 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     }
 
     #[cfg(feature = "test-registry")]
-    fn registry_image() -> GenericImage {
-        images::generic::GenericImage::new("docker.io/library/registry", "2")
+    fn registry_image() -> testcontainers::GenericImage {
+        testcontainers::GenericImage::new("docker.io/library/registry", "2")
             .with_wait_for(WaitFor::message_on_stderr("listening on "))
     }
 }
