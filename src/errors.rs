@@ -52,6 +52,9 @@ pub enum SigstoreError {
     #[error("invalid key format: {error}")]
     InvalidKeyFormat { error: String },
 
+    #[error("Unable to parse identity token: {0}")]
+    IdentityTokenError(&'static str),
+
     #[error("unmatched key type {key_typ} and signing scheme {scheme}")]
     UnmatchedKeyAndSigningScheme { key_typ: String, scheme: String },
 
@@ -69,6 +72,9 @@ pub enum SigstoreError {
 
     #[error("Public key verification error")]
     PublicKeyVerificationError,
+
+    #[error("X.509 certificate version is not V3")]
+    CertificateUnsupportedVersionError,
 
     #[error("Certificate validity check failed: cannot be used before {0}")]
     CertificateValidityError(String),
@@ -103,6 +109,12 @@ pub enum SigstoreError {
     #[error("Certificate pool error: {0}")]
     CertificatePoolError(&'static str),
 
+    #[error("Signing session expired")]
+    ExpiredSigningSession(),
+
+    #[error("Fulcio request unsuccessful: {0}")]
+    FulcioClientError(&'static str),
+
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
 
@@ -115,8 +127,17 @@ pub enum SigstoreError {
     #[error("Cannot push {image}: {error}")]
     RegistryPushError { image: String, error: String },
 
+    #[error("Rekor request unsuccessful: {0}")]
+    RekorClientError(String),
+
+    #[error(transparent)]
+    ReqwestError(#[from] reqwest::Error),
+
     #[error("OCI reference not valid: {reference}")]
     OciReferenceNotValidError { reference: String },
+
+    #[error("Sigstore bundle malformed: {0}")]
+    SigstoreBundleMalformedError(String),
 
     #[error("Layer doesn't have Sigstore media type")]
     SigstoreMediaTypeNotFoundError,
@@ -154,6 +175,9 @@ pub enum SigstoreError {
 
     #[error("{0}")]
     VerificationConstraintError(String),
+
+    #[error("{0}")]
+    VerificationMaterialError(String),
 
     #[error("{0}")]
     ApplyConstraintError(String),
@@ -214,4 +238,10 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     Ed25519PKCS8Error(#[from] ed25519_dalek::pkcs8::spki::Error),
+
+    #[error(transparent)]
+    X509ParseError(#[from] x509_cert::der::Error),
+
+    #[error(transparent)]
+    X509BuilderError(#[from] x509_cert::builder::Error),
 }

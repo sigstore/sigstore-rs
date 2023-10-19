@@ -22,6 +22,8 @@ use x509_cert::{
 
 use crate::errors::{Result, SigstoreError};
 
+pub type DERCert = Vec<u8>;
+
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
 ///
@@ -117,6 +119,34 @@ fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<
         );
     }
 
+    Ok(())
+}
+
+/// Check if the given certificate is a leaf in the context of the Sigstore profile.
+///
+/// * It is not a root or intermediate CA;
+/// * It has `keyUsage.digitalSignature`
+/// * It has `CODE_SIGNING` as an `ExtendedKeyUsage`.
+///
+/// This function does not evaluate the trustworthiness of the certificate.
+pub(crate) fn is_leaf(certificate: &Certificate) -> Result<()> {
+    let tbs = &certificate.tbs_certificate;
+
+    // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
+    // extensions and have ambiguous CA behavior.
+    if tbs.version != x509_cert::Version::V3 {
+        return Err(SigstoreError::CertificateUnsupportedVersionError);
+    }
+
+    // TODO(tnytown): cert_is_ca
+
+    verify_key_usages(certificate)?;
+
+    Ok(())
+}
+
+pub(crate) fn is_root_ca(certificate: &Certificate) -> Result<()> {
+    // TODO(tnytown)
     Ok(())
 }
 

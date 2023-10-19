@@ -1,5 +1,5 @@
 //
-// Copyright 2021 The Sigstore Authors.
+// Copyright 2023 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) const SIGSTORE_METADATA_BASE: &str = "https://tuf-repo-cdn.sigstore.dev";
-pub(crate) const SIGSTORE_TARGET_BASE: &str = "https://tuf-repo-cdn.sigstore.dev/targets";
+//! Verifier for Sigstore bundles and associated types and policies.
+mod models;
+pub use models::{VerificationError, VerificationMaterials, VerificationResult};
 
-macro_rules! tuf_resource {
-    ($path:literal) => {
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/trust_root/", $path))
-    };
-}
+pub mod policy;
+pub use policy::VerificationPolicy;
 
-pub(crate) const SIGSTORE_ROOT: &[u8] = tuf_resource!("prod/root.json");
-pub(crate) const SIGSTORE_TRUST_BUNDLE: &[u8] = tuf_resource!("prod/trusted_root.json");
+mod verifier;
+pub use verifier::Verifier;
