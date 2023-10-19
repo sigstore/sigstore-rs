@@ -107,7 +107,7 @@ pub enum SigstoreError {
     CertificateWithIncompleteSubjectAlternativeName,
 
     #[error("Certificate pool error: {0}")]
-    CertificatePoolError(String),
+    CertificatePoolError(&'static str),
 
     #[error("Signing session expired")]
     ExpiredSigningSession(),

@@ -61,7 +61,7 @@ impl<'a> CertificatePool<'a> {
         let cert_pem = pem::parse(cert_pem)?;
         if cert_pem.tag() != "CERTIFICATE" {
             return Err(SigstoreError::CertificatePoolError(
-                "PEM file is not a certificate".into(),
+                "PEM file is not a certificate",
             ));
         }
 

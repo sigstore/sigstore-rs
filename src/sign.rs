@@ -15,6 +15,8 @@
 //! Types for signing artifacts and producing Sigstore Bundles.
 
 use std::io::{self, Read};
+
+
 use std::time::SystemTime;
 
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
@@ -38,6 +40,7 @@ use url::Url;
 use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
+
 
 use crate::bundle::Version;
 use crate::errors::{Result as SigstoreResult, SigstoreError};
