@@ -15,21 +15,45 @@
 //! Useful types for Sigstore bundles.
 
 use std::fmt::Display;
+use std::str::FromStr;
 
 pub use sigstore_protobuf_specs::Bundle;
+
+macro_rules! required {
+    ($($base:expr )? ; $first_attr:ident $( . $rest_attrs:ident)* $( , $else_err:expr)?) => {
+        $( $base . )? $first_attr.as_ref()
+            $(
+                .and_then(|v| v.$rest_attrs.as_ref())
+            )*
+        $( .ok_or($else_err) )?
+    }
+}
+pub(crate) use required;
 
 // Known Sigstore bundle media types.
 #[derive(Clone, Copy, Debug)]
 pub enum Version {
-    _Bundle0_1,
+    Bundle0_1,
     Bundle0_2,
 }
 
 impl Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match &self {
-            Version::_Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
+            Version::Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
             Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
         })
+    }
+}
+
+impl FromStr for Version {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "application/vnd.dev.sigstore.bundle+json;version=0.1" => Ok(Version::Bundle0_1),
+            "application/vnd.dev.sigstore.bundle+json;version=0.2" => Ok(Version::Bundle0_2),
+            _ => Err(()),
+        }
     }
 }

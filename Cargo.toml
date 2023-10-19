@@ -9,7 +9,7 @@ readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
 [features]
-default = ["full-native-tls", "cached-client", "tuf", "sign"]
+default = ["full-native-tls", "cached-client", "tuf", "sign", "verify"]
 wasm = ["getrandom/js"]
 
 full-native-tls = [
@@ -43,6 +43,7 @@ rekor = ["reqwest"]
 tuf = ["tough", "regex"]
 
 sign = []
+verify = []
 
 cosign-native-tls = [
   "oci-distribution/native-tls",
