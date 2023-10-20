@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use pkcs8::der::Decode;
+use rustls_pki_types::CertificateDer;
 use std::convert::TryFrom;
 use tracing::warn;
 use x509_cert::Certificate;
@@ -61,8 +62,12 @@ impl CertificateVerifier {
         crate::crypto::certificate::verify_validity(&cert)?;
 
         if let Some(certs) = cert_chain {
-            let cert_pool = CertificatePool::from_certificates(certs)?;
-            cert_pool.verify_der_cert(cert_bytes)?;
+            let certs = certs
+                .iter()
+                .map(|c| CertificateDer::try_from(c.clone()))
+                .collect::<Result<Vec<_>>>()?;
+            let cert_pool = CertificatePool::from_certificates(certs, [])?;
+            cert_pool.verify_der_cert(cert_bytes, None)?;
         }
 
         let subject_public_key_info = &cert.tbs_certificate.subject_public_key_info;

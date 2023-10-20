@@ -15,9 +15,12 @@
 
 //! Set of structs and enums used to define how to interact with OCI registries
 
+use rustls_pki_types::CertificateDer;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::convert::From;
+
+use crate::errors;
 
 /// A method for authenticating to a registry
 #[derive(Serialize, Debug)]
@@ -119,6 +122,21 @@ impl From<&Certificate> for oci_distribution::client::Certificate {
         oci_distribution::client::Certificate {
             encoding: cert.encoding.clone().into(),
             data: cert.data.clone(),
+        }
+    }
+}
+
+impl<'a> TryFrom<Certificate> for CertificateDer<'a> {
+    type Error = errors::SigstoreError;
+    fn try_from(value: Certificate) -> errors::Result<CertificateDer<'a>> {
+        #[inline]
+        fn to_der(pem: &[u8]) -> errors::Result<Vec<u8>> {
+            Ok(pem::parse(pem)?.into_contents())
+        }
+
+        match &value.encoding {
+            CertificateEncoding::Der => Ok(CertificateDer::from(value.data)),
+            CertificateEncoding::Pem => Ok(CertificateDer::from(to_der(&value.data)?)),
         }
     }
 }

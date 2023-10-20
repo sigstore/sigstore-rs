@@ -438,7 +438,12 @@ impl CertificateSignature {
         let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
-        fulcio_cert_pool.verify_pem_cert(cert_pem)?;
+        fulcio_cert_pool.verify_pem_cert(
+            cert_pem,
+            Some(rustls_pki_types::UnixTime::since_unix_epoch(
+                cert.tbs_certificate.validity.not_before.to_unix_duration(),
+            )),
+        )?;
 
         crypto::certificate::is_trusted(&cert, integrated_time)?;
 
@@ -899,8 +904,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
+            .unwrap()
+            .try_into()?];
+        let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
         let bundle = Bundle {
@@ -946,8 +953,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
+            .unwrap()
+            .try_into()?];
+        let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
         let bundle = Bundle {
@@ -992,8 +1001,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert).unwrap()];
-        let cert_pool = CertificatePool::from_certificates(&certs).unwrap();
+        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
+            .unwrap()
+            .try_into()?];
+        let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
         let bundle = Bundle {

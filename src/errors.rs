@@ -62,9 +62,6 @@ pub enum SigstoreError {
     FromPEMError(#[from] pem::PemError),
 
     #[error(transparent)]
-    CertError(#[from] picky::x509::certificate::CertError),
-
-    #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
 
     #[error("Public key with unsupported algorithm: {0}")]
@@ -104,7 +101,7 @@ pub enum SigstoreError {
     CertificateWithIncompleteSubjectAlternativeName,
 
     #[error("Certificate pool error: {0}")]
-    CertificatePoolError(String),
+    CertificatePoolError(&'static str),
 
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
@@ -145,6 +142,9 @@ pub enum SigstoreError {
 
     #[error("TUF target {0} not found inside of repository")]
     TufTargetNotFoundError(String),
+
+    #[error("{0}")]
+    TufMetadataError(&'static str),
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),
@@ -199,6 +199,9 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     Utf8Error(#[from] std::str::Utf8Error),
+
+    #[error(transparent)]
+    WebPKIError(#[from] webpki::Error),
 
     #[error("Failed to parse the key: {0}")]
     KeyParseError(String),
