@@ -28,7 +28,7 @@ use crate::tuf::Repository;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via the [`ClientBuilder::with_rekor_pub_key`] method.
+/// This can be provided via a [`crate::tuf::FakeRepository`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -36,7 +36,7 @@ use crate::tuf::Repository;
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
-/// This can be provided via the [`ClientBuilder::with_fulcio_certs`] method.
+/// This can be provided via a [`crate::tuf::FakeRepository`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.

@@ -27,7 +27,7 @@
 //!
 //! # Verification
 //!
-//! Sigstore verification is done using the [`cosign::Client`](crate::cosign::Client)
+//! Sigstore verification is done using the [`cosign::Client`]
 //! struct.
 //!
 //! ## Triangulation of Sigstore signature
@@ -92,9 +92,11 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::tuf::FakeRepository::default();
-//!   repo.fulcio_certs.get_or_insert(Vec::new()).push(fulcio_cert.try_into().unwrap());
-//!   repo.rekor_key = Some(rekor_pub_key);
+//!   let mut repo = sigstore::tuf::FakeRepository {
+//!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
+//!     rekor_key: Some(rekor_pub_key),
+//!     ..Default::default()
+//!   };
 //!
 //!   let mut client = sigstore::cosign::ClientBuilder::default()
 //!     .with_trust_repository(&repo)
@@ -222,7 +224,7 @@
 //!
 //! ## Fulcio and Rekor integration
 //!
-//! [`cosign::Client`](crate::cosign::Client) integration with Fulcio and Rekor
+//! [`cosign::Client`] integration with Fulcio and Rekor
 //! requires the following data to work: Fulcio's certificate and Rekor's public key.
 //!
 //! These files are safely distributed by the Sigstore project via a TUF repository.

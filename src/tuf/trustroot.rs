@@ -13,6 +13,13 @@ use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[allow(non_camel_case_types)]
+/// Only a subset of the secure hash standard algorithms are supported.
+/// See <https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf> for more
+/// details.
+/// UNSPECIFIED SHOULD not be used, primary reason for inclusion is to force
+/// any proto JSON serialization to emit the used hash algorithm, as default
+/// option is to *omit* the default value of an enum (which is the first
+/// value, represented by '0'.
 pub(crate) enum HashAlgorithm {
     HASH_ALGORITHM_UNSPECIFIED = 0,
     SHA2_256 = 1,
@@ -20,6 +27,12 @@ pub(crate) enum HashAlgorithm {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[allow(non_camel_case_types)]
+/// Details of a specific public key, capturing the the key encoding method,
+/// and signature algorithm.
+/// To avoid the possibility of contradicting formats such as PKCS1 with
+/// ED25519 the valid permutations are listed as a linear set instead of a
+/// cartesian set (i.e one combined variable instead of two, one for encoding
+/// and one for the signature algorithm).
 pub(crate) enum PublicKeyDetails {
     PUBLIC_KEY_DETAILS_UNSPECIFIED = 0,
     // RSA
@@ -37,6 +50,7 @@ pub(crate) enum PublicKeyDetails {
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// LogId captures the identity of a transparency log.
 pub(crate) struct LogId {
     #[serde_as(as = "Base64")]
     pub key_id: Vec<u8>,
@@ -44,6 +58,10 @@ pub(crate) struct LogId {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// The time range is closed and includes both the start and end times,
+/// (i.e., [start, end]).
+/// End is optional to be able to capture a period that has started but
+/// has no known end.
 pub(crate) struct TimeRange {
     pub start: DateTime<Utc>,
     pub end: Option<DateTime<Utc>>,
@@ -76,12 +94,19 @@ pub(crate) struct X509Certificate {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// A chain of X.509 certificates.
 pub(crate) struct X509CertificateChain {
     pub certificates: Vec<X509Certificate>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// TransparencyLogInstance describes the immutable parameters from a
+/// transparency log.
+/// See https://www.rfc-editor.org/rfc/rfc9162.html#name-log-parameters
+/// for more details.
+/// The included parameters are the minimal set required to identify a log,
+/// and verify an inclusion proof/promise.
 pub(crate) struct TransparencyLogInstance {
     pub base_url: String,
     pub hash_algorithm: HashAlgorithm,
@@ -91,6 +116,8 @@ pub(crate) struct TransparencyLogInstance {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// CertificateAuthority enlists the information required to identify which
+/// CA to use and perform signature verification.
 pub(crate) struct CertificateAuthority {
     pub subject: DistinguishedName,
     pub uri: Option<String>,
@@ -100,6 +127,25 @@ pub(crate) struct CertificateAuthority {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// TrustedRoot describes the client's complete set of trusted entities.
+/// How the TrustedRoot is populated is not specified, but can be a
+/// combination of many sources such as TUF repositories, files on disk etc.
+///
+/// The TrustedRoot is not meant to be used for any artifact verification, only
+/// to capture the complete/global set of trusted verification materials.
+/// When verifying an artifact, based on the artifact and policies, a selection
+/// of keys/authorities are expected to be extracted and provided to the
+/// verification function. This way the set of keys/authorities can be kept to
+/// a minimal set by the policy to gain better control over what signatures
+/// that are allowed.
+///
+/// The embedded transparency logs, CT logs, CAs and TSAs MUST include any
+/// previously used instance -- otherwise signatures made in the past cannot
+/// be verified.
+/// The currently used instances MUST NOT have their 'end' timestamp set in
+/// their 'valid_for' attribute for easy identification.
+/// All the listed instances SHOULD be sorted by the 'valid_for' in ascending
+/// order, that is, the oldest instance first and the current instance last.
 pub(crate) struct TrustedRoot {
     pub media_type: String,
     pub tlogs: Vec<TransparencyLogInstance>,

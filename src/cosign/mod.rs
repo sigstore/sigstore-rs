@@ -102,12 +102,13 @@ pub trait CosignCapabilities {
     /// must be satisfied:
     ///
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Rekor integration enabled (see
-    ///   [`sigstore::cosign::ClientBuilder::with_rekor_pub_key`](crate::cosign::ClientBuilder::with_rekor_pub_key))
+    ///   have been created with Rekor integration enabled (see [`crate::tuf::FakeRepository`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see
-    ///   [`sigstore::cosign::ClientBuilder::with_fulcio_certs`](crate::cosign::ClientBuilder::with_fulcio_certs))
+    ///   have been created with Fulcio integration enabled (see [`crate::tuf::FakeRepository])
     /// * The layer must include a bundle produced by Rekor
+    ///
+    /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+    /// > to obtain this data from the official TUF repository of the Sigstore project.
     ///
     /// When the embedded certificate cannot be verified, [`SignatureLayer::certificate_signature`]
     /// is going to be `None`.
@@ -199,7 +200,7 @@ pub trait CosignCapabilities {
 /// verification.
 ///
 /// Returns a `Result` with either `Ok()` for passed verification or
-/// [`SigstoreVerifyConstraintsError`](crate::errors::SigstoreVerifyConstraintsError),
+/// [`SigstoreVerifyConstraintsError`]
 /// which contains a vector of references to unsatisfied constraints.
 ///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
@@ -249,7 +250,7 @@ where
 /// passes applying constraints process.
 ///
 /// Returns a `Result` with either `Ok()` for success or
-/// [`SigstoreApplicationConstraintsError`](crate::errors::SigstoreApplicationConstraintsError),
+/// [`SigstoreApplicationConstraintsError`]
 /// which contains a vector of references to unapplied constraints.
 ///
 /// See the documentation of the [`cosign::sign_constraint`](crate::cosign::sign_constraint) module for more
