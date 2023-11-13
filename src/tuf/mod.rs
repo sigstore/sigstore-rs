@@ -43,6 +43,7 @@ mod trustroot;
 use rustls_pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 use tough::TargetName;
+use tracing::debug;
 
 use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 
@@ -54,15 +55,15 @@ pub trait Repository {
     fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
 }
 
-/// A `FakeRepository` is a [Repository] with out-of-band trust materials.
+/// A `ManualRepository` is a [Repository] with out-of-band trust materials.
 /// As it does not establish a trust root with TUF, users must initialize its materials themselves.
 #[derive(Debug, Default)]
-pub struct FakeRepository<'a> {
+pub struct ManualRepository<'a> {
     pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
     pub rekor_key: Option<Vec<u8>>,
 }
 
-impl Repository for FakeRepository<'_> {
+impl Repository for ManualRepository<'_> {
     fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
         Ok(match &self.fulcio_certs {
             Some(certs) => certs.clone(),
@@ -120,7 +121,7 @@ impl SigstoreRepository {
                 local_path.as_ref(),
             )?;
 
-            println!("data:\n{}", String::from_utf8_lossy(&data));
+            debug!("data:\n{}", String::from_utf8_lossy(&data));
 
             Ok(serde_json::from_slice(&data[..])?)
         }

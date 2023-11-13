@@ -92,7 +92,7 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::tuf::FakeRepository {
+//!   let mut repo = sigstore::tuf::ManualRepository {
 //!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
 //!     rekor_key: Some(rekor_pub_key),
 //!     ..Default::default()

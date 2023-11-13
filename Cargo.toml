@@ -118,7 +118,7 @@ tokio = { version = "1.17.0", features = ["rt"] }
 tough = { version = "0.14", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
-x509-cert = { version = "0.2.2", features = ["builder", "pem", "std"] }
+x509-cert = { version = "0.2.2", features = ["pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
 rustls-webpki = { version = "0.102.0-alpha.4", features = ["alloc"] }

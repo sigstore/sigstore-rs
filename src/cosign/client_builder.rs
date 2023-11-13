@@ -28,7 +28,7 @@ use crate::tuf::Repository;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::tuf::FakeRepository`].
+/// This can be provided via a [`crate::tuf::ManualRepository`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -36,7 +36,7 @@ use crate::tuf::Repository;
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
-/// This can be provided via a [`crate::tuf::FakeRepository`].
+/// This can be provided via a [`crate::tuf::ManualRepository`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -56,7 +56,6 @@ pub struct ClientBuilder<'a> {
     oci_client_config: ClientConfig,
     rekor_pub_key: Option<&'a [u8]>,
     fulcio_certs: Vec<CertificateDer<'a>>,
-    // repo: Repository
     #[cfg(feature = "cached-client")]
     enable_registry_caching: bool,
 }
