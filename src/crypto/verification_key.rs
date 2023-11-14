@@ -59,7 +59,7 @@ pub enum CosignVerificationKey {
     ED25519(ed25519_dalek::VerifyingKey),
 }
 
-/// Attempts to convert a [x509 Subject Public Key Info](SubjectPublicKeyInfo) object into
+/// Attempts to convert a [x509 Subject Public Key Info](x509_cert::spki::SubjectPublicKeyInfo) object into
 /// a `CosignVerificationKey` one.
 ///
 /// Currently can convert only the following types of keys:

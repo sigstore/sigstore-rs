@@ -23,142 +23,316 @@
 //!
 //! # Example
 //!
-//! The `SigstoreRepository` instance can be created via the [`SigstoreRepository::fetch`]
+//! The `SigstoreRepository` instance can be created via the [`SigstoreRepository::prefetch`]
 //! method.
 //!
 //! ```rust,no_run
 //! use sigstore::tuf::SigstoreRepository;
-//! use sigstore::cosign;
-//!
-//! let repo = SigstoreRepository::fetch(None)
-//!     .expect("Error while building SigstoreRepository");
-//! let client = cosign::ClientBuilder::default()
-//!     .with_rekor_pub_key(repo.rekor_pub_key())
-//!     .with_fulcio_certs(repo.fulcio_certs())
-//!     .build()
-//!     .expect("Error while building cosign client");
+//! let repo = SigstoreRepository::new(None).unwrap().prefetch().unwrap();
 //! ```
-//!
-//! The `SigstoreRepository::fetch` method can attempt to leverage local copies
-//! of the Rekor and Fulcio files. Please refer to the
-//! [method docs](SigstoreRepository::fetch) for more details.
-//!
-//! **Warning:** the `SigstoreRepository::fetch` method currently needs
-//! special handling when invoked inside of an async context. Please refer to the
-//! [method docs](SigstoreRepository::fetch) for more details.
-//!
-use std::path::Path;
+use std::{
+    cell::OnceCell,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 mod constants;
-use constants::*;
+mod trustroot;
 
-mod repository_helper;
-use repository_helper::RepositoryHelper;
+use rustls_pki_types::CertificateDer;
+use sha2::{Digest, Sha256};
+use tough::TargetName;
+use tracing::debug;
+
+use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 
 use super::errors::{Result, SigstoreError};
 
-/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository
-#[derive(Clone)]
-pub struct SigstoreRepository {
-    rekor_pub_key: String,
-    fulcio_certs: Vec<crate::registry::Certificate>,
+/// A `Repository` owns all key material necessary for establishing a root of trust.
+pub trait Repository {
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>>;
+    fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
 }
 
-impl SigstoreRepository {
-    /// Fetch relevant information from the remote Sigstore TUF repository.
-    ///
-    /// ## Parameters
-    ///
-    /// * `checkout_dir`: path to a local directory where Rekor's public
-    /// key and Fulcio's certificates can be found
-    ///
-    /// ## Behaviour
-    ///
-    /// This method requires network connectivity, because it will always
-    /// reach out to Sigstore's TUF repository.
-    ///
-    /// This crates embeds a trusted copy of the `root.json` file of Sigstore's
-    /// TUF repository. The `fetch` function will always connect to the online
-    /// Sigstore's repository to update this embedded file to the latest version.
-    /// The update process happens using the TUF protocol.
-    ///
-    /// When `checkout_dir` is specified, this method will look for the
-    /// Fulcio and Rekor files inside of this directory. It will then compare the
-    /// checksums of these local files with the ones reported inside of the
-    /// TUF repository metadata.
-    ///
-    /// If the files are not found, or if their local checksums do not match
-    /// with the ones reported by TUF's metdata, the files are then downloaded
-    /// from the TUF repository and then written to the local filesystem.
-    ///
-    /// When `checkout_dir` is `None`, the `fetch` method will always fetch the
-    /// Fulcio and Rekor files from the remote TUF repository and keep them
-    /// in memory.
-    ///
-    /// ## Usage inside of async code
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
-    ///
-    /// If needed, this can be solved in the following way:
-    ///
-    /// ```rust,no_run
-    /// use tokio::task::spawn_blocking;
-    /// use sigstore::tuf::SigstoreRepository;
-    ///
-    /// async fn my_async_function() {
-    ///    // ... your code
-    ///
-    ///    let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(||
-    ///      sigstore::tuf::SigstoreRepository::fetch(None)
-    ///    )
-    ///    .await
-    ///    .expect("Error spawning blocking task");
-    ///
-    ///    // handle the case of `repo` being an `Err`
-    ///    // ... your code
-    /// }
-    /// ```
-    ///
-    /// This of course has a performance hit when used inside of an async function.
-    pub fn fetch(checkout_dir: Option<&Path>) -> Result<Self> {
-        let metadata_base = url::Url::parse(SIGSTORE_METADATA_BASE).map_err(|_| {
-            SigstoreError::UnexpectedError(String::from("Cannot convert metadata_base to URL"))
-        })?;
-        let target_base = url::Url::parse(SIGSTORE_TARGET_BASE).map_err(|_| {
-            SigstoreError::UnexpectedError(String::from("Cannot convert target_base to URL"))
-        })?;
+/// A `ManualRepository` is a [Repository] with out-of-band trust materials.
+/// As it does not establish a trust root with TUF, users must initialize its materials themselves.
+#[derive(Debug, Default)]
+pub struct ManualRepository<'a> {
+    pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
+    pub rekor_key: Option<Vec<u8>>,
+}
 
-        let repository_helper = RepositoryHelper::new(
-            SIGSTORE_ROOT.as_bytes(),
-            metadata_base,
-            target_base,
-            checkout_dir,
-        )?;
-
-        let fulcio_certs = repository_helper.fulcio_certs()?;
-
-        let rekor_pub_key = repository_helper.rekor_pub_key().map(|data| {
-            String::from_utf8(data).map_err(|e| {
-                SigstoreError::UnexpectedError(format!(
-                    "Cannot parse Rekor's public key obtained from TUF repository: {e}",
-                ))
-            })
-        })??;
-
-        Ok(SigstoreRepository {
-            rekor_pub_key,
-            fulcio_certs,
+impl Repository for ManualRepository<'_> {
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+        Ok(match &self.fulcio_certs {
+            Some(certs) => certs.clone(),
+            None => Vec::new(),
         })
     }
 
-    /// Rekor public key
-    pub fn rekor_pub_key(&self) -> &str {
-        &self.rekor_pub_key
+    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+        Ok(match &self.rekor_key {
+            Some(key) => vec![&key[..]],
+            None => Vec::new(),
+        })
+    }
+}
+
+/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
+#[derive(Debug)]
+pub struct SigstoreRepository {
+    repository: tough::Repository,
+    checkout_dir: Option<PathBuf>,
+    trusted_root: OnceCell<TrustedRoot>,
+}
+
+impl SigstoreRepository {
+    /// Constructs a new trust repository established by a [tough::Repository].
+    pub fn new(checkout_dir: Option<&Path>) -> Result<Self> {
+        // These are statically defined and should always parse correctly.
+        let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
+        let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
+
+        let repository =
+            tough::RepositoryLoader::new(constants::SIGSTORE_ROOT, metadata_base, target_base)
+                .expiration_enforcement(tough::ExpirationEnforcement::Safe)
+                .load()
+                .map_err(Box::new)?;
+
+        Ok(Self {
+            repository,
+            checkout_dir: checkout_dir.map(ToOwned::to_owned),
+            trusted_root: OnceCell::default(),
+        })
     }
 
-    /// Fulcio certificate
-    pub fn fulcio_certs(&self) -> &[crate::registry::Certificate] {
-        &self.fulcio_certs
+    fn trusted_root(&self) -> Result<&TrustedRoot> {
+        fn init_trusted_root(
+            repository: &tough::Repository,
+            checkout_dir: Option<&PathBuf>,
+        ) -> Result<TrustedRoot> {
+            let trusted_root_target = TargetName::new("trusted_root.json").map_err(Box::new)?;
+            let local_path = checkout_dir.map(|d| d.join(trusted_root_target.raw()));
+
+            let data = fetch_target_or_reuse_local_cache(
+                repository,
+                &trusted_root_target,
+                local_path.as_ref(),
+            )?;
+
+            debug!("data:\n{}", String::from_utf8_lossy(&data));
+
+            Ok(serde_json::from_slice(&data[..])?)
+        }
+
+        if let Some(root) = self.trusted_root.get() {
+            return Ok(root);
+        }
+
+        let root = init_trusted_root(&self.repository, self.checkout_dir.as_ref())?;
+        Ok(self.trusted_root.get_or_init(|| root))
     }
+
+    /// Prefetches trust materials.
+    ///
+    /// [Repository::fulcio_certs()] and [Repository::rekor_keys()] on [SigstoreRepository] lazily
+    /// fetches the requested data, which is problematic for async callers. Those callers should
+    /// use this method to fetch the trust root ahead of time.
+    ///
+    /// ```rust
+    /// # use tokio::task::spawn_blocking;
+    /// # use sigstore::tuf::SigstoreRepository;
+    /// # use sigstore::errors::Result;
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), anyhow::Error> {
+    /// let repo: Result<SigstoreRepository> = spawn_blocking(|| Ok(SigstoreRepository::new(None)?.prefetch()?)).await?;
+    /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRepository`
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn prefetch(self) -> Result<Self> {
+        let _ = self.trusted_root()?;
+        Ok(self)
+    }
+
+    #[inline]
+    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
+        tlogs
+            .iter()
+            .filter(|key| is_timerange_valid(key.public_key.valid_for.as_ref(), false))
+            .filter_map(|key| key.public_key.raw_bytes.as_ref())
+            .map(|key_bytes| key_bytes.as_slice())
+    }
+
+    #[inline]
+    fn ca_keys(
+        cas: &[CertificateAuthority],
+        allow_expired: bool,
+    ) -> impl Iterator<Item = &'_ [u8]> {
+        cas.iter()
+            .filter(move |ca| is_timerange_valid(Some(&ca.valid_for), allow_expired))
+            .flat_map(|ca| ca.cert_chain.certificates.iter())
+            .map(|cert| cert.raw_bytes.as_slice())
+    }
+}
+
+impl Repository for SigstoreRepository {
+    /// Fetch Fulcio certificates from the given TUF repository or reuse
+    /// the local cache if its contents are not outdated.
+    ///
+    /// The contents of the local cache are updated when they are outdated.
+    ///
+    /// **Warning:** this method needs special handling when invoked from
+    /// an async function because it performs blocking operations.
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+        let root = self.trusted_root()?;
+
+        // Allow expired certificates: they may have been active when the
+        // certificate was used to sign.
+        let certs = Self::ca_keys(&root.certificate_authorities, true);
+        let certs: Vec<_> = certs.map(CertificateDer::from).collect();
+
+        if certs.is_empty() {
+            Err(SigstoreError::TufMetadataError(
+                "Fulcio certificates not found",
+            ))
+        } else {
+            Ok(certs)
+        }
+    }
+
+    /// Fetch Rekor public keys from the given TUF repository or reuse
+    /// the local cache if it's not outdated.
+    ///
+    /// The contents of the local cache are updated when they are outdated.
+    ///
+    /// **Warning:** this method needs special handling when invoked from
+    /// an async function because it performs blocking operations.
+    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+        let root = self.trusted_root()?;
+        let keys: Vec<_> = Self::tlog_keys(&root.tlogs).collect();
+
+        if keys.len() != 1 {
+            Err(SigstoreError::TufMetadataError(
+                "Did not find exactly 1 active Rekor key",
+            ))
+        } else {
+            Ok(keys)
+        }
+    }
+}
+
+/// Given a `range`, checks that the the current time is not before `start`. If
+/// `allow_expired` is `false`, also checks that the current time is not after
+/// `end`.
+fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
+    let time = chrono::Utc::now();
+
+    match range {
+        // If there was no validity period specified, the key is always valid.
+        None => true,
+        // Active: if the current time is before the starting period, we are not yet valid.
+        Some(range) if time < range.start => false,
+        // If we want Expired keys, then the key is valid at this point.
+        _ if allow_expired => true,
+        // Otherwise, check that we are in range if the range has an end.
+        Some(range) => match range.end {
+            None => true,
+            Some(end) => time <= end,
+        },
+    }
+}
+
+/// Download a file stored inside of a TUF repository, try to reuse a local
+/// cache when possible.
+///
+/// * `repository`: TUF repository holding the file
+/// * `target_name`: TUF representation of the file to be downloaded
+/// * `local_file`: location where the file should be downloaded
+///
+/// This function will reuse the local copy of the file if contents
+/// didn't change.
+/// This check is done by comparing the digest of the local file, if found,
+/// with the digest reported inside of the TUF repository metadata.
+///
+/// **Note well:** the `local_file` is updated whenever its contents are
+/// outdated.
+fn fetch_target_or_reuse_local_cache(
+    repository: &tough::Repository,
+    target_name: &TargetName,
+    local_file: Option<&PathBuf>,
+) -> Result<Vec<u8>> {
+    let (local_file_outdated, local_file_contents) = if let Some(path) = local_file {
+        is_local_file_outdated(repository, target_name, path)
+    } else {
+        Ok((true, None))
+    }?;
+
+    let data = if local_file_outdated {
+        let data = fetch_target(repository, target_name)?;
+        if let Some(path) = local_file {
+            // update the local file to have latest data from the TUF repo
+            fs::write(path, data.clone())?;
+        }
+        data
+    } else {
+        local_file_contents
+            .expect("local file contents to not be 'None'")
+            .as_bytes()
+            .to_owned()
+    };
+
+    Ok(data)
+}
+
+/// Download a file from a TUF repository
+fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
+    let data: Vec<u8>;
+    match repository.read_target(target_name).map_err(Box::new)? {
+        None => Err(SigstoreError::TufTargetNotFoundError(
+            target_name.raw().to_string(),
+        )),
+        Some(reader) => {
+            data = read_to_end(reader)?;
+            Ok(data)
+        }
+    }
+}
+
+/// Compares the checksum of a local file, with the digest reported inside of
+/// TUF repository metadata
+fn is_local_file_outdated(
+    repository: &tough::Repository,
+    target_name: &TargetName,
+    local_file: &Path,
+) -> Result<(bool, Option<String>)> {
+    let target = repository
+        .targets()
+        .signed
+        .targets
+        .get(target_name)
+        .ok_or_else(|| SigstoreError::TufTargetNotFoundError(target_name.raw().to_string()))?;
+
+    if local_file.exists() {
+        let data = fs::read_to_string(local_file)?;
+        let local_checksum = Sha256::digest(data.clone());
+        let expected_digest: Vec<u8> = target.hashes.sha256.to_vec();
+
+        if local_checksum.as_slice() == expected_digest.as_slice() {
+            // local data is not outdated
+            Ok((false, Some(data)))
+        } else {
+            Ok((true, None))
+        }
+    } else {
+        Ok((true, None))
+    }
+}
+
+/// Gets the goods from a read and makes a Vec
+fn read_to_end<R: Read>(mut reader: R) -> Result<Vec<u8>> {
+    let mut v = Vec::new();
+    reader.read_to_end(&mut v)?;
+    Ok(v)
 }

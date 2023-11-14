@@ -102,12 +102,13 @@ pub trait CosignCapabilities {
     /// must be satisfied:
     ///
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Rekor integration enabled (see
-    ///   [`sigstore::cosign::ClientBuilder::with_rekor_pub_key`](crate::cosign::ClientBuilder::with_rekor_pub_key))
+    ///   have been created with Rekor integration enabled (see [`crate::tuf::ManualRepository`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see
-    ///   [`sigstore::cosign::ClientBuilder::with_fulcio_certs`](crate::cosign::ClientBuilder::with_fulcio_certs))
+    ///   have been created with Fulcio integration enabled (see [`crate::tuf::ManualRepository])
     /// * The layer must include a bundle produced by Rekor
+    ///
+    /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+    /// > to obtain this data from the official TUF repository of the Sigstore project.
     ///
     /// When the embedded certificate cannot be verified, [`SignatureLayer::certificate_signature`]
     /// is going to be `None`.
@@ -199,7 +200,7 @@ pub trait CosignCapabilities {
 /// verification.
 ///
 /// Returns a `Result` with either `Ok()` for passed verification or
-/// [`SigstoreVerifyConstraintsError`](crate::errors::SigstoreVerifyConstraintsError),
+/// [`SigstoreVerifyConstraintsError`]
 /// which contains a vector of references to unsatisfied constraints.
 ///
 /// See the documentation of the [`cosign::verification_constraint`](crate::cosign::verification_constraint) module for more
@@ -249,7 +250,7 @@ where
 /// passes applying constraints process.
 ///
 /// Returns a `Result` with either `Ok()` for success or
-/// [`SigstoreApplicationConstraintsError`](crate::errors::SigstoreApplicationConstraintsError),
+/// [`SigstoreApplicationConstraintsError`]
 /// which contains a vector of references to unapplied constraints.
 ///
 /// See the documentation of the [`cosign::sign_constraint`](crate::cosign::sign_constraint) module for more
@@ -282,6 +283,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rustls_pki_types::CertificateDer;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -335,18 +337,15 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[cfg(feature = "test-registry")]
     const SIGNED_IMAGE: &str = "busybox:1.34";
 
-    pub(crate) fn get_fulcio_cert_pool() -> CertificatePool {
-        let certificates = vec![
-            crate::registry::Certificate {
-                encoding: crate::registry::CertificateEncoding::Pem,
-                data: FULCIO_CRT_1_PEM.as_bytes().to_vec(),
-            },
-            crate::registry::Certificate {
-                encoding: crate::registry::CertificateEncoding::Pem,
-                data: FULCIO_CRT_2_PEM.as_bytes().to_vec(),
-            },
-        ];
-        CertificatePool::from_certificates(&certificates).unwrap()
+    pub(crate) fn get_fulcio_cert_pool() -> CertificatePool<'static> {
+        fn pem_to_der<'a>(input: &'a str) -> CertificateDer<'a> {
+            let pem_cert = pem::parse(input).unwrap();
+            assert_eq!(pem_cert.tag(), "CERTIFICATE");
+            CertificateDer::from(pem_cert.into_contents())
+        }
+        let certificates = vec![pem_to_der(FULCIO_CRT_1_PEM), pem_to_der(FULCIO_CRT_2_PEM)];
+
+        CertificatePool::from_certificates(certificates, []).unwrap()
     }
 
     pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
@@ -645,7 +644,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     }
 
     #[cfg(feature = "test-registry")]
-    async fn prepare_image_to_be_signed(client: &mut Client, image_ref: &OciReference) {
+    async fn prepare_image_to_be_signed(client: &mut Client<'_>, image_ref: &OciReference) {
         let data = client
             .registry_client
             .pull(
