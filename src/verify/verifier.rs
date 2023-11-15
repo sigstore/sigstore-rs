@@ -15,7 +15,7 @@
 use std::cell::OnceCell;
 
 use const_oid::db::rfc5280::ID_KP_CODE_SIGNING;
-use pkcs8::der::{Encode, EncodePem};
+use pkcs8::der::Encode;
 use rustls_pki_types::UnixTime;
 use x509_cert::ext::pkix::{ExtendedKeyUsage, KeyUsage};
 
@@ -30,6 +30,7 @@ use crate::{
 use super::{models::VerificationMaterials, policy::VerificationPolicy, VerificationResult};
 
 pub struct Verifier<'a, R: Repository> {
+    #[allow(dead_code)]
     rekor_config: RekorConfiguration,
     trust_repo: R,
     cert_pool: OnceCell<CertificatePool<'a>>,
@@ -93,7 +94,10 @@ impl<'a, R: Repository> Verifier<'a, R> {
             .validity
             .not_before
             .to_unix_duration();
-        let cert_der = &materials.certificate.to_der().unwrap();
+        let cert_der = &materials
+            .certificate
+            .to_der()
+            .expect("failed to DER-encode constructed Certificate!");
         store
             .verify_cert_with_time(cert_der, UnixTime::since_unix_epoch(issued_at))
             .or(Err(VerificationError::CertificateVerificationFailure))?;

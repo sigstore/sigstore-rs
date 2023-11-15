@@ -22,8 +22,6 @@ use x509_cert::{
 
 use crate::errors::{Result, SigstoreError};
 
-pub type DERCert = Vec<u8>;
-
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
 ///
@@ -145,9 +143,9 @@ pub(crate) fn is_leaf(certificate: &Certificate) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn is_root_ca(certificate: &Certificate) -> Result<()> {
+pub(crate) fn is_root_ca(_certificate: &Certificate) -> Result<()> {
     // TODO(tnytown)
-    Ok(())
+    todo!()
 }
 
 #[cfg(test)]

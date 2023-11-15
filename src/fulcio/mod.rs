@@ -259,7 +259,10 @@ impl FulcioClient {
             .iter()
             .map(|pem| Certificate::from_der(pem.contents()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let cert = chain.drain(..1).next().unwrap();
+        let cert = chain
+            .drain(..1)
+            .next()
+            .expect("failed to drain certificates of checked length!");
 
         // TODO(tnytown): Implement SCT extraction.
         /*

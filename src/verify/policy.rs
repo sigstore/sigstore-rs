@@ -85,7 +85,8 @@ impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T
         };
 
         // Parse raw string without DER encoding.
-        let val = std::str::from_utf8(ext.extn_value.as_bytes()).unwrap();
+        let val = std::str::from_utf8(ext.extn_value.as_bytes())
+            .expect("failed to parse constructed Extension!");
 
         if val != self.value() {
             Err(VerificationError::PolicyFailure(format!(
@@ -158,19 +159,14 @@ impl<'a> AnyOf<'a> {
 
 impl VerificationPolicy for AnyOf<'_> {
     fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult {
-        let ok = self
-            .children
+        self.children
             .iter()
-            .find(|policy| policy.verify(cert).is_ok());
-
-        return if let Some(_) = ok {
-            Ok(())
-        } else {
-            Err(VerificationError::PolicyFailure(format!(
+            .find(|policy| policy.verify(cert).is_ok())
+            .ok_or(VerificationError::PolicyFailure(format!(
                 "0 of {} policies succeeded",
                 self.children.len()
             )))
-        };
+            .map(|_| ())
     }
 }
 
@@ -194,7 +190,7 @@ impl VerificationPolicy for AllOf<'_> {
         // Without this, we'd consider empty lists of child policies trivially valid.
         // This is almost certainly not what the user wants and is a potential
         // source of API misuse, so we explicitly disallow it.
-        if self.children.len() < 1 {
+        if self.children.is_empty() {
             return Err(VerificationError::PolicyFailure(
                 "no child policies to verify".into(),
             ));
@@ -206,7 +202,7 @@ impl VerificationPolicy for AllOf<'_> {
             .map(|err| err.to_string())
             .collect();
 
-        if failures.len() == 0 {
+        if failures.is_empty() {
             Ok(())
         } else {
             Err(VerificationError::PolicyFailure(format!(

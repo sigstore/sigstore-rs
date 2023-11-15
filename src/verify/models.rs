@@ -130,12 +130,12 @@ impl VerificationMaterials {
             return None;
         };
 
-        if let Err(_) = is_leaf(leaf_cert) {
+        if is_leaf(leaf_cert).is_err() {
             return None;
         }
 
         for chain_cert in chain_certs {
-            if let Ok(_) = is_root_ca(chain_cert) {
+            if is_root_ca(chain_cert).is_ok() {
                 return None;
             }
         }

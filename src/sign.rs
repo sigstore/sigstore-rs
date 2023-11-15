@@ -83,7 +83,7 @@ impl<'ctx> SigningSession<'ctx> {
                 "emailAddress={}",
                 identity.unverified_claims().email
             ))
-            .unwrap();
+            .expect("failed to initialize constant X509Name!");
 
             let mut builder = CertRequestBuilder::new(subject, private_key)?;
             builder
@@ -91,7 +91,7 @@ impl<'ctx> SigningSession<'ctx> {
                     ca: false,
                     path_len_constraint: None,
                 })
-                .unwrap();
+                .expect("failed to initialize constant BasicConstaints!");
 
             let cert_req = builder
                 .build::<p256::ecdsa::DerSignature>()
@@ -215,7 +215,7 @@ impl SigningContext {
     pub fn production() -> Self {
         Self::new(
             FulcioClient::new(
-                Url::parse(FULCIO_ROOT).unwrap(),
+                Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
@@ -273,7 +273,8 @@ impl SigningArtifact {
         };
 
         let canonicalized_body = {
-            let mut body = json_syntax::to_value(self.log_entry.body).unwrap();
+            let mut body = json_syntax::to_value(self.log_entry.body)
+                .expect("failed to parse constructed Body!");
             body.canonicalize();
             Some(base64.encode(body.compact_print().to_string()))
         };

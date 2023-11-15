@@ -23,4 +23,4 @@ macro_rules! tuf_resource {
 }
 
 pub(crate) const SIGSTORE_ROOT: &[u8] = tuf_resource!("prod/root.json");
-pub(crate) const SIGSTORE_TRUST_BUNDLE: &[u8] = tuf_resource!("prod/trusted_root.json");
+pub(crate) const _SIGSTORE_TRUST_BUNDLE: &[u8] = tuf_resource!("prod/trusted_root.json");
