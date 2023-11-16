@@ -21,34 +21,15 @@ pub use sigstore_protobuf_specs::Bundle;
 // Known Sigstore bundle media types.
 #[derive(Clone, Copy, Debug)]
 pub enum Version {
-    Bundle0_1,
+    _Bundle0_1,
     Bundle0_2,
-}
-
-impl TryFrom<&str> for Version {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "application/vnd.dev.sigstore.bundle+json;version=0.1" => Ok(Version::Bundle0_1),
-            "application/vnd.dev.sigstore.bundle+json;version=0.2" => Ok(Version::Bundle0_2),
-            _ => Err(()),
-        }
-    }
-}
-
-impl From<Version> for &str {
-    fn from(value: Version) -> Self {
-        match value {
-            Version::Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
-            Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
-        }
-    }
 }
 
 impl Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str((*self).into())?;
-        Ok(())
+        f.write_str(match &self {
+            Version::_Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
+            Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
+        })
     }
 }
