@@ -256,14 +256,11 @@ impl FulcioClient {
             ));
         }
 
-        let mut chain = certs
+        let cert = Certificate::from_der(certs[0].contents())?;
+        let chain = certs[1..]
             .iter()
             .map(|pem| Certificate::from_der(pem.contents()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let cert = chain
-            .drain(..1)
-            .next()
-            .expect("failed to drain certificates of checked length!");
 
         // TODO(tnytown): Implement SCT extraction.
         // see: https://github.com/RustCrypto/formats/pull/1134
