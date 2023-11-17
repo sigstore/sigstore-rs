@@ -56,17 +56,14 @@ impl TryFrom<&str> for IdentityToken {
     type Error = SigstoreError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let parts: Vec<_> = value.split('.').take(3).collect();
-
-        if parts.len() != 3 {
-            return Err(SigstoreError::IdentityTokenError("Malformed JWT"));
-        }
-        let &[_, claims, _] = &parts[..] else {
-            unreachable!()
-        };
+        let parts: [&str; 3] = value
+            .split('.')
+            .collect::<Vec<_>>()
+            .try_into()
+            .or(Err(SigstoreError::IdentityTokenError("Malformed JWT")))?;
 
         let claims = base64
-            .decode(claims)
+            .decode(parts[1])
             .or(Err(SigstoreError::IdentityTokenError(
                 "Malformed JWT: Unable to decode claims",
             )))?;
