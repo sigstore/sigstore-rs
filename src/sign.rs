@@ -239,7 +239,7 @@ pub struct SigningArtifact {
 impl SigningArtifact {
     /// Consumes the signing artifact and produces a Sigstore [Bundle].
     ///
-    /// The resulting bundle can be serialized with with [serde_json].
+    /// The resulting bundle can be serialized with [serde_json].
     pub fn to_bundle(self) -> Bundle {
         #[inline]
         fn hex_to_base64<S: AsRef<str>>(hex: S) -> String {
