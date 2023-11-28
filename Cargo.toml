@@ -121,7 +121,7 @@ url = "2.2.2"
 x509-cert = { version = "0.2.2", features = ["builder", "pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
-rustls-webpki = { version = "0.102.0", features = ["alloc"] }
+rustls-webpki = { version = "0.102.0-alpha.7", features = ["alloc"] }
 rustls-pki-types = { version = "1.0.0", features = ["std"] }
 serde_repr = "0.1.16"
 hex = "0.4.3"
