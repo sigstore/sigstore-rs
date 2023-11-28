@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::OnceCell;
 use std::io::{self, Read};
-use std::str::FromStr;
 use std::time::SystemTime;
 
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
@@ -33,8 +31,9 @@ use sigstore_protobuf_specs::{
     DevSigstoreRekorV1TransparencyLogEntry,
 };
 use url::Url;
+use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
-use x509_cert::{ext::pkix as x509_ext, name::Name as X509Name};
+use x509_cert::ext::pkix as x509_ext;
 
 use crate::bundle::Version;
 use crate::errors::{Result as SigstoreResult, SigstoreError};
@@ -54,56 +53,50 @@ pub struct SigningSession<'ctx> {
     context: &'ctx SigningContext,
     identity_token: IdentityToken,
     private_key: ecdsa::SigningKey<NistP256>,
-    certs: OnceCell<fulcio::CertificateResponse>,
+    certs: fulcio::CertificateResponse,
 }
 
 impl<'ctx> SigningSession<'ctx> {
-    fn new(context: &'ctx SigningContext, identity_token: IdentityToken) -> Self {
-        Self {
+    fn new(context: &'ctx SigningContext, identity_token: IdentityToken) -> SigstoreResult<Self> {
+        let (private_key, certs) = Self::materials(&context.fulcio, &identity_token)?;
+        Ok(Self {
             context,
             identity_token,
-            private_key: Self::private_key(),
-            certs: Default::default(),
-        }
+            private_key,
+            certs,
+        })
     }
 
-    fn private_key() -> ecdsa::SigningKey<NistP256> {
+    fn materials(
+        fulcio: &FulcioClient,
+        token: &IdentityToken,
+    ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
+        let subject =
+                // SEQUENCE OF RelativeDistinguishedName
+                vec![
+                    // SET OF AttributeTypeAndValue
+                    vec![
+                        // AttributeTypeAndValue, `emailAddress=...``
+                        AttributeTypeAndValue {
+                            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
+                            value: AttributeValue::new(
+                                pkcs8::der::Tag::Utf8String,
+                                token.unverified_claims().email.as_ref(),
+                            )?,
+                        }
+                    ].try_into()?
+                ].into();
+
         let mut rng = rand::thread_rng();
-        let secret_key = p256::SecretKey::random(&mut rng);
-        ecdsa::SigningKey::from(secret_key)
-    }
+        let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rng));
+        let mut builder = CertRequestBuilder::new(subject, &private_key)?;
+        builder.add_extension(&x509_ext::BasicConstraints {
+            ca: false,
+            path_len_constraint: None,
+        })?;
 
-    fn certs(&self) -> SigstoreResult<&fulcio::CertificateResponse> {
-        fn init_certs(
-            fulcio: &FulcioClient,
-            identity: &IdentityToken,
-            private_key: &ecdsa::SigningKey<NistP256>,
-        ) -> SigstoreResult<fulcio::CertificateResponse> {
-            let subject = X509Name::from_str(&format!(
-                "emailAddress={}",
-                identity.unverified_claims().email
-            ))?;
-
-            let mut builder = CertRequestBuilder::new(subject, private_key)?;
-            builder
-                .add_extension(&x509_ext::BasicConstraints {
-                    ca: false,
-                    path_len_constraint: None,
-                })
-                .expect("failed to initialize constant BasicConstaints!");
-
-            let cert_req = builder
-                .build::<p256::ecdsa::DerSignature>()
-                .expect("CSR signing failed");
-            fulcio.request_cert_v2(cert_req, identity)
-        }
-
-        let resp = init_certs(
-            &self.context.fulcio,
-            &self.identity_token,
-            &self.private_key,
-        )?;
-        Ok(self.certs.get_or_init(|| resp))
+        let cert_req = builder.build::<p256::ecdsa::DerSignature>()?;
+        Ok((private_key, fulcio.request_cert_v2(cert_req, token)?))
     }
 
     /// Check if the session's identity token or key material is expired.
@@ -111,17 +104,15 @@ impl<'ctx> SigningSession<'ctx> {
     /// If the session is expired, it cannot be used for signing operations, and a new session
     /// must be created with a fresh identity token.
     pub fn is_expired(&self) -> bool {
-        !self.identity_token.in_validity_period()
-            || self.certs().is_ok_and(|certs| {
-                let not_after = certs
-                    .cert
-                    .tbs_certificate
-                    .validity
-                    .not_after
-                    .to_system_time();
+        let not_after = self
+            .certs
+            .cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_system_time();
 
-                SystemTime::now() > not_after
-            })
+        !self.identity_token.in_validity_period() || SystemTime::now() > not_after
     }
 
     /// Signs for the input with the session's identity. If the identity is expired,
@@ -138,7 +129,6 @@ impl<'ctx> SigningSession<'ctx> {
         let mut hasher = Sha256::new();
         io::copy(input, &mut hasher)?;
 
-        let certs = self.certs()?;
         // TODO(tnytown): Verify SCT here.
 
         // Sign artifact.
@@ -147,7 +137,7 @@ impl<'ctx> SigningSession<'ctx> {
 
         // Prepare inputs.
         let b64_artifact_signature = base64.encode(artifact_signature.to_der());
-        let cert = &certs.cert;
+        let cert = &self.certs.cert;
 
         // Create the transparency log entry.
         let proposed_entry = ProposedLogEntry::Hashedrekord {
@@ -219,7 +209,7 @@ impl SigningContext {
     }
 
     /// Configures and returns a [SigningSession] with the held context.
-    pub fn signer(&self, identity_token: IdentityToken) -> SigningSession {
+    pub fn signer(&self, identity_token: IdentityToken) -> SigstoreResult<SigningSession> {
         SigningSession::new(self, identity_token)
     }
 }
