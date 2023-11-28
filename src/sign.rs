@@ -82,8 +82,7 @@ impl<'ctx> SigningSession<'ctx> {
             let subject = X509Name::from_str(&format!(
                 "emailAddress={}",
                 identity.unverified_claims().email
-            ))
-            .expect("failed to initialize constant X509Name!");
+            ))?;
 
             let mut builder = CertRequestBuilder::new(subject, private_key)?;
             builder
@@ -112,7 +111,7 @@ impl<'ctx> SigningSession<'ctx> {
     /// If the session is expired, it cannot be used for signing operations, and a new session
     /// must be created with a fresh identity token.
     pub fn is_expired(&self) -> bool {
-        self.identity_token.appears_to_be_expired()
+        !self.identity_token.in_validity_period()
             || self.certs().is_ok_and(|certs| {
                 let not_after = certs
                     .cert
@@ -175,10 +174,7 @@ impl<'ctx> SigningSession<'ctx> {
             .build()?;
         let entry = rt
             .block_on(create_log_entry(&self.context.rekor_config, proposed_entry))
-            .map_err(|err| {
-                eprintln!("original: {err:?}");
-                SigstoreError::RekorClientError(err.to_string())
-            })?;
+            .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
 
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
 

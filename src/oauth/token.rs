@@ -25,6 +25,8 @@ pub struct Claims {
     pub aud: String,
     #[serde(with = "chrono::serde::ts_seconds")]
     pub exp: DateTime<Utc>,
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub nbf: Option<DateTime<Utc>>,
     pub email: String,
 }
 
@@ -47,8 +49,15 @@ impl IdentityToken {
         &self.claims
     }
 
-    pub fn appears_to_be_expired(&self) -> bool {
-        Utc::now() > self.claims.exp
+    /// Returns whether or not this token is within its self-stated validity period.
+    pub fn in_validity_period(&self) -> bool {
+        let now = Utc::now();
+
+        if let Some(nbf) = self.claims.nbf {
+            nbf <= now && now < self.claims.exp
+        } else {
+            now < self.claims.exp
+        }
     }
 }
 
