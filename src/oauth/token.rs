@@ -65,22 +65,22 @@ impl TryFrom<&str> for IdentityToken {
     type Error = SigstoreError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let parts: [&str; 3] = value
-            .split('.')
-            .collect::<Vec<_>>()
-            .try_into()
-            .or(Err(SigstoreError::IdentityTokenError("Malformed JWT")))?;
+        let parts: [&str; 3] = value.split('.').collect::<Vec<_>>().try_into().or(Err(
+            SigstoreError::IdentityTokenError("Malformed JWT".into()),
+        ))?;
 
         let claims = base64
             .decode(parts[1])
             .or(Err(SigstoreError::IdentityTokenError(
-                "Malformed JWT: Unable to decode claims",
+                "Malformed JWT: Unable to decode claims".into(),
             )))?;
         let claims: Claims = serde_json::from_slice(&claims).or(Err(
-            SigstoreError::IdentityTokenError("Malformed JWT: claims JSON malformed"),
+            SigstoreError::IdentityTokenError("Malformed JWT: claims JSON malformed".into()),
         ))?;
         if claims.aud != "sigstore" {
-            return Err(SigstoreError::IdentityTokenError("Not a Sigstore JWT"));
+            return Err(SigstoreError::IdentityTokenError(
+                "Not a Sigstore JWT".into(),
+            ));
         }
 
         Ok(IdentityToken {

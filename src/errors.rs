@@ -53,7 +53,7 @@ pub enum SigstoreError {
     InvalidKeyFormat { error: String },
 
     #[error("Unable to parse identity token: {0}")]
-    IdentityTokenError(&'static str),
+    IdentityTokenError(String),
 
     #[error("unmatched key type {key_typ} and signing scheme {scheme}")]
     UnmatchedKeyAndSigningScheme { key_typ: String, scheme: String },
@@ -107,13 +107,13 @@ pub enum SigstoreError {
     CertificateWithIncompleteSubjectAlternativeName,
 
     #[error("Certificate pool error: {0}")]
-    CertificatePoolError(&'static str),
+    CertificatePoolError(String),
 
     #[error("Signing session expired")]
     ExpiredSigningSession(),
 
     #[error("Fulcio request unsuccessful: {0}")]
-    FulcioClientError(&'static str),
+    FulcioClientError(String),
 
     #[error("Cannot fetch manifest of {image}: {error}")]
     RegistryFetchManifestError { image: String, error: String },
@@ -129,6 +129,9 @@ pub enum SigstoreError {
 
     #[error("Rekor request unsuccessful: {0}")]
     RekorClientError(String),
+
+    #[error(transparent)]
+    JoinError(#[from] tokio::task::JoinError),
 
     #[cfg(feature = "sign")]
     #[error(transparent)]
@@ -166,7 +169,7 @@ pub enum SigstoreError {
     TufTargetNotFoundError(String),
 
     #[error("{0}")]
-    TufMetadataError(&'static str),
+    TufMetadataError(String),
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),
