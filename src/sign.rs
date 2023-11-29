@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Types for signing artifacts and producing Sigstore Bundles.
+
 use std::io::{self, Read};
 use std::time::SystemTime;
 
@@ -30,6 +32,8 @@ use sigstore_protobuf_specs::{
     DevSigstoreRekorV1InclusionProof, DevSigstoreRekorV1KindVersion,
     DevSigstoreRekorV1TransparencyLogEntry,
 };
+use tokio::io::AsyncRead;
+use tokio_util::io::SyncIoBridge;
 use url::Url;
 use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
@@ -45,20 +49,26 @@ use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::LogEntry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
 
-/// A Sigstore signing session.
+/// An asynchronous Sigstore signing session.
 ///
 /// Sessions hold a provided user identity and key materials tied to that identity. A single
-/// session may be used to sign multiple items. For more information, see [`Self::sign()`].
-pub struct SigningSession<'ctx> {
+/// session may be used to sign multiple items. For more information, see [`AsyncSigningSession::sign`](Self::sign).
+///
+/// This signing session operates asynchronously. To construct a synchronous [SigningSession],
+/// use [`SigningContext::signer()`].
+pub struct AsyncSigningSession<'ctx> {
     context: &'ctx SigningContext,
     identity_token: IdentityToken,
     private_key: ecdsa::SigningKey<NistP256>,
     certs: fulcio::CertificateResponse,
 }
 
-impl<'ctx> SigningSession<'ctx> {
-    fn new(context: &'ctx SigningContext, identity_token: IdentityToken) -> SigstoreResult<Self> {
-        let (private_key, certs) = Self::materials(&context.fulcio, &identity_token)?;
+impl<'ctx> AsyncSigningSession<'ctx> {
+    async fn new(
+        context: &'ctx SigningContext,
+        identity_token: IdentityToken,
+    ) -> SigstoreResult<AsyncSigningSession<'ctx>> {
+        let (private_key, certs) = Self::materials(&context.fulcio, &identity_token).await?;
         Ok(Self {
             context,
             identity_token,
@@ -67,7 +77,7 @@ impl<'ctx> SigningSession<'ctx> {
         })
     }
 
-    fn materials(
+    async fn materials(
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
@@ -76,7 +86,7 @@ impl<'ctx> SigningSession<'ctx> {
                 vec![
                     // SET OF AttributeTypeAndValue
                     vec![
-                        // AttributeTypeAndValue, `emailAddress=...``
+                        // AttributeTypeAndValue, `emailAddress=...`
                         AttributeTypeAndValue {
                             oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
                             value: AttributeValue::new(
@@ -96,7 +106,7 @@ impl<'ctx> SigningSession<'ctx> {
         })?;
 
         let cert_req = builder.build::<p256::ecdsa::DerSignature>()?;
-        Ok((private_key, fulcio.request_cert_v2(cert_req, token)?))
+        Ok((private_key, fulcio.request_cert_v2(cert_req, token).await?))
     }
 
     /// Check if the session's identity token or key material is expired.
@@ -115,19 +125,10 @@ impl<'ctx> SigningSession<'ctx> {
         !self.identity_token.in_validity_period() || SystemTime::now() > not_after
     }
 
-    /// Signs for the input with the session's identity. If the identity is expired,
-    /// [SigstoreError::ExpiredSigningSession] is returned.
-    ///
-    /// TODO(tnytown): Make this async safe. We may need to make the underlying trait functions
-    /// implementations async and wrap them with executors for the sync variants. Our async
-    /// variants would also need to use async variants of common traits (AsyncRead? AsyncHasher?)
-    pub fn sign<R: Read>(&self, input: &mut R) -> SigstoreResult<SigningArtifact> {
+    async fn sign_digest(&self, hasher: Sha256) -> SigstoreResult<SigningArtifact> {
         if self.is_expired() {
             return Err(SigstoreError::ExpiredSigningSession());
         }
-
-        let mut hasher = Sha256::new();
-        io::copy(input, &mut hasher)?;
 
         // TODO(tnytown): Verify SCT here.
 
@@ -158,12 +159,8 @@ impl<'ctx> SigningSession<'ctx> {
             },
         };
 
-        // HACK(tnytown): We aren't async yet.
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        let entry = rt
-            .block_on(create_log_entry(&self.context.rekor_config, proposed_entry))
+        let entry = create_log_entry(&self.context.rekor_config, proposed_entry)
+            .await
             .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
 
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
@@ -175,13 +172,72 @@ impl<'ctx> SigningSession<'ctx> {
             log_entry: entry,
         })
     }
+
+    /// Signs for the input with the session's identity. If the identity is expired,
+    /// [SigstoreError::ExpiredSigningSession] is returned.
+    pub async fn sign<R: AsyncRead + Unpin + Send + 'static>(
+        &self,
+        input: R,
+    ) -> SigstoreResult<SigningArtifact> {
+        if self.is_expired() {
+            return Err(SigstoreError::ExpiredSigningSession());
+        }
+
+        let mut sync_input = SyncIoBridge::new(input);
+        let hasher = tokio::task::spawn_blocking(move || -> SigstoreResult<_> {
+            let mut hasher = Sha256::new();
+            io::copy(&mut sync_input, &mut hasher)?;
+            Ok(hasher)
+        })
+        .await??;
+
+        self.sign_digest(hasher).await
+    }
+}
+
+/// A synchronous Sigstore signing session.
+///
+/// Sessions hold a provided user identity and key materials tied to that identity. A single
+/// session may be used to sign multiple items. For more information, see [`SigningSession::sign`](Self::sign).
+///
+/// This signing session operates synchronously, thus it cannot be used in an asynchronous context.
+/// To construct an asynchronous [SigningSession], use [`SigningContext::async_signer()`].
+pub struct SigningSession<'ctx> {
+    inner: AsyncSigningSession<'ctx>,
+    rt: tokio::runtime::Runtime,
+}
+
+impl<'ctx> SigningSession<'ctx> {
+    fn new(ctx: &'ctx SigningContext, token: IdentityToken) -> SigstoreResult<Self> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let inner = rt.block_on(AsyncSigningSession::new(ctx, token))?;
+        Ok(Self { inner, rt })
+    }
+
+    /// Check if the session's identity token or key material is expired.
+    ///
+    /// If the session is expired, it cannot be used for signing operations, and a new session
+    /// must be created with a fresh identity token.
+    pub fn is_expired(&self) -> bool {
+        self.inner.is_expired()
+    }
+
+    /// Signs for the input with the session's identity. If the identity is expired,
+    /// [SigstoreError::ExpiredSigningSession] is returned.
+    pub fn sign<R: Read>(&self, mut input: R) -> SigstoreResult<SigningArtifact> {
+        let mut hasher = Sha256::new();
+        io::copy(&mut input, &mut hasher)?;
+        self.rt.block_on(self.inner.sign_digest(hasher))
+    }
 }
 
 /// A Sigstore signing context.
 ///
 /// Contexts hold Fulcio (CA) and Rekor (CT) configurations which signing sessions can be
-/// constructed against. Use [`Self::production()`] to create a context against the public-good
-/// Sigstore infrastructure.
+/// constructed against. Use [`SigningContext::production`](Self::production) to create a context against
+/// the public-good Sigstore infrastructure.
 pub struct SigningContext {
     fulcio: FulcioClient,
     rekor_config: RekorConfiguration,
@@ -208,7 +264,17 @@ impl SigningContext {
         )
     }
 
-    /// Configures and returns a [SigningSession] with the held context.
+    /// Configures and returns an [AsyncSigningSession] with the held context.
+    pub async fn async_signer(
+        &self,
+        identity_token: IdentityToken,
+    ) -> SigstoreResult<AsyncSigningSession> {
+        AsyncSigningSession::new(self, identity_token).await
+    }
+
+    /// Configures and returns a [SigningContext] with the held context.
+    ///
+    /// Async contexts must use [`SigningContext::async_signer`](Self::async_signer).
     pub fn signer(&self, identity_token: IdentityToken) -> SigstoreResult<SigningSession> {
         SigningSession::new(self, identity_token)
     }
