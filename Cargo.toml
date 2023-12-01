@@ -121,14 +121,14 @@ url = "2.2.2"
 x509-cert = { version = "0.2.2", features = ["pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
-rustls-webpki = { version = "0.102.0-alpha.4", features = ["alloc"] }
-rustls-pki-types = { version = "0.2.1", features = ["std"] }
+rustls-webpki = { version = "0.102.0", features = ["alloc"] }
+rustls-pki-types = { version = "1.0.0", features = ["std"] }
 serde_repr = "0.1.16"
 
 [dev-dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
 assert-json-diff = "2.0.2"
-chrono = "0.4.27"
+chrono = "0.4.31"
 clap = { version = "4.0.8", features = ["derive"] }
 docker_credential = "1.1.0"
 openssl = "0.10.38"
