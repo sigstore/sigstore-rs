@@ -253,7 +253,7 @@ where
 /// [`SigstoreApplicationConstraintsError`]
 /// which contains a vector of references to unapplied constraints.
 ///
-/// See the documentation of the [`cosign::sign_constraint`](crate::cosign::sign_constraint) module for more
+/// See the documentation of the [`cosign::constraint`](crate::cosign::constraint) module for more
 /// details about how to define constraints.
 pub fn apply_constraints<'a, 'b, I>(
     signature_layer: &'a mut SignatureLayer,

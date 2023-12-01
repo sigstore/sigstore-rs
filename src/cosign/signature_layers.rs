@@ -98,8 +98,7 @@ pub enum CertificateSubject {
     Uri(String),
 }
 
-/// Object that contains all the data about a
-/// [`SimpleSigning`](crate::simple_signing::SimpleSigning) object.
+/// Object that contains all the data about a `SimpleSigning` object.
 ///
 /// The struct provides some helper methods that can be used at verification
 /// time.

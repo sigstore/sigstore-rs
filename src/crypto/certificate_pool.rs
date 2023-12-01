@@ -39,7 +39,7 @@ impl<'a> CertificatePool<'a> {
         Ok(CertificatePool {
             trusted_roots: trusted_roots
                 .into_iter()
-                .map(|x| Ok(webpki::extract_trust_anchor(&x)?.to_owned()))
+                .map(|x| Ok(webpki::anchor_from_trusted_cert(&x)?.to_owned()))
                 .collect::<std::result::Result<Vec<_>, webpki::Error>>()?,
             intermediates: untrusted_intermediates.into_iter().collect(),
         })
