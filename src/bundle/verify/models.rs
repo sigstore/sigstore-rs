@@ -102,6 +102,9 @@ pub enum CertificateErrorKind {
     #[error("certificate expired before time of signing")]
     Expired,
 
+    #[error("certificate SCT verification failed")]
+    Sct(#[source] crate::crypto::transparency::SCTError),
+
     #[error("certificate verification failed")]
     VerificationFailed(#[source] webpki::Error),
 }

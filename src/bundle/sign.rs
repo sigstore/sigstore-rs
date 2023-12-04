@@ -39,6 +39,8 @@ use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
 
 use crate::bundle::models::Version;
+use crate::crypto::keyring::Keyring;
+use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
@@ -46,6 +48,10 @@ use crate::oauth::IdentityToken;
 use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
+use crate::trust::TrustRoot;
+
+#[cfg(feature = "sigstore-trust-root")]
+use crate::trust::sigstore::SigstoreTrustRoot;
 
 /// An asynchronous Sigstore signing session.
 ///
@@ -128,7 +134,12 @@ impl<'ctx> SigningSession<'ctx> {
             return Err(SigstoreError::ExpiredSigningSession());
         }
 
-        // TODO(tnytown): verify SCT here, sigstore-rs#326
+        if let Some(detached_sct) = &self.certs.detached_sct {
+            verify_sct(detached_sct, &self.context.ctfe_keyring)?;
+        } else {
+            let sct = CertificateEmbeddedSCT::new(&self.certs.cert, &self.certs.chain)?;
+            verify_sct(&sct, &self.context.ctfe_keyring)?;
+        }
 
         // Sign artifact.
         let input_hash: &[u8] = &hasher.clone().finalize();
@@ -247,27 +258,49 @@ pub mod blocking {
 pub struct SigningContext {
     fulcio: FulcioClient,
     rekor_config: RekorConfiguration,
+    ctfe_keyring: Keyring,
 }
 
 impl SigningContext {
     /// Manually constructs a [`SigningContext`] from its constituent data.
-    pub fn new(fulcio: FulcioClient, rekor_config: RekorConfiguration) -> Self {
+    pub fn new(
+        fulcio: FulcioClient,
+        rekor_config: RekorConfiguration,
+        ctfe_keyring: Keyring,
+    ) -> Self {
         Self {
             fulcio,
             rekor_config,
+            ctfe_keyring,
         }
     }
 
     /// Returns a [`SigningContext`] configured against the public-good production Sigstore
     /// infrastructure.
-    pub fn production() -> SigstoreResult<Self> {
+    #[cfg(feature = "sigstore-trust-root")]
+    pub async fn async_production() -> SigstoreResult<Self> {
+        let trust_root = SigstoreTrustRoot::new(None).await?;
         Ok(Self::new(
             FulcioClient::new(
                 Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
+            Keyring::new(trust_root.ctfe_keys()?)?,
         ))
+    }
+
+    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
+    /// infrastructure.
+    ///
+    /// Async callers should use [`SigningContext::async_production`].
+    #[cfg(feature = "sigstore-trust-root")]
+    pub fn production() -> SigstoreResult<Self> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
+        rt.block_on(Self::async_production())
     }
 
     /// Configures and returns a [`SigningSession`] with the held context.
