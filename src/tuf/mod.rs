@@ -270,7 +270,6 @@ impl Repository for SigstoreRepository {
     /// an async function because it performs blocking operations.
     fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
         let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
-
         if keys.is_empty() {
             Err(SigstoreError::TufMetadataError(
                 "CTFE keys not found".into(),

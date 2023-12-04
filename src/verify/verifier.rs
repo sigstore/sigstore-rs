@@ -22,7 +22,11 @@ use x509_cert::der::Encode;
 
 use crate::{
     bundle::Bundle,
-    crypto::{CertificatePool, CosignVerificationKey, Signature},
+    crypto::{
+        keyring::Keyring,
+        transparency::{verify_sct, CertificateEmbeddedSCT},
+        CertificatePool, CosignVerificationKey, Signature,
+    },
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
     tuf::{Repository, SigstoreRepository},
@@ -41,6 +45,7 @@ pub struct AsyncVerifier {
     #[allow(dead_code)]
     rekor_config: RekorConfiguration,
     cert_pool: CertificatePool,
+    ctfe_keyring: Keyring,
 }
 
 impl AsyncVerifier {
@@ -52,10 +57,12 @@ impl AsyncVerifier {
         trust_repo: R,
     ) -> SigstoreResult<Self> {
         let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
+        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?)?;
 
         Ok(Self {
             rekor_config,
             cert_pool,
+            ctfe_keyring,
         })
     }
 
@@ -100,14 +107,18 @@ impl AsyncVerifier {
             .try_into()
             .map_err(CertificateErrorKind::Malformed)?;
 
-        let _trusted_chain = self
+        let trusted_chain = self
             .cert_pool
             .verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
             .map_err(CertificateErrorKind::VerificationFailed)?;
 
         debug!("signing certificate chains back to trusted root");
 
-        // TODO(tnytown): verify SCT here, sigstore-rs#326
+        let sct_context =
+            CertificateEmbeddedSCT::new_with_verified_path(&materials.certificate, &trusted_chain)
+                .map_err(CertificateErrorKind::Sct)?;
+        verify_sct(&sct_context, &self.ctfe_keyring).map_err(CertificateErrorKind::Sct)?;
+        debug!("signing certificate's SCT is valid");
 
         // 2) Verify that the signing certificate belongs to the signer.
         policy.verify(&materials.certificate)?;
