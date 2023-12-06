@@ -87,6 +87,7 @@ impl VerificationMaterials {
             let cell = OnceCell::new();
 
             // TODO(tnytown): Switch to setting if offline when Rekor fetching is implemented.
+            #[allow(clippy::unwrap_used)]
             cell.set(rekor_entry).unwrap();
 
             cell
@@ -167,10 +168,7 @@ impl VerificationMaterials {
                 }
             }
             BundleVersion::Bundle0_2 => {
-                if inclusion_proof.is_none() {
-                    // 0.2 bundle must contain inclusion proof
-                    return None;
-                }
+                inclusion_proof?;
                 if !has_checkpoint {
                     // inclusion proofs must contain checkpoints
                     return None;
@@ -217,6 +215,7 @@ impl VerificationMaterials {
     /// Retrieves the [LogEntry] for the materials.
     pub fn rekor_entry(&self) -> &LogEntry {
         // TODO(tnytown): Fetch online Rekor entry, confirm consistency, and get_or_init here.
+        #[allow(clippy::unwrap_used)]
         self.rekor_entry.get().unwrap()
     }
 }
