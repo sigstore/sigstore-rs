@@ -154,6 +154,120 @@ impl RepositoryHelper {
     }
 }
 
+/// Given a `range`, checks that the the current time is not before `start`. If
+/// `allow_expired` is `false`, also checks that the current time is not after
+/// `end`.
+fn is_timerange_valid(range: Option<TimeRange>, allow_expired: bool) -> bool {
+    let time = chrono::Utc::now();
+
+    match range {
+        // If there was no validity period specified, the key is always valid.
+        None => true,
+        // Active: if the current time is before the starting period, we are not yet valid.
+        Some(range) if time < range.start => false,
+        // If we want Expired keys, then the key is valid at this point.
+        _ if allow_expired => true,
+        // Otherwise, check that we are in range if the range has an end.
+        Some(range) => match range.end {
+            None => true,
+            Some(end) => time <= end,
+        },
+    }
+}
+
+/// Download a file stored inside of a TUF repository, try to reuse a local
+/// cache when possible.
+///
+/// * `repository`: TUF repository holding the file
+/// * `target_name`: TUF representation of the file to be downloaded
+/// * `local_file`: location where the file should be downloaded
+///
+/// This function will reuse the local copy of the file if contents
+/// didn't change.
+/// This check is done by comparing the digest of the local file, if found,
+/// with the digest reported inside of the TUF repository metadata.
+///
+/// **Note well:** the `local_file` is updated whenever its contents are
+/// outdated.
+fn fetch_target_or_reuse_local_cache(
+    repository: &tough::Repository,
+    target_name: &TargetName,
+    local_file: Option<&PathBuf>,
+) -> Result<Vec<u8>> {
+    let (local_file_outdated, local_file_contents) = if let Some(path) = local_file {
+        is_local_file_outdated(repository, target_name, path)
+    } else {
+        Ok((true, None))
+    }?;
+
+    let data = if local_file_outdated {
+        let data = fetch_target(repository, target_name)?;
+        if let Some(path) = local_file {
+            // update the local file to have latest data from the TUF repo
+            fs::write(path, data.clone())?;
+        }
+        data
+    } else {
+        local_file_contents
+            .expect("local file contents to not be 'None'")
+            .as_bytes()
+            .to_owned()
+    };
+
+    Ok(data)
+}
+
+/// Download a file from a TUF repository
+fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
+    let data: Vec<u8>;
+    match repository.read_target(target_name).map_err(Box::new)? {
+        None => Err(SigstoreError::TufTargetNotFoundError(
+            target_name.raw().to_string(),
+        )),
+        Some(reader) => {
+            data = read_to_end(reader)?;
+            Ok(data)
+        }
+    }
+}
+
+/// Compares the checksum of a local file, with the digest reported inside of
+/// TUF repository metadata
+fn is_local_file_outdated(
+    repository: &tough::Repository,
+    target_name: &TargetName,
+    local_file: &Path,
+) -> Result<(bool, Option<String>)> {
+    let target = repository
+        .targets()
+        .signed
+        .targets
+        .get(target_name)
+        .ok_or_else(|| SigstoreError::TufTargetNotFoundError(target_name.raw().to_string()))?;
+
+    if local_file.exists() {
+        let data = fs::read_to_string(local_file)?;
+        let local_checksum = Sha256::digest(data.clone());
+        let expected_digest: Vec<u8> = target.hashes.sha256.to_vec();
+
+        if local_checksum.as_slice() == expected_digest.as_slice() {
+            // local data is not outdated
+            Ok((false, Some(data)))
+        } else {
+            Ok((true, None))
+        }
+    } else {
+        Ok((true, None))
+    }
+}
+
+/// Gets the goods from a read and makes a Vec
+fn read_to_end<R: Read>(mut reader: R) -> Result<Vec<u8>> {
+    let mut v = Vec::new();
+    reader.read_to_end(&mut v)?;
+    Ok(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::constants::*;

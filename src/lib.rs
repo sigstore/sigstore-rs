@@ -283,3 +283,13 @@ pub mod rekor;
 
 #[cfg(feature = "tuf")]
 pub mod tuf;
+
+// Don't export yet -- these types should only be useful internally.
+mod bundle;
+pub use bundle::Bundle;
+
+#[cfg(feature = "verify")]
+pub mod verify;
+
+#[cfg(feature = "sign")]
+pub mod sign;
