@@ -26,6 +26,7 @@ pub struct Claims {
     #[serde(with = "chrono::serde::ts_seconds")]
     pub exp: DateTime<Utc>,
     #[serde(with = "chrono::serde::ts_seconds_option")]
+    #[serde(default)]
     pub nbf: Option<DateTime<Utc>>,
     pub email: String,
 }
