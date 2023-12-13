@@ -35,9 +35,7 @@ pub type UnverifiedClaims = Claims;
 /// A Sigstore token.
 pub struct IdentityToken {
     original_token: String,
-    // header
     claims: UnverifiedClaims,
-    // signature
 }
 
 impl IdentityToken {
