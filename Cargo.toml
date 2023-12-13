@@ -80,7 +80,7 @@ ed25519 = { version = "2.2.1", features = ["alloc"] }
 ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
 elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
 lazy_static = "1.4.0"
-oci-distribution = { version = "0.9", default-features = false, optional = true }
+oci-distribution = { version = "0.10", default-features = false, optional = true }
 olpc-cjson = "0.1"
 openidconnect = { version = "3.0", default-features = false, features = [
   "reqwest",
