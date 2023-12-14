@@ -214,4 +214,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     Ed25519PKCS8Error(#[from] ed25519_dalek::pkcs8::spki::Error),
+
+    #[error("Failed to request the certificate")]
+    CertificateRequestError,
 }
