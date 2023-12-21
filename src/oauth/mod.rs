@@ -14,3 +14,6 @@
 // limitations under the License.
 
 pub mod openidflow;
+
+mod token;
+pub use token::IdentityToken;

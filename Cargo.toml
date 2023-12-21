@@ -9,7 +9,7 @@ readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
 [features]
-default = ["full-native-tls", "cached-client", "tuf"]
+default = ["full-native-tls", "cached-client", "tuf", "sign"]
 wasm = ["getrandom/js"]
 
 full-native-tls = [
@@ -42,6 +42,8 @@ rekor = ["reqwest"]
 
 tuf = ["tough", "regex"]
 
+sign = []
+
 cosign-native-tls = [
   "oci-distribution/native-tls",
   "cert",
@@ -72,7 +74,7 @@ async-trait = "0.1.52"
 base64 = "0.21.0"
 cached = { version = "0.46.0", optional = true, features = ["async"] }
 cfg-if = "1.0.0"
-chrono = { version = "0.4.27", default-features = false }
+chrono = { version = "0.4.27", default-features = false, features = ["serde"] }
 const-oid = "0.9.1"
 digest = { version = "0.10.3", default-features = false }
 ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
@@ -88,7 +90,7 @@ openidconnect = { version = "3.0", default-features = false, features = [
 p256 = "0.13.2"
 p384 = "0.13"
 webbrowser = "0.8.4"
-pem = "3.0"
+pem = { version = "3.0", features = ["serde"] }
 pkcs1 = { version = "0.7.5", features = ["std"] }
 pkcs8 = { version = "0.10.2", features = [
   "pem",
@@ -110,17 +112,21 @@ serde_json = "1.0.79"
 serde_with = { version = "3.4.0", features = ["base64"] }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = { version = "2.0" }
+sigstore_protobuf_specs = "0.1.0-rc.2"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
+tokio-util = { version = "0.7.10", features = ["io-util"] }
 tough = { version = "0.14", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
-x509-cert = { version = "0.2.2", features = ["pem", "std"] }
+x509-cert = { version = "0.2.2", features = ["builder", "pem", "std"] }
 crypto_secretbox = "0.1.1"
 zeroize = "1.5.7"
-rustls-webpki = { version = "0.102.0", features = ["alloc"] }
+rustls-webpki = { version = "0.102.0-alpha.7", features = ["alloc"] }
 rustls-pki-types = { version = "1.0.0", features = ["std"] }
 serde_repr = "0.1.16"
+hex = "0.4.3"
+json-syntax = { version = "0.9.6", features = ["canonicalize", "serde"] }
 
 [dev-dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
@@ -134,7 +140,6 @@ serial_test = "2.0.0"
 tempfile = "3.3.0"
 testcontainers = "0.15"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
-hex = "0.4.3"
 
 # cosign example mappings
 

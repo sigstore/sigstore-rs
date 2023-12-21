@@ -195,7 +195,7 @@ impl Repository for SigstoreRepository {
 
         if certs.is_empty() {
             Err(SigstoreError::TufMetadataError(
-                "Fulcio certificates not found",
+                "Fulcio certificates not found".into(),
             ))
         } else {
             Ok(certs)
@@ -215,7 +215,7 @@ impl Repository for SigstoreRepository {
 
         if keys.len() != 1 {
             Err(SigstoreError::TufMetadataError(
-                "Did not find exactly 1 active Rekor key",
+                "Did not find exactly 1 active Rekor key".into(),
             ))
         } else {
             Ok(keys)

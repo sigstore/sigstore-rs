@@ -1,3 +1,18 @@
+//
+// Copyright 2023 The Sigstore Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
@@ -14,7 +29,7 @@ use super::{
 
 /// Stores the response returned by Rekor after making a new entry
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct LogEntry {
     pub uuid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,4 +110,10 @@ pub struct InclusionProof {
     pub log_index: i64,
     pub root_hash: String,
     pub tree_size: TreeSize,
+
+    /// A snapshot of the transparency log's state at a specific point in time,
+    /// in [Signed Note format].
+    ///
+    /// [Signed Note format]: https://github.com/transparency-dev/formats/blob/main/log/README.md
+    pub checkpoint: String,
 }
