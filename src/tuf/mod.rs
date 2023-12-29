@@ -27,20 +27,24 @@
 //! method.
 //!
 //! ```rust,no_run
-//! use sigstore::tuf::SigstoreRepository;
-//! let repo = SigstoreRepository::new(None).unwrap().prefetch().unwrap();
+//! #[tokio::main]
+//! async fn main() {
+//!     use sigstore::tuf::SigstoreRepository;
+//!     let repo = SigstoreRepository::new(None).await.unwrap().prefetch().await.unwrap();
+//! }
 //! ```
 use std::{
-    cell::OnceCell,
     fs,
-    io::Read,
     path::{Path, PathBuf},
 };
 
 mod constants;
 mod trustroot;
 
+use async_trait::async_trait;
+use futures_util::stream::StreamExt;
 use sha2::{Digest, Sha256};
+use tokio::sync::OnceCell;
 use tough::TargetName;
 use tracing::debug;
 use webpki::types::CertificateDer;
@@ -50,9 +54,10 @@ use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, 
 use super::errors::{Result, SigstoreError};
 
 /// A `Repository` owns all key material necessary for establishing a root of trust.
+#[async_trait]
 pub trait Repository {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>>;
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
+    async fn fulcio_certs(&self) -> Result<Vec<CertificateDer>>;
+    async fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
 }
 
 /// A `ManualRepository` is a [Repository] with out-of-band trust materials.
@@ -63,15 +68,16 @@ pub struct ManualRepository<'a> {
     pub rekor_key: Option<Vec<u8>>,
 }
 
+#[async_trait]
 impl Repository for ManualRepository<'_> {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+    async fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
         Ok(match &self.fulcio_certs {
             Some(certs) => certs.clone(),
             None => Vec::new(),
         })
     }
 
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+    async fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
         Ok(match &self.rekor_key {
             Some(key) => vec![&key[..]],
             None => Vec::new(),
@@ -89,15 +95,16 @@ pub struct SigstoreRepository {
 
 impl SigstoreRepository {
     /// Constructs a new trust repository established by a [tough::Repository].
-    pub fn new(checkout_dir: Option<&Path>) -> Result<Self> {
+    pub async fn new(checkout_dir: Option<&Path>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
         let repository =
-            tough::RepositoryLoader::new(constants::SIGSTORE_ROOT, metadata_base, target_base)
+            tough::RepositoryLoader::new(&constants::SIGSTORE_ROOT, metadata_base, target_base)
                 .expiration_enforcement(tough::ExpirationEnforcement::Safe)
                 .load()
+                .await
                 .map_err(Box::new)?;
 
         Ok(Self {
@@ -107,8 +114,8 @@ impl SigstoreRepository {
         })
     }
 
-    fn trusted_root(&self) -> Result<&TrustedRoot> {
-        fn init_trusted_root(
+    async fn trusted_root(&self) -> Result<&TrustedRoot> {
+        async fn init_trusted_root(
             repository: &tough::Repository,
             checkout_dir: Option<&PathBuf>,
         ) -> Result<TrustedRoot> {
@@ -119,7 +126,8 @@ impl SigstoreRepository {
                 repository,
                 &trusted_root_target,
                 local_path.as_ref(),
-            )?;
+            )
+            .await?;
 
             debug!("data:\n{}", String::from_utf8_lossy(&data));
 
@@ -130,8 +138,8 @@ impl SigstoreRepository {
             return Ok(root);
         }
 
-        let root = init_trusted_root(&self.repository, self.checkout_dir.as_ref())?;
-        Ok(self.trusted_root.get_or_init(|| root))
+        let root = init_trusted_root(&self.repository, self.checkout_dir.as_ref()).await?;
+        Ok(self.trusted_root.get_or_init(|| async { root }).await)
     }
 
     /// Prefetches trust materials.
@@ -141,18 +149,17 @@ impl SigstoreRepository {
     /// use this method to fetch the trust root ahead of time.
     ///
     /// ```rust
-    /// # use tokio::task::spawn_blocking;
     /// # use sigstore::tuf::SigstoreRepository;
     /// # use sigstore::errors::Result;
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), anyhow::Error> {
-    /// let repo: Result<SigstoreRepository> = spawn_blocking(|| Ok(SigstoreRepository::new(None)?.prefetch()?)).await?;
+    /// let repo: Result<SigstoreRepository> = Ok(SigstoreRepository::new(None).await?.prefetch().await?);
     /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRepository`
     /// # Ok(())
     /// # }
     /// ```
-    pub fn prefetch(self) -> Result<Self> {
-        let _ = self.trusted_root()?;
+    pub async fn prefetch(self) -> Result<Self> {
+        let _ = self.trusted_root().await?;
         Ok(self)
     }
 
@@ -177,16 +184,14 @@ impl SigstoreRepository {
     }
 }
 
+#[async_trait]
 impl Repository for SigstoreRepository {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
-        let root = self.trusted_root()?;
+    async fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+        let root = self.trusted_root().await?;
 
         // Allow expired certificates: they may have been active when the
         // certificate was used to sign.
@@ -206,11 +211,8 @@ impl Repository for SigstoreRepository {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        let root = self.trusted_root()?;
+    async fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+        let root = self.trusted_root().await?;
         let keys: Vec<_> = Self::tlog_keys(&root.tlogs).collect();
 
         if keys.len() != 1 {
@@ -258,7 +260,7 @@ fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
 ///
 /// **Note well:** the `local_file` is updated whenever its contents are
 /// outdated.
-fn fetch_target_or_reuse_local_cache(
+async fn fetch_target_or_reuse_local_cache(
     repository: &tough::Repository,
     target_name: &TargetName,
     local_file: Option<&PathBuf>,
@@ -270,7 +272,7 @@ fn fetch_target_or_reuse_local_cache(
     }?;
 
     let data = if local_file_outdated {
-        let data = fetch_target(repository, target_name)?;
+        let data = fetch_target(repository, target_name).await?;
         if let Some(path) = local_file {
             // update the local file to have latest data from the TUF repo
             fs::write(path, data.clone())?;
@@ -287,14 +289,21 @@ fn fetch_target_or_reuse_local_cache(
 }
 
 /// Download a file from a TUF repository
-fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
-    let data: Vec<u8>;
-    match repository.read_target(target_name).map_err(Box::new)? {
+async fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
+    match repository
+        .read_target(target_name)
+        .await
+        .map_err(Box::new)?
+    {
         None => Err(SigstoreError::TufTargetNotFoundError(
             target_name.raw().to_string(),
         )),
-        Some(reader) => {
-            data = read_to_end(reader)?;
+        Some(mut stream) => {
+            let mut data = vec![];
+            while let Some(d) = stream.next().await {
+                let mut d = Into::<Vec<u8>>::into(d.map_err(Box::new)?);
+                data.append(&mut d);
+            }
             Ok(data)
         }
     }
@@ -330,9 +339,17 @@ fn is_local_file_outdated(
     }
 }
 
-/// Gets the goods from a read and makes a Vec
-fn read_to_end<R: Read>(mut reader: R) -> Result<Vec<u8>> {
-    let mut v = Vec::new();
-    reader.read_to_end(&mut v)?;
-    Ok(v)
+#[cfg(test)]
+mod tests {
+    use crate::tuf::SigstoreRepository;
+
+    #[tokio::test]
+    async fn prefetch() {
+        let _repo = SigstoreRepository::new(None)
+            .await
+            .expect("initialize SigstoreRepository")
+            .prefetch()
+            .await
+            .expect("prefetch");
+    }
 }

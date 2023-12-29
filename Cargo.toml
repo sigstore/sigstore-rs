@@ -40,7 +40,7 @@ rekor-native-tls = ["reqwest/native-tls", "rekor"]
 rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-tuf = ["tough", "regex"]
+tuf = ["futures-util", "tough", "regex", "tokio/sync"]
 
 sign = []
 
@@ -81,6 +81,7 @@ ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
 ed25519 = { version = "2.2.1", features = ["alloc"] }
 ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
 elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
+futures-util = { version = "0.3.30", optional = true }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.10", default-features = false, optional = true }
 olpc-cjson = "0.1"
@@ -116,7 +117,8 @@ sigstore_protobuf_specs = "0.1.0-rc.2"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
 tokio-util = { version = "0.7.10", features = ["io-util"] }
-tough = { version = "0.14", features = ["http"], optional = true }
+# TODO: replace this with crates.io once
+tough = { git = "https://github.com/awslabs/tough.git", rev = "7f30c64", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
 x509-cert = { version = "0.2.2", features = ["builder", "pem", "std"] }

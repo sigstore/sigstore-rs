@@ -34,7 +34,6 @@ extern crate clap;
 use clap::Parser;
 
 use std::{collections::HashMap, fs};
-use tokio::task::spawn_blocking;
 
 extern crate tracing_subscriber;
 use tracing::{info, warn};
@@ -133,7 +132,7 @@ async fn run_app(
 
     let mut client_builder =
         sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
-    client_builder = client_builder.with_trust_repository(frd)?;
+    client_builder = client_builder.with_trust_repository(frd).await?;
 
     let cert_chain: Option<Vec<sigstore::registry::Certificate>> = match cli.cert_chain.as_ref() {
         None => None,
@@ -187,7 +186,7 @@ async fn run_app(
     }
     if let Some(path_to_cert) = cli.cert.as_ref() {
         let cert = fs::read(path_to_cert).map_err(|e| anyhow!("Cannot read cert: {:?}", e))?;
-        let require_rekor_bundle = if !frd.rekor_keys()?.is_empty() {
+        let require_rekor_bundle = if !frd.rekor_keys().await?.is_empty() {
             true
         } else {
             warn!("certificate based verification is weaker when Rekor integration is disabled");
@@ -230,14 +229,14 @@ async fn run_app(
 
 async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tuf::Repository>> {
     if cli.use_sigstore_tuf_data {
-        let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
-            info!("Downloading data from Sigstore TUF repository");
-            SigstoreRepository::new(None)?.prefetch()
-        })
-        .await
-        .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
+        info!("Downloading data from Sigstore TUF repository");
+        let repo = SigstoreRepository::new(None)
+            .await?
+            .prefetch()
+            .await
+            .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
 
-        return Ok(Box::new(repo?));
+        return Ok(Box::new(repo));
     };
 
     let mut data = sigstore::tuf::ManualRepository::default();

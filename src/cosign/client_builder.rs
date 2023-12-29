@@ -72,12 +72,15 @@ impl<'a> ClientBuilder<'a> {
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
     /// See [crate::tuf::Repository] for more details on trust repositories.
-    pub fn with_trust_repository<R: Repository + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
-        let rekor_keys = repo.rekor_keys()?;
+    pub async fn with_trust_repository<R: Repository + ?Sized>(
+        mut self,
+        repo: &'a R,
+    ) -> Result<Self> {
+        let rekor_keys = repo.rekor_keys().await?;
         if !rekor_keys.is_empty() {
             self.rekor_pub_key = Some(rekor_keys[0]);
         }
-        self.fulcio_certs = repo.fulcio_certs()?;
+        self.fulcio_certs = repo.fulcio_certs().await?;
 
         Ok(self)
     }
