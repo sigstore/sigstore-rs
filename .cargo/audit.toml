@@ -7,9 +7,6 @@ ignore = [
                        # to API breakages.
                        #
                        # This is a transitive depependency of tough
-  "RUSTSEC-2021-0139",  # ansi_term is no longer maintained, however this is a transient dependency of
-                       # the `tracing-subscriber` crate, which is a dev_dependency and so therefore
-                       # will not be included in a release build.
   "RUSTSEC-2023-0071"  # "Classic" RSA timing sidechannel attack from non-constant-time implementation.
                        # Okay for local use.
                        # https://rustsec.org/advisories/RUSTSEC-2023-0071.html
