@@ -288,5 +288,8 @@ pub mod tuf;
 mod bundle;
 pub use bundle::Bundle;
 
+#[cfg(feature = "verify")]
+pub mod verify;
+
 #[cfg(feature = "sign")]
 pub mod sign;

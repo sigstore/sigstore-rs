@@ -16,7 +16,7 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use const_oid::db::rfc5912::ID_KP_CODE_SIGNING;
 use x509_cert::{
-    ext::pkix::{ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName},
+    ext::pkix::{constraints, ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName},
     Certificate,
 };
 
@@ -118,6 +118,147 @@ fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<
     }
 
     Ok(())
+}
+
+/// Check if the given certificate is a leaf in the context of the Sigstore profile.
+///
+/// * It is not a root or intermediate CA;
+/// * It has `keyUsage.digitalSignature`
+/// * It has `CODE_SIGNING` as an `ExtendedKeyUsage`.
+///
+/// This function does not evaluate the trustworthiness of the certificate.
+pub(crate) fn is_leaf(certificate: &Certificate) -> Result<bool> {
+    // NOTE(jl): following structure of sigstore-python over the slightly different handling found
+    // in `verify_key_usages`.
+    let tbs = &certificate.tbs_certificate;
+
+    // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
+    // extensions and have ambiguous CA behavior.
+    if tbs.version != x509_cert::Version::V3 {
+        return Err(SigstoreError::CertificateUnsupportedVersionError);
+    }
+
+    if is_ca(certificate)? {
+        return Ok(false);
+    };
+
+    let digital_signature = match tbs.get::<KeyUsage>()? {
+        None => {
+            return Err(SigstoreError::InvalidCertError(
+                "invalid X.509 certificate: missing KeyUsage".to_string(),
+            ))
+        }
+        Some((_, key_usage)) => key_usage.digital_signature(),
+    };
+
+    if !digital_signature {
+        return Err(SigstoreError::InvalidCertError(
+            "invalid certificate for Sigstore purposes: missing digital signature usage"
+                .to_string(),
+        ));
+    }
+
+    // Finally, we check to make sure the leaf has an `ExtendedKeyUsages`
+    // extension that includes a codesigning entitlement. Sigstore should
+    // never issue a leaf that doesn't have this extended usage.
+
+    let extended_key_usage = match tbs.get::<ExtendedKeyUsage>()? {
+        None => {
+            return Err(SigstoreError::InvalidCertError(
+                "invalid X.509 certificate: missing ExtendedKeyUsage".to_string(),
+            ))
+        }
+        Some((_, extended_key_usage)) => extended_key_usage,
+    };
+
+    Ok(extended_key_usage.0.contains(&ID_KP_CODE_SIGNING))
+}
+
+/// Checks if the given `certificate` is a CA certificate.
+///
+/// This does **not** indicate trustworthiness of the given `certificate`, only if it has the
+/// appropriate interior state.
+///
+/// This function is **not** naively invertible: users **must** use the dedicated `is_leaf`
+/// utility function to determine whether a particular leaf upholds Sigstore's invariants.
+pub(crate) fn is_ca(certificate: &Certificate) -> Result<bool> {
+    let tbs = &certificate.tbs_certificate;
+
+    // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
+    // extensions and have ambiguous CA behavior.
+    if tbs.version != x509_cert::Version::V3 {
+        return Err(SigstoreError::CertificateUnsupportedVersionError);
+    }
+
+    // Valid CA certificates must have the following set:
+    //
+    // - `BasicKeyUsage.keyCertSign`
+    // - `BasicConstraints.ca`
+    //
+    // Any other combination of states is inconsistent and invalid, meaning
+    // that we won't consider the certificate a valid non-CA leaf.
+
+    let ca = match tbs.get::<constraints::BasicConstraints>()? {
+        None => return Ok(false),
+        Some((false, _)) => {
+            // BasicConstraints must be marked as critical, per RFC 5280 4.2.1.9.
+            return Err(SigstoreError::InvalidCertError(
+                "invalid X.509 certificate: non-critical BasicConstraints in CA".to_string(),
+            ));
+        }
+        Some((true, v)) => v.ca,
+    };
+
+    let key_cert_sign = match tbs.get::<KeyUsage>()? {
+        None => {
+            return Err(SigstoreError::InvalidCertError(
+                "invalid X.509 certificate: missing KeyUsage".to_string(),
+            ))
+        }
+        Some((_, v)) => v.key_cert_sign(),
+    };
+
+    // both states set, this is a CA.
+    if ca && key_cert_sign {
+        return Ok(true);
+    }
+
+    if !(ca || key_cert_sign) {
+        return Ok(false);
+    }
+
+    // Anything else is an invalid state that should never occur.
+    Err(SigstoreError::InvalidCertError(format!(
+        "invalid certificate states: KeyUsage.keyCertSign={}, BasicConstraints.ca={}",
+        key_cert_sign, ca
+    )))
+}
+
+/// Returns `True` if and only if the given `Certificate` indicates
+/// that it's a root CA.
+///
+/// This is **not** a verification function, and it does not establish
+/// the trustworthiness of the given certificate.
+pub(crate) fn is_root_ca(certificate: &Certificate) -> Result<bool> {
+    // NOTE(ww): This function is obnoxiously long to make the different
+    // states explicit.
+
+    let tbs = &certificate.tbs_certificate;
+
+    // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
+    // extensions and have ambiguous CA behavior.
+    if tbs.version != x509_cert::Version::V3 {
+        return Err(SigstoreError::CertificateUnsupportedVersionError);
+    }
+
+    // Non-CAs can't possibly be root CAs.
+    if !is_ca(certificate)? {
+        return Ok(false);
+    }
+
+    // A certificate that is its own issuer and signer is considered a root CA.
+    // TODO(jl): verify_directly_issued_by
+    todo!()
 }
 
 #[cfg(test)]

@@ -16,7 +16,16 @@
 // CLI implemented to specification:
 // https://github.com/sigstore/sigstore-conformance/blob/main/docs/cli_protocol.md
 
+use std::{fs, process::exit};
+
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
+use sigstore::{
+    oauth::IdentityToken,
+    sign::SigningContext,
+    verify::VerificationMaterials,
+    verify::{policy, Verifier},
+};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -106,4 +115,62 @@ struct VerifyBundle {
 
 fn main() {
     let cli = Cli::parse();
+
+    let result = match cli.command {
+        Commands::SignBundle(args) => sign_bundle(args),
+        Commands::VerifyBundle(args) => verify_bundle(args),
+        _ => unimplemented!("sig/cert commands"),
+    };
+
+    if let Err(error) = result {
+        eprintln!("Operation failed:\n{error:?}");
+        exit(-1);
+    }
+
+    eprintln!("Operation succeeded!");
+}
+
+fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
+    let SignBundle {
+        identity_token,
+        bundle,
+        artifact,
+    } = args;
+    let identity_token = IdentityToken::try_from(identity_token.as_str())?;
+    let bundle = fs::File::create(bundle)?;
+    let mut artifact = fs::File::open(artifact)?;
+
+    let context = SigningContext::production();
+    let signer = context.signer(identity_token);
+
+    let signing_artifact = signer.sign(&mut artifact)?;
+    let bundle_data = signing_artifact.to_bundle();
+
+    serde_json::to_writer(bundle, &bundle_data)?;
+
+    Ok(())
+}
+
+fn verify_bundle(args: VerifyBundle) -> anyhow::Result<()> {
+    let VerifyBundle {
+        bundle,
+        certificate_identity,
+        certificate_oidc_issuer,
+        artifact,
+    } = args;
+    let bundle = fs::File::open(bundle)?;
+    let mut artifact = fs::File::open(artifact)?;
+
+    let bundle: sigstore::Bundle = serde_json::from_reader(bundle)?;
+    let materials = VerificationMaterials::from_bundle(&mut artifact, bundle, true)
+        .ok_or(anyhow!("Unable to construct VerificationMaterials"))?;
+
+    let verifier = Verifier::production()?;
+
+    verifier.verify(
+        materials,
+        &policy::Identity::new(certificate_identity, certificate_oidc_issuer),
+    )?;
+
+    Ok(())
 }
