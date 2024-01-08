@@ -136,7 +136,7 @@ clap = { version = "4.0.8", features = ["derive"] }
 docker_credential = "1.1.0"
 openssl = "0.10.38"
 rstest = "0.18.1"
-serial_test = "2.0.0"
+serial_test = "3.0.0"
 tempfile = "3.3.0"
 testcontainers = "0.15"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
