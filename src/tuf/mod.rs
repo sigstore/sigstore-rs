@@ -40,10 +40,10 @@ use std::{
 mod constants;
 mod trustroot;
 
-use rustls_pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 use tough::TargetName;
 use tracing::debug;
+use webpki::types::CertificateDer;
 
 use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 

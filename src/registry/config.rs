@@ -15,10 +15,10 @@
 
 //! Set of structs and enums used to define how to interact with OCI registries
 
-use rustls_pki_types::CertificateDer;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::convert::From;
+use webpki::types::CertificateDer;
 
 use crate::errors;
 

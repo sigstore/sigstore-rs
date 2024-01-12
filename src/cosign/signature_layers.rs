@@ -439,7 +439,7 @@ impl CertificateSignature {
         // ensure the certificate has been issued by Fulcio
         fulcio_cert_pool.verify_pem_cert(
             cert_pem,
-            Some(rustls_pki_types::UnixTime::since_unix_epoch(
+            Some(webpki::types::UnixTime::since_unix_epoch(
                 cert.tbs_certificate.validity.not_before.to_unix_duration(),
             )),
         )?;
