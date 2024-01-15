@@ -14,8 +14,10 @@
 // limitations under the License.
 
 use const_oid::db::rfc5280::ID_KP_CODE_SIGNING;
-use rustls_pki_types::{CertificateDer, TrustAnchor, UnixTime};
-use webpki::{EndEntityCert, KeyUsage};
+use webpki::{
+    types::{CertificateDer, TrustAnchor, UnixTime},
+    EndEntityCert, KeyUsage,
+};
 
 use crate::errors::{Result, SigstoreError};
 

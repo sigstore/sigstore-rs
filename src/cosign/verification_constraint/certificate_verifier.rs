@@ -1,8 +1,8 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use pkcs8::der::Decode;
-use rustls_pki_types::CertificateDer;
 use std::convert::TryFrom;
 use tracing::warn;
+use webpki::types::CertificateDer;
 use x509_cert::Certificate;
 
 use super::VerificationConstraint;
