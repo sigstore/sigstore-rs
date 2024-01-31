@@ -36,6 +36,7 @@ use pkcs8::der::Decode;
 use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::Bundle;
 use thiserror::Error;
+use tracing::warn;
 use x509_cert::Certificate;
 
 #[derive(Error, Debug)]
@@ -164,15 +165,14 @@ impl VerificationMaterials {
                 }
 
                 if inclusion_proof.is_some() && !has_checkpoint {
-                    // TODO(tnytown): Act here.
-                    // NOTE(jl): in sigstore-python, this is a no-op that prints a warning log.
+                    warn!("0.1 bundle contains inclusion proof without checkpoint; ignoring");
                 }
             }
             BundleVersion::Bundle0_2 => {
                 inclusion_proof?;
                 if !has_checkpoint {
                     // inclusion proofs must contain checkpoints
-                    return None; // FIXME(jl): this raises an error in sigstore-python.
+                    return None;
                 }
             }
         }

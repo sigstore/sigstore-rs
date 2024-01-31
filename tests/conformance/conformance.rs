@@ -143,7 +143,7 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
     let context = SigningContext::production();
     let signer = context.signer(identity_token);
 
-    let signing_artifact = signer.sign(&mut artifact)?;
+    let signing_artifact = signer?.sign(&mut artifact)?;
     let bundle_data = signing_artifact.to_bundle();
 
     serde_json::to_writer(bundle, &bundle_data)?;

@@ -45,6 +45,8 @@ use tough::TargetName;
 use tracing::debug;
 use webpki::types::CertificateDer;
 
+use crate::tuf::constants::SIGSTORE_TRUST_BUNDLE;
+
 use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 
 use super::errors::{Result, SigstoreError};
@@ -94,11 +96,14 @@ impl SigstoreRepository {
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
-        let repository =
-            tough::RepositoryLoader::new(constants::SIGSTORE_ROOT, metadata_base, target_base)
-                .expiration_enforcement(tough::ExpirationEnforcement::Safe)
-                .load()
-                .map_err(Box::new)?;
+        let repository = tough::RepositoryLoader::new(
+            include_bytes!(constants::SIGSTORE_ROOT),
+            metadata_base,
+            target_base,
+        )
+        .expiration_enforcement(tough::ExpirationEnforcement::Safe)
+        .load()
+        .map_err(Box::new)?;
 
         Ok(Self {
             repository,
@@ -108,30 +113,30 @@ impl SigstoreRepository {
     }
 
     fn trusted_root(&self) -> Result<&TrustedRoot> {
-        fn init_trusted_root(
-            repository: &tough::Repository,
-            checkout_dir: Option<&PathBuf>,
-        ) -> Result<TrustedRoot> {
-            let trusted_root_target = TargetName::new("trusted_root.json").map_err(Box::new)?;
-            let local_path = checkout_dir.map(|d| d.join(trusted_root_target.raw()));
+        return if let Some(root) = self.trusted_root.get() {
+            Ok(root)
+        } else {
+            let trusted_root_target = SIGSTORE_TRUST_BUNDLE
+                .to_str()
+                .and_then(TargetName::new)
+                .map_err(Box::new)?;
+            let local_path = self
+                .checkout_dir
+                .as_ref()
+                .map(|d| d.join(trusted_root_target.raw()));
 
             let data = fetch_target_or_reuse_local_cache(
-                repository,
+                &self.repository,
                 &trusted_root_target,
                 local_path.as_ref(),
             )?;
 
             debug!("data:\n{}", String::from_utf8_lossy(&data));
 
-            Ok(serde_json::from_slice(&data[..])?)
-        }
+            let root = serde_json::from_slice(&data[..])?;
 
-        if let Some(root) = self.trusted_root.get() {
-            return Ok(root);
-        }
-
-        let root = init_trusted_root(&self.repository, self.checkout_dir.as_ref())?;
-        Ok(self.trusted_root.get_or_init(|| root))
+            Ok(self.trusted_root.get_or_init(|| root))
+        };
     }
 
     /// Prefetches trust materials.
@@ -264,10 +269,10 @@ fn fetch_target_or_reuse_local_cache(
     local_file: Option<&PathBuf>,
 ) -> Result<Vec<u8>> {
     let (local_file_outdated, local_file_contents) = if let Some(path) = local_file {
-        is_local_file_outdated(repository, target_name, path)
+        is_local_file_outdated(repository, target_name, path)?
     } else {
-        Ok((true, None))
-    }?;
+        (true, None)
+    };
 
     let data = if local_file_outdated {
         let data = fetch_target(repository, target_name)?;
