@@ -158,9 +158,14 @@ impl<'ctx> AsyncSigningSession<'ctx> {
             },
         };
 
-        let entry = create_log_entry(&self.context.rekor_config, proposed_entry)
+        let log_entry = create_log_entry(&self.context.rekor_config, proposed_entry)
             .await
             .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
+        let log_entry = log_entry
+            .try_into()
+            .or(Err(SigstoreError::RekorClientError(
+                "Rekor returned malformed LogEntry".into(),
+            )))?;
 
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
 
@@ -168,7 +173,7 @@ impl<'ctx> AsyncSigningSession<'ctx> {
             input_digest: input_hash.to_owned(),
             cert: cert.to_der()?,
             signature: signature_bytes,
-            log_entry: entry.try_into().expect("TODO"),
+            log_entry,
         })
     }
 

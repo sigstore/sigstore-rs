@@ -119,8 +119,6 @@ pub enum SCTVersion {
     V1 = 0,
 }
 
-// TODO(tnytown): Make this type prettier. SigningCertificateDetachedSCT duplicates most of the data
-// in cert and chain.
 pub struct CertificateResponse {
     pub cert: Certificate,
     pub chain: Vec<Certificate>,

@@ -14,7 +14,6 @@
 
 use std::cell::OnceCell;
 
-use const_oid::db::rfc5280::ID_KP_CODE_SIGNING;
 use tracing::debug;
 use webpki::{
     types::{CertificateDer, UnixTime},
@@ -22,7 +21,6 @@ use webpki::{
 };
 
 use x509_cert::der::Encode;
-use x509_cert::ext::pkix::{ExtendedKeyUsage, KeyUsage};
 
 use crate::{
     crypto::{CertificatePool, CosignVerificationKey, Signature},
@@ -96,7 +94,9 @@ impl<'a, R: Repository> Verifier<'a, R> {
             .to_der()
             .expect("failed to DER-encode constructed Certificate!")
             .into();
-        let ee_cert: EndEntityCert = (&cert_der).try_into().expect("TODO");
+        let Ok(ee_cert) = (&cert_der).try_into() else {
+            return Err(VerificationError::CertificateVerificationFailure);
+        };
 
         let Ok(_trusted_chain) =
             store.verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
@@ -107,28 +107,6 @@ impl<'a, R: Repository> Verifier<'a, R> {
         debug!("signing certificate chains back to trusted root");
 
         // 2) Verify that the signing certificate belongs to the signer.
-
-        let Ok(Some((_, key_usage_ext))) = tbs_certificate.get::<KeyUsage>() else {
-            return Err(VerificationError::CertificateMalformed);
-        };
-
-        if !key_usage_ext.digital_signature() {
-            return Err(VerificationError::CertificateTypeError(
-                "Key usage is not of type `digital signature`".into(),
-            ));
-        }
-
-        let Ok(Some((_, extended_key_usage_ext))) = tbs_certificate.get::<ExtendedKeyUsage>()
-        else {
-            return Err(VerificationError::CertificateMalformed);
-        };
-
-        if !extended_key_usage_ext.0.contains(&ID_KP_CODE_SIGNING) {
-            return Err(VerificationError::CertificateTypeError(
-                "Extended key usage does not contain `code signing`".into(),
-            ));
-        }
-
         if let Some(err) = policy.verify(&materials.certificate) {
             return Err(err)?;
         }
@@ -159,11 +137,11 @@ impl<'a, R: Repository> Verifier<'a, R> {
 
         // 5) Verify the inclusion proof supplied by Rekor for this artifact,
         //    if we're doing online verification.
-        // TODO(tnytown): Merkle inclusion
+        // TODO(tnytown): Merkle inclusion; sigstore-rs#285
 
         // 6) Verify the Signed Entry Timestamp (SET) supplied by Rekor for this
         //    artifact.
-        // TODO(tnytown) SET verification
+        // TODO(tnytown) SET verification; sigstore-rs#285
 
         // 7) Verify that the signing certificate was valid at the time of
         //    signing by comparing the expiry against the integrated timestamp.

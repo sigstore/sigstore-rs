@@ -20,7 +20,10 @@ use x509_cert::{
     Certificate,
 };
 
-use crate::errors::{Result, SigstoreError};
+use crate::{
+    crypto::certificate,
+    errors::{Result, SigstoreError},
+};
 
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
@@ -127,7 +130,7 @@ fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<
 /// * It has `CODE_SIGNING` as an `ExtendedKeyUsage`.
 ///
 /// This function does not evaluate the trustworthiness of the certificate.
-pub(crate) fn is_leaf(certificate: &Certificate) -> Result<bool> {
+pub(crate) fn is_leaf(certificate: &Certificate) -> Result<()> {
     // NOTE(jl): following structure of sigstore-python over the slightly different handling found
     // in `verify_key_usages`.
     let tbs = &certificate.tbs_certificate;
@@ -139,13 +142,15 @@ pub(crate) fn is_leaf(certificate: &Certificate) -> Result<bool> {
     }
 
     if is_ca(certificate)? {
-        return Ok(false);
+        return Err(SigstoreError::InvalidCertError(
+            "invalid signing cert: missing KeyUsage".to_string(),
+        ));
     };
 
     let digital_signature = match tbs.get::<KeyUsage>()? {
         None => {
             return Err(SigstoreError::InvalidCertError(
-                "invalid X.509 certificate: missing KeyUsage".to_string(),
+                "invalid signing cert: missing KeyUsage".to_string(),
             ))
         }
         Some((_, key_usage)) => key_usage.digital_signature(),
@@ -153,8 +158,7 @@ pub(crate) fn is_leaf(certificate: &Certificate) -> Result<bool> {
 
     if !digital_signature {
         return Err(SigstoreError::InvalidCertError(
-            "invalid certificate for Sigstore purposes: missing digital signature usage"
-                .to_string(),
+            "invalid signing cert: missing digital signature usage".to_string(),
         ));
     }
 
@@ -165,13 +169,19 @@ pub(crate) fn is_leaf(certificate: &Certificate) -> Result<bool> {
     let extended_key_usage = match tbs.get::<ExtendedKeyUsage>()? {
         None => {
             return Err(SigstoreError::InvalidCertError(
-                "invalid X.509 certificate: missing ExtendedKeyUsage".to_string(),
+                "invalid signing cert: missing ExtendedKeyUsage".to_string(),
             ))
         }
         Some((_, extended_key_usage)) => extended_key_usage,
     };
 
-    Ok(extended_key_usage.0.contains(&ID_KP_CODE_SIGNING))
+    if !extended_key_usage.0.contains(&ID_KP_CODE_SIGNING) {
+        return Err(SigstoreError::InvalidCertError(
+            "invalid signing cert: missing CODE_SIGNING ExtendedKeyUsage".into(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Checks if the given `certificate` is a CA certificate.
@@ -257,8 +267,7 @@ pub(crate) fn is_root_ca(certificate: &Certificate) -> Result<bool> {
     }
 
     // A certificate that is its own issuer and signer is considered a root CA.
-    // TODO(jl): verify_directly_issued_by
-    todo!()
+    Ok(tbs.issuer == tbs.subject)
 }
 
 #[cfg(test)]
