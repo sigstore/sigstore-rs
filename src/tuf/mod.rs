@@ -32,7 +32,6 @@
 //! ```
 use std::{
     cell::OnceCell,
-    fs,
     io::Read,
     path::{Path, PathBuf},
 };
@@ -44,8 +43,6 @@ use sha2::{Digest, Sha256};
 use tough::TargetName;
 use tracing::debug;
 use webpki::types::CertificateDer;
-
-use crate::tuf::constants::SIGSTORE_TRUST_BUNDLE;
 
 use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 
@@ -97,7 +94,7 @@ impl SigstoreRepository {
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
         let repository = tough::RepositoryLoader::new(
-            include_bytes!(constants::SIGSTORE_ROOT),
+            constants::static_resource("root.json").expect("Failed to fetch required resource!"),
             metadata_base,
             target_base,
         )
@@ -116,20 +113,7 @@ impl SigstoreRepository {
         return if let Some(root) = self.trusted_root.get() {
             Ok(root)
         } else {
-            let trusted_root_target = SIGSTORE_TRUST_BUNDLE
-                .to_str()
-                .and_then(TargetName::new)
-                .map_err(Box::new)?;
-            let local_path = self
-                .checkout_dir
-                .as_ref()
-                .map(|d| d.join(trusted_root_target.raw()));
-
-            let data = fetch_target_or_reuse_local_cache(
-                &self.repository,
-                &trusted_root_target,
-                local_path.as_ref(),
-            )?;
+            let data = self.fetch_target("trusted_root.json")?;
 
             debug!("data:\n{}", String::from_utf8_lossy(&data));
 
@@ -137,6 +121,62 @@ impl SigstoreRepository {
 
             Ok(self.trusted_root.get_or_init(|| root))
         };
+    }
+
+    fn fetch_target<N>(&self, name: N) -> Result<Vec<u8>>
+    where
+        N: TryInto<TargetName, Error = tough::error::Error>,
+    {
+        let read_remote_target = |name: &TargetName| -> Result<Vec<u8>> {
+            let Some(mut reader) = self.repository.read_target(name).map_err(Box::new)? else {
+                return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
+            };
+
+            debug!("fetching target {} from remote", name.raw());
+
+            let mut repo_data = Vec::new();
+            reader.read_to_end(&mut repo_data)?;
+            Ok(repo_data)
+        };
+
+        let name: TargetName = name.try_into().map_err(Box::new)?;
+        let local_path = self.checkout_dir.as_ref().map(|d| d.join(name.raw()));
+
+        // Try reading the target from disk cache.
+        let data = if let Some(Ok(local_data)) = local_path.as_ref().map(std::fs::read) {
+            local_data.to_vec()
+        // Try reading the target embedded into the binary.
+        } else if let Some(embedded_data) = constants::static_resource(name.raw()) {
+            debug!("read embedded target {}", name.raw());
+            embedded_data.to_vec()
+        // If all else fails, read the data from the TUF repo.
+        } else if let Ok(remote_data) = read_remote_target(&name) {
+            remote_data
+        } else {
+            return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
+        };
+
+        // Get metadata (hash) of the target and update the disk copy if it doesn't match.
+        let Some(target) = self.repository.targets().signed.targets.get(&name) else {
+            return Err(SigstoreError::TufMetadataError(format!(
+                "couldn't get metadata for {}",
+                name.raw()
+            )));
+        };
+
+        let data = if Sha256::digest(&data)[..] != target.hashes.sha256[..] {
+            read_remote_target(&name)?
+        } else {
+            data
+        };
+
+        // Write the up-to-date data back to the disk. This doesn't need to succeed, as we can
+        // always fetch the target again later.
+        if let Some(local_path) = local_path {
+            let _ = std::fs::write(local_path, &data);
+        }
+
+        Ok(data)
     }
 
     /// Prefetches trust materials.
@@ -247,97 +287,4 @@ fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
             Some(end) => time <= end,
         },
     }
-}
-
-/// Download a file stored inside of a TUF repository, try to reuse a local
-/// cache when possible.
-///
-/// * `repository`: TUF repository holding the file
-/// * `target_name`: TUF representation of the file to be downloaded
-/// * `local_file`: location where the file should be downloaded
-///
-/// This function will reuse the local copy of the file if contents
-/// didn't change.
-/// This check is done by comparing the digest of the local file, if found,
-/// with the digest reported inside of the TUF repository metadata.
-///
-/// **Note well:** the `local_file` is updated whenever its contents are
-/// outdated.
-fn fetch_target_or_reuse_local_cache(
-    repository: &tough::Repository,
-    target_name: &TargetName,
-    local_file: Option<&PathBuf>,
-) -> Result<Vec<u8>> {
-    let (local_file_outdated, local_file_contents) = if let Some(path) = local_file {
-        is_local_file_outdated(repository, target_name, path)?
-    } else {
-        (true, None)
-    };
-
-    let data = if local_file_outdated {
-        let data = fetch_target(repository, target_name)?;
-        if let Some(path) = local_file {
-            // update the local file to have latest data from the TUF repo
-            fs::write(path, data.clone())?;
-        }
-        data
-    } else {
-        local_file_contents
-            .expect("local file contents to not be 'None'")
-            .as_bytes()
-            .to_owned()
-    };
-
-    Ok(data)
-}
-
-/// Download a file from a TUF repository
-fn fetch_target(repository: &tough::Repository, target_name: &TargetName) -> Result<Vec<u8>> {
-    let data: Vec<u8>;
-    match repository.read_target(target_name).map_err(Box::new)? {
-        None => Err(SigstoreError::TufTargetNotFoundError(
-            target_name.raw().to_string(),
-        )),
-        Some(reader) => {
-            data = read_to_end(reader)?;
-            Ok(data)
-        }
-    }
-}
-
-/// Compares the checksum of a local file, with the digest reported inside of
-/// TUF repository metadata
-fn is_local_file_outdated(
-    repository: &tough::Repository,
-    target_name: &TargetName,
-    local_file: &Path,
-) -> Result<(bool, Option<String>)> {
-    let target = repository
-        .targets()
-        .signed
-        .targets
-        .get(target_name)
-        .ok_or_else(|| SigstoreError::TufTargetNotFoundError(target_name.raw().to_string()))?;
-
-    if local_file.exists() {
-        let data = fs::read_to_string(local_file)?;
-        let local_checksum = Sha256::digest(data.clone());
-        let expected_digest: Vec<u8> = target.hashes.sha256.to_vec();
-
-        if local_checksum.as_slice() == expected_digest.as_slice() {
-            // local data is not outdated
-            Ok((false, Some(data)))
-        } else {
-            Ok((true, None))
-        }
-    } else {
-        Ok((true, None))
-    }
-}
-
-/// Gets the goods from a read and makes a Vec
-fn read_to_end<R: Read>(mut reader: R) -> Result<Vec<u8>> {
-    let mut v = Vec::new();
-    reader.read_to_end(&mut v)?;
-    Ok(v)
 }
