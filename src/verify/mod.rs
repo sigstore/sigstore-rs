@@ -18,7 +18,7 @@ mod models;
 pub use models::{VerificationError, VerificationMaterials, VerificationResult};
 
 pub mod policy;
-pub use policy::VerificationPolicy;
+pub use policy::{PolicyError, VerificationPolicy};
 
 mod verifier;
 pub use verifier::Verifier;

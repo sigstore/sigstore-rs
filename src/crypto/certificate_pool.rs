@@ -16,7 +16,7 @@
 use const_oid::db::rfc5280::ID_KP_CODE_SIGNING;
 use webpki::{
     types::{CertificateDer, TrustAnchor, UnixTime},
-    EndEntityCert, KeyUsage,
+    EndEntityCert, KeyUsage, VerifiedPath,
 };
 
 use crate::errors::{Result, SigstoreError};
@@ -83,24 +83,26 @@ impl<'a> CertificatePool<'a> {
         der: &[u8],
         verification_time: Option<UnixTime>,
     ) -> Result<()> {
-        self.verify_cert_with_time(der, verification_time.unwrap_or(UnixTime::now()))
-    }
-
-    /// TODO(tnytown): nudge webpki into behaving as the cosign code expects
-    pub(crate) fn verify_cert_with_time(
-        &self,
-        cert: &[u8],
-        verification_time: UnixTime,
-    ) -> Result<()> {
-        let der = CertificateDer::from(cert);
+        let der = CertificateDer::from(der);
         let cert = EndEntityCert::try_from(&der)?;
 
-        // TODO(tnytown): Determine which of these algs are used in the Sigstore ecosystem.
-        let signing_algs = webpki::ALL_VERIFICATION_ALGS;
+        self.verify_cert_with_time(&cert, verification_time.unwrap_or(UnixTime::now()))?;
 
+        Ok(())
+    }
+
+    pub(crate) fn verify_cert_with_time<'cert>(
+        &'a self,
+        cert: &'cert EndEntityCert<'cert>,
+        verification_time: UnixTime,
+    ) -> Result<VerifiedPath<'cert>>
+    where
+        'a: 'cert,
+    {
+        let signing_algs = webpki::ALL_VERIFICATION_ALGS;
         let eku_code_signing = ID_KP_CODE_SIGNING.as_bytes();
 
-        cert.verify_for_usage(
+        Ok(cert.verify_for_usage(
             signing_algs,
             &self.trusted_roots,
             self.intermediates.as_slice(),
@@ -108,8 +110,6 @@ impl<'a> CertificatePool<'a> {
             KeyUsage::required(eku_code_signing),
             None,
             None,
-        )?;
-
-        Ok(())
+        )?)
     }
 }

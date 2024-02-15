@@ -19,19 +19,18 @@ use std::time::SystemTime;
 
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use hex;
-use json_syntax::Print;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};
 use sha2::{Digest, Sha256};
 use signature::DigestSigner;
-use sigstore_protobuf_specs::{
-    Bundle, DevSigstoreBundleV1VerificationMaterial, DevSigstoreCommonV1HashOutput,
-    DevSigstoreCommonV1LogId, DevSigstoreCommonV1MessageSignature,
-    DevSigstoreCommonV1X509Certificate, DevSigstoreCommonV1X509CertificateChain,
-    DevSigstoreRekorV1Checkpoint, DevSigstoreRekorV1InclusionPromise,
-    DevSigstoreRekorV1InclusionProof, DevSigstoreRekorV1KindVersion,
-    DevSigstoreRekorV1TransparencyLogEntry,
+use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
+use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
+    verification_material, Bundle, VerificationMaterial,
 };
+use sigstore_protobuf_specs::dev::sigstore::common::v1::{
+    HashAlgorithm, HashOutput, MessageSignature, X509Certificate, X509CertificateChain,
+};
+use sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry;
 use tokio::io::AsyncRead;
 use tokio_util::io::SyncIoBridge;
 use url::Url;
@@ -46,7 +45,6 @@ use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
 use crate::oauth::IdentityToken;
 use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
-use crate::rekor::models::LogEntry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
 
 /// An asynchronous Sigstore signing session.
@@ -130,14 +128,15 @@ impl<'ctx> AsyncSigningSession<'ctx> {
             return Err(SigstoreError::ExpiredSigningSession());
         }
 
-        // TODO(tnytown): Verify SCT here.
-
         // Sign artifact.
         let input_hash: &[u8] = &hasher.clone().finalize();
+        let mut signature_bytes = Vec::new();
         let artifact_signature: p256::ecdsa::Signature = self.private_key.sign_digest(hasher);
+        artifact_signature
+            .to_der()
+            .encode_to_vec(&mut signature_bytes)
+            .expect("failed to encode Signature!");
 
-        // Prepare inputs.
-        let b64_artifact_signature = base64.encode(artifact_signature.to_der());
         let cert = &self.certs.cert;
 
         // Create the transparency log entry.
@@ -145,9 +144,9 @@ impl<'ctx> AsyncSigningSession<'ctx> {
             api_version: "0.0.1".to_owned(),
             spec: hashedrekord::Spec {
                 signature: hashedrekord::Signature {
-                    content: b64_artifact_signature.clone(),
+                    content: base64.encode(&signature_bytes),
                     public_key: hashedrekord::PublicKey::new(
-                        base64.encode(cert.to_pem(pkcs8::LineEnding::CRLF)?),
+                        base64.encode(cert.to_pem(pkcs8::LineEnding::LF)?),
                     ),
                 },
                 data: hashedrekord::Data {
@@ -166,10 +165,10 @@ impl<'ctx> AsyncSigningSession<'ctx> {
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
 
         Ok(SigningArtifact {
-            input_digest: base64.encode(input_hash),
+            input_digest: input_hash.to_owned(),
             cert: cert.to_der()?,
-            b64_signature: b64_artifact_signature,
-            log_entry: entry,
+            signature: signature_bytes,
+            log_entry: entry.try_into().expect("TODO"),
         })
     }
 
@@ -245,7 +244,10 @@ pub struct SigningContext {
 
 impl SigningContext {
     /// Manually constructs a [SigningContext] from its constituent data.
-    pub fn new(fulcio: FulcioClient, rekor_config: RekorConfiguration) -> Self {
+    pub fn new(
+        fulcio: FulcioClient,
+        rekor_config: RekorConfiguration,
+    ) -> Self {
         Self {
             fulcio,
             rekor_config,
@@ -254,14 +256,14 @@ impl SigningContext {
 
     /// Returns a [SigningContext] configured against the public-good production Sigstore
     /// infrastructure.
-    pub fn production() -> Self {
-        Self::new(
+    pub fn production() -> SigstoreResult<Self> {
+        Ok(Self::new(
             FulcioClient::new(
                 Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
-        )
+        ))
     }
 
     /// Configures and returns an [AsyncSigningSession] with the held context.
@@ -282,10 +284,10 @@ impl SigningContext {
 
 /// A signature and its associated metadata.
 pub struct SigningArtifact {
-    input_digest: String,
+    input_digest: Vec<u8>,
     cert: Vec<u8>,
-    b64_signature: String,
-    log_entry: LogEntry,
+    signature: Vec<u8>,
+    log_entry: TransparencyLogEntry,
 }
 
 impl SigningArtifact {
@@ -293,84 +295,35 @@ impl SigningArtifact {
     ///
     /// The resulting bundle can be serialized with [serde_json].
     pub fn to_bundle(self) -> Bundle {
-        #[inline]
-        fn hex_to_base64<S: AsRef<str>>(hex: S) -> String {
-            let decoded = hex::decode(hex.as_ref()).expect("Malformed data in Rekor response");
-            base64.encode(decoded)
-        }
-
         // NOTE: We explicitly only include the leaf certificate in the bundle's "chain"
         // here: the specs explicitly forbid the inclusion of the root certificate,
         // and discourage inclusion of any intermediates (since they're in the root of
         // trust already).
-        let x_509_certificate_chain = Some(DevSigstoreCommonV1X509CertificateChain {
-            certificates: Some(vec![DevSigstoreCommonV1X509Certificate {
-                raw_bytes: Some(base64.encode(&self.cert)),
-            }]),
-        });
-
-        let inclusion_proof = if let Some(proof) = self.log_entry.verification.inclusion_proof {
-            let hashes = proof.hashes.iter().map(hex_to_base64).collect();
-            Some(DevSigstoreRekorV1InclusionProof {
-                checkpoint: Some(DevSigstoreRekorV1Checkpoint {
-                    envelope: Some(proof.checkpoint),
-                }),
-                hashes: Some(hashes),
-                log_index: Some(proof.log_index.to_string()),
-                root_hash: Some(hex_to_base64(proof.root_hash)),
-                tree_size: Some(proof.tree_size.to_string()),
-            })
-        } else {
-            None
+        let x509_certificate_chain = X509CertificateChain {
+            certificates: vec![X509Certificate {
+                raw_bytes: self.cert,
+            }],
         };
 
-        let canonicalized_body = {
-            let mut body = json_syntax::to_value(self.log_entry.body)
-                .expect("failed to parse constructed Body!");
-            body.canonicalize();
-            Some(base64.encode(body.compact_print().to_string()))
-        };
-
-        // TODO(tnytown): When we fix `sigstore_protobuf_specs`, have the Rekor client APIs convert
-        // responses into types from the specs as opposed to returning the raw `LogEntry` model type.
-        let tlog_entry = DevSigstoreRekorV1TransparencyLogEntry {
-            canonicalized_body,
-            inclusion_promise: Some(DevSigstoreRekorV1InclusionPromise {
-                // XX: sigstore-python deserializes the SET from base64 here because their protobuf
-                // library transparently serializes `bytes` fields as base64.
-                signed_entry_timestamp: Some(self.log_entry.verification.signed_entry_timestamp),
-            }),
-            inclusion_proof,
-            integrated_time: Some(self.log_entry.integrated_time.to_string()),
-            kind_version: Some(DevSigstoreRekorV1KindVersion {
-                kind: Some("hashedrekord".to_owned()),
-                version: Some("0.0.1".to_owned()),
-            }),
-            log_id: Some(DevSigstoreCommonV1LogId {
-                key_id: Some(hex_to_base64(self.log_entry.log_i_d)),
-            }),
-            log_index: Some(self.log_entry.log_index.to_string()),
-        };
-
-        let verification_material = Some(DevSigstoreBundleV1VerificationMaterial {
-            public_key: None,
+        let verification_material = Some(VerificationMaterial {
             timestamp_verification_data: None,
-            tlog_entries: Some(vec![tlog_entry]),
-            x_509_certificate_chain,
+            tlog_entries: vec![self.log_entry],
+            content: Some(verification_material::Content::X509CertificateChain(
+                x509_certificate_chain,
+            )),
         });
 
-        let message_signature = Some(DevSigstoreCommonV1MessageSignature {
-            message_digest: Some(DevSigstoreCommonV1HashOutput {
-                algorithm: Some("SHA2_256".to_owned()),
-                digest: Some(self.input_digest),
+        let message_signature = MessageSignature {
+            message_digest: Some(HashOutput {
+                algorithm: HashAlgorithm::Sha2256.into(),
+                digest: self.input_digest,
             }),
-            signature: Some(self.b64_signature),
-        });
+            signature: self.signature,
+        };
         Bundle {
-            dsse_envelope: None,
-            media_type: Some(Version::Bundle0_2.to_string()),
-            message_signature,
+            media_type: Version::Bundle0_2.to_string(),
             verification_material,
+            content: Some(bundle::Content::MessageSignature(message_signature)),
         }
     }
 }

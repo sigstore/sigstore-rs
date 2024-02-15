@@ -17,11 +17,9 @@
 //! <https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md#extension-values>
 
 use const_oid::ObjectIdentifier;
+use thiserror::Error;
+use tracing::warn;
 use x509_cert::ext::pkix::{name::GeneralName, SubjectAltName};
-
-use crate::verify::VerificationError;
-
-use super::models::VerificationResult;
 
 macro_rules! oids {
     ($($name:ident = $value:literal),+) => {
@@ -65,7 +63,32 @@ oids! {
 
 }
 
-/// A trait for policies that check a single textual value against a X.509 extension.
+#[derive(Error, Debug)]
+pub enum PolicyError {
+    #[error("did not find exactly 1 of the required extension in the certificate")]
+    ExtensionNotFound,
+
+    #[error("certificate's {extension} does not match (got {actual}, expected {expected})")]
+    ExtensionCheckFailed {
+        extension: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("{0} of {total} policies failed: {1}\n- ",
+            errors.len(),
+            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n- ")
+    )]
+    AllOf {
+        total: usize,
+        errors: Vec<PolicyError>,
+    },
+
+    #[error("0 of {total} policies succeeded")]
+    AnyOf { total: usize },
+}
+
+/// A policy that checks a single textual value against a X.509 extension.
 pub trait SingleX509ExtPolicy {
     fn new<S: AsRef<str>>(val: S) -> Self;
     fn name() -> &'static str;
@@ -73,15 +96,13 @@ pub trait SingleX509ExtPolicy {
 }
 
 impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T {
-    fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult {
+    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
         let extensions = cert.tbs_certificate.extensions.as_deref().unwrap_or(&[]);
         let mut extensions = extensions.iter().filter(|ext| ext.extn_id == T::OID);
 
         // Check for exactly one extension.
         let (Some(ext), None) = (extensions.next(), extensions.next()) else {
-            return Err(VerificationError::PolicyFailure(
-                "Cannot get policy extensions from certificate".into(),
-            ));
+            return Some(PolicyError::ExtensionNotFound);
         };
 
         // Parse raw string without DER encoding.
@@ -89,14 +110,13 @@ impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T
             .expect("failed to parse constructed Extension!");
 
         if val != self.value() {
-            Err(VerificationError::PolicyFailure(format!(
-                "Certificate's {} does not match (got {}, expected {})",
-                T::name(),
-                val,
-                self.value()
-            )))
+            Some(PolicyError::ExtensionCheckFailed {
+                extension: T::name().to_owned(),
+                expected: self.value().to_owned(),
+                actual: val.to_owned(),
+            })
         } else {
-            Ok(())
+            None
         }
     }
 }
@@ -139,7 +159,7 @@ impl_policy!(
 
 /// An interface that all policies must conform to.
 pub trait VerificationPolicy {
-    fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult;
+    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError>;
 }
 
 /// The "any of" policy, corresponding to a logical OR between child policies.
@@ -158,15 +178,13 @@ impl<'a> AnyOf<'a> {
 }
 
 impl VerificationPolicy for AnyOf<'_> {
-    fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult {
+    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
         self.children
             .iter()
-            .find(|policy| policy.verify(cert).is_ok())
-            .ok_or(VerificationError::PolicyFailure(format!(
-                "0 of {} policies succeeded",
-                self.children.len()
-            )))
-            .map(|_| ())
+            .find(|policy| policy.verify(cert).is_some())
+            .map(|_| PolicyError::AnyOf {
+                total: self.children.len(),
+            })
     }
 }
 
@@ -178,39 +196,33 @@ pub struct AllOf<'a> {
 }
 
 impl<'a> AllOf<'a> {
-    pub fn new<I: IntoIterator<Item = &'a dyn VerificationPolicy>>(policies: I) -> Self {
-        Self {
-            children: policies.into_iter().collect(),
+    pub fn new<I: IntoIterator<Item = &'a dyn VerificationPolicy>>(policies: I) -> Option<Self> {
+        let children: Vec<_> = policies.into_iter().collect();
+
+        // Without this, we'd be able to construct an `AllOf` containing an empty list of child
+        // policies. This is almost certainly not what the user wants and is a potential source
+        // of API misuse, so we explicitly disallow it.
+        if children.is_empty() {
+            warn!("attempted to construct an AllOf with an empty list of child policies");
+            return None;
         }
+
+        Some(Self { children })
     }
 }
 
 impl VerificationPolicy for AllOf<'_> {
-    fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult {
-        // Without this, we'd consider empty lists of child policies trivially valid.
-        // This is almost certainly not what the user wants and is a potential
-        // source of API misuse, so we explicitly disallow it.
-        if self.children.is_empty() {
-            return Err(VerificationError::PolicyFailure(
-                "no child policies to verify".into(),
-            ));
-        }
-
+    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
         let results = self.children.iter().map(|policy| policy.verify(cert));
-        let failures: Vec<_> = results
-            .filter_map(|result| result.err())
-            .map(|err| err.to_string())
-            .collect();
+        let failures: Vec<_> = results.flatten().collect();
 
         if failures.is_empty() {
-            Ok(())
+            None
         } else {
-            Err(VerificationError::PolicyFailure(format!(
-                "{} of {} policies failed:\n- {}",
-                failures.len(),
-                self.children.len(),
-                failures.join("\n- ")
-            )))
+            Some(PolicyError::AllOf {
+                total: self.children.len(),
+                errors: failures,
+            })
         }
     }
 }
@@ -218,9 +230,9 @@ impl VerificationPolicy for AllOf<'_> {
 pub(crate) struct UnsafeNoOp;
 
 impl VerificationPolicy for UnsafeNoOp {
-    fn verify(&self, _cert: &x509_cert::Certificate) -> VerificationResult {
-        eprintln!("unsafe (no-op) verification policy used! no verification performed!");
-        VerificationResult::Ok(())
+    fn verify(&self, _cert: &x509_cert::Certificate) -> Option<PolicyError> {
+        warn!("unsafe (no-op) verification policy used! no verification performed!");
+        None
     }
 }
 
@@ -248,14 +260,14 @@ impl Identity {
 }
 
 impl VerificationPolicy for Identity {
-    fn verify(&self, cert: &x509_cert::Certificate) -> VerificationResult {
-        if let err @ Err(_) = self.issuer.verify(cert) {
+    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
+        if let err @ Some(_) = self.issuer.verify(cert) {
             return err;
         }
 
         let (_, san): (bool, SubjectAltName) = match cert.tbs_certificate.get() {
             Ok(Some(result)) => result,
-            _ => return Err(VerificationError::CertificateMalformed),
+            _ => return Some(PolicyError::ExtensionNotFound),
         };
 
         let names: Vec<_> = san
@@ -272,13 +284,13 @@ impl VerificationPolicy for Identity {
             .collect();
 
         if names.contains(&self.identity.as_str()) {
-            Ok(())
+            None
         } else {
-            Err(VerificationError::PolicyFailure(format!(
-                "Certificate's SANs do not match {}; actual SANs: {}",
-                self.identity,
-                names.join(", ")
-            )))
+            Some(PolicyError::ExtensionCheckFailed {
+                extension: "SubjectAltName".to_owned(),
+                expected: self.identity.clone(),
+                actual: names.join(", "),
+            })
         }
     }
 }

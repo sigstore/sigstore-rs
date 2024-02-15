@@ -10,17 +10,15 @@ use crate::fulcio::oauth::OauthTokenProvider;
 use crate::oauth::IdentityToken;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use openidconnect::core::CoreIdToken;
-use pkcs8::der::Decode;
 use reqwest::{header, Body};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Display, Formatter};
-use tracing::debug;
 use url::Url;
-use x509_cert::Certificate;
+use x509_cert::{Certificate, der::Decode};
 
-pub use models::CertificateResponse;
+pub use models::{CertificateResponse, SigningCertificateDetachedSCT};
 
 /// Default public Fulcio server root.
 pub const FULCIO_ROOT: &str = "https://fulcio.sigstore.dev/";
@@ -232,24 +230,23 @@ impl FulcioClient {
             header::ACCEPT => "application/pem-certificate-chain"
         );
 
-        let response: SigningCertificate = client
+        let response = client
             .post(self.root_url.join(SIGNING_CERT_V2_PATH)?)
             .headers(headers)
             .json(&CreateSigningCertificateRequest {
                 certificate_signing_request: request,
             })
             .send()
-            .await?
-            .json()
             .await?;
+        let response = response.json().await?;
 
-        let sct_embedded = matches!(
-            response,
-            SigningCertificate::SignedCertificateEmbeddedSct(_)
-        );
-        let certs = match response {
-            SigningCertificate::SignedCertificateDetachedSct(ref sc) => &sc.chain.certificates,
-            SigningCertificate::SignedCertificateEmbeddedSct(ref sc) => &sc.chain.certificates,
+        let (certs, detached_sct) = match response {
+            SigningCertificate::SignedCertificateDetachedSct(ref sc) => {
+                (&sc.chain.certificates, Some(sc.clone()))
+            }
+            SigningCertificate::SignedCertificateEmbeddedSct(ref sc) => {
+                (&sc.chain.certificates, None)
+            }
         };
 
         if certs.len() < 2 {
@@ -264,19 +261,10 @@ impl FulcioClient {
             .map(|pem| Certificate::from_der(pem.contents()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        // TODO(tnytown): Implement SCT extraction.
-        // see: https://github.com/RustCrypto/formats/pull/1134
-        if sct_embedded {
-            debug!("PrecertificateSignedCertificateTimestamps isn't implemented yet in x509_cert.");
-        } else {
-            // No embedded SCT, Fulcio instance that provides detached SCT:
-            if let SigningCertificate::SignedCertificateDetachedSct(_sct) = response {}
-        };
-
         Ok(CertificateResponse {
             cert,
             chain,
-            // sct,
+            detached_sct,
         })
     }
 }
