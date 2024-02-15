@@ -16,7 +16,7 @@ use serde::{Serialize, Serializer};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Display, Formatter};
 use url::Url;
-use x509_cert::{Certificate, der::Decode};
+use x509_cert::{der::Decode, Certificate};
 
 pub use models::{CertificateResponse, SigningCertificateDetachedSCT};
 

@@ -42,8 +42,9 @@ rekor = ["reqwest"]
 
 tuf = ["tough", "regex"]
 
-sign = []
-verify = []
+bundle = []
+sign = ["bundle"]
+verify = ["bundle"]
 
 cosign-native-tls = [
   "oci-distribution/native-tls",

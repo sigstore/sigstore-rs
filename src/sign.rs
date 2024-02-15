@@ -244,10 +244,7 @@ pub struct SigningContext {
 
 impl SigningContext {
     /// Manually constructs a [SigningContext] from its constituent data.
-    pub fn new(
-        fulcio: FulcioClient,
-        rekor_config: RekorConfiguration,
-    ) -> Self {
+    pub fn new(fulcio: FulcioClient, rekor_config: RekorConfiguration) -> Self {
         Self {
             fulcio,
             rekor_config,
