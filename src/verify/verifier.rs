@@ -17,7 +17,6 @@ use std::cell::OnceCell;
 use tracing::debug;
 use webpki::{
     types::{CertificateDer, UnixTime},
-    EndEntityCert,
 };
 
 use x509_cert::der::Encode;

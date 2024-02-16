@@ -21,7 +21,6 @@ use x509_cert::{
 };
 
 use crate::{
-    crypto::certificate,
     errors::{Result, SigstoreError},
 };
 

@@ -140,7 +140,7 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
     let bundle = fs::File::create(bundle)?;
     let mut artifact = fs::File::open(artifact)?;
 
-    let context = SigningContext::production();
+    let context = SigningContext::production()?;
     let signer = context.signer(identity_token);
 
     let signing_artifact = signer?.sign(&mut artifact)?;
