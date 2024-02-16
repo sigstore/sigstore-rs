@@ -262,7 +262,7 @@ pub(crate) fn is_root_ca(certificate: &Certificate) -> Result<bool> {
     }
 
     // Non-CAs can't possibly be root CAs.
-    if !is_ca(certificate)? {
+    if !matches!(is_ca(certificate), Ok(true)) {
         return Ok(false);
     }
 

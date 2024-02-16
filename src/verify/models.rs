@@ -144,7 +144,7 @@ impl VerificationMaterials {
         }
 
         for chain_cert in chain_certs {
-            if is_root_ca(chain_cert).is_ok() {
+            if matches!(is_root_ca(chain_cert), Ok(true)) {
                 return None;
             }
         }
