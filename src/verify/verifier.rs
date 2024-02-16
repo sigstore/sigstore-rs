@@ -103,6 +103,8 @@ impl<'a, R: Repository> Verifier<'a, R> {
 
         debug!("signing certificate chains back to trusted root");
 
+        // TODO(tnytown): verify SCT here, sigstore-rs#326
+
         // 2) Verify that the signing certificate belongs to the signer.
         if let Some(err) = policy.verify(&materials.certificate) {
             return Err(err)?;

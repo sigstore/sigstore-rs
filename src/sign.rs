@@ -128,6 +128,8 @@ impl<'ctx> AsyncSigningSession<'ctx> {
             return Err(SigstoreError::ExpiredSigningSession());
         }
 
+        // TODO(tnytown): verify SCT here, sigstore-rs#326
+
         // Sign artifact.
         let input_hash: &[u8] = &hasher.clone().finalize();
         let mut signature_bytes = Vec::new();
