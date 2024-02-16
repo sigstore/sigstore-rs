@@ -20,9 +20,7 @@ use x509_cert::{
     Certificate,
 };
 
-use crate::{
-    errors::{Result, SigstoreError},
-};
+use crate::errors::{Result, SigstoreError};
 
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
