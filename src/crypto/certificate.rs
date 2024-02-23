@@ -137,9 +137,6 @@ pub enum ExtensionErrorKind {
 pub enum NotLeafErrorKind {
     #[error("certificate is a CA: CAs are not leaves")]
     IsCA,
-
-    #[error(transparent)]
-    Extension(#[from] ExtensionErrorKind),
 }
 
 #[derive(Debug, Error)]
@@ -152,9 +149,6 @@ pub enum NotCAErrorKind {
 
     #[error("certificate in invalid state: cA={ca}, keyCertSign={key_cert_sign}")]
     Invalid { ca: bool, key_cert_sign: bool },
-
-    #[error(transparent)]
-    Extension(#[from] ExtensionErrorKind),
 }
 
 #[derive(Debug, Error)]
@@ -169,6 +163,8 @@ pub enum CertificateValidationError {
     NotLeaf(#[from] NotLeafErrorKind),
 
     NotCA(#[from] NotCAErrorKind),
+
+    Extension(#[from] ExtensionErrorKind),
 }
 
 /// Check if the given certificate is a leaf in the context of the Sigstore profile.
@@ -199,16 +195,12 @@ pub(crate) fn is_leaf(
         .get::<KeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
-        None => Err(NotLeafErrorKind::Extension(ExtensionErrorKind::Missing(
-            "KeyUsage",
-        )))?,
+        None => Err(ExtensionErrorKind::Missing("KeyUsage"))?,
         Some((_, key_usage)) => key_usage.digital_signature(),
     };
 
     if !digital_signature {
-        Err(NotLeafErrorKind::Extension(ExtensionErrorKind::BitUnset(
-            "KeyUsage.digitalSignature",
-        )))?;
+        Err(ExtensionErrorKind::BitUnset("KeyUsage.digitalSignature"))?;
     }
 
     // Finally, we check to make sure the leaf has an `ExtendedKeyUsages`
@@ -219,16 +211,14 @@ pub(crate) fn is_leaf(
         .get::<ExtendedKeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
-        None => Err(NotLeafErrorKind::Extension(ExtensionErrorKind::Missing(
-            "ExtendedKeyUsage",
-        )))?,
+        None => Err(ExtensionErrorKind::Missing("ExtendedKeyUsage"))?,
         Some((_, extended_key_usage)) => extended_key_usage,
     };
 
     if !extended_key_usage.0.contains(&ID_KP_CODE_SIGNING) {
-        Err(NotLeafErrorKind::Extension(ExtensionErrorKind::BitUnset(
+        Err(ExtensionErrorKind::BitUnset(
             "ExtendedKeyUsage.digitalSignature",
-        )))?;
+        ))?;
     }
 
     Ok(())
@@ -264,14 +254,10 @@ pub(crate) fn is_ca(
         .get::<constraints::BasicConstraints>()
         .map_err(CertificateValidationError::Malformed)?
     {
-        None => Err(NotCAErrorKind::Extension(ExtensionErrorKind::Missing(
-            "BasicConstraints",
-        )))?,
+        None => Err(ExtensionErrorKind::Missing("BasicConstraints"))?,
         Some((false, _)) => {
             // BasicConstraints must be marked as critical, per RFC 5280 4.2.1.9.
-            Err(NotCAErrorKind::Extension(ExtensionErrorKind::NotCritical(
-                "BasicConstraints",
-            )))?
+            Err(ExtensionErrorKind::NotCritical("BasicConstraints"))?
         }
         Some((true, v)) => v.ca,
     };
@@ -280,9 +266,7 @@ pub(crate) fn is_ca(
         .get::<KeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
-        None => Err(NotCAErrorKind::Extension(ExtensionErrorKind::Missing(
-            "KeyUsage",
-        )))?,
+        None => Err(ExtensionErrorKind::Missing("KeyUsage"))?,
         Some((_, v)) => v.key_cert_sign(),
     };
 
