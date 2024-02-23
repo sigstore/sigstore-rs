@@ -388,7 +388,9 @@ impl CosignVerificationKey {
                     .verify_prehash(msg, &sig)
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
-            _ => unimplemented!("Ed25519 doesn't implement verify_prehash"),
+            CosignVerificationKey::ED25519(_) => {
+                unimplemented!("Ed25519 doesn't implement verify_prehash")
+            }
         }
     }
 }

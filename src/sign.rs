@@ -132,12 +132,8 @@ impl<'ctx> AsyncSigningSession<'ctx> {
 
         // Sign artifact.
         let input_hash: &[u8] = &hasher.clone().finalize();
-        let mut signature_bytes = Vec::new();
         let artifact_signature: p256::ecdsa::Signature = self.private_key.sign_digest(hasher);
-        artifact_signature
-            .to_der()
-            .encode_to_vec(&mut signature_bytes)
-            .expect("failed to encode Signature!");
+        let signature_bytes = artifact_signature.to_der().as_bytes().to_owned();
 
         let cert = &self.certs.cert;
 
