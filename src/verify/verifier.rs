@@ -34,6 +34,9 @@ use crate::{
 
 use super::{models::CheckedBundle, policy::VerificationPolicy, VerificationResult};
 
+/// An asynchronous Sigstore verifier.
+///
+/// For synchronous usage, see [`Verifier`].
 pub struct AsyncVerifier {
     #[allow(dead_code)]
     rekor_config: RekorConfiguration,
@@ -41,6 +44,9 @@ pub struct AsyncVerifier {
 }
 
 impl AsyncVerifier {
+    /// Constructs an [`AsyncVerifier`].
+    ///
+    /// For verifications against the public-good trust root, use [`AsyncVerifier::production`].
     pub fn new<R: Repository>(
         rekor_config: RekorConfiguration,
         trust_repo: R,
@@ -155,6 +161,8 @@ impl AsyncVerifier {
         Ok(())
     }
 
+    /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
+    /// [`VerificationPolicy`].
     pub async fn verify<R: AsyncRead + Unpin + Send>(
         &self,
         mut input: R,
@@ -182,6 +190,7 @@ impl AsyncVerifier {
 }
 
 impl AsyncVerifier {
+    /// Constructs an [`AsyncVerifier`] against the public-good trust root.
     pub fn production() -> SigstoreResult<AsyncVerifier> {
         let updater = SigstoreRepository::new(None)?;
 
@@ -189,12 +198,18 @@ impl AsyncVerifier {
     }
 }
 
+/// A synchronous Sigstore verifier.
+///
+/// Async callers must use [`AsyncVerifier`]. Async usage of [`Verifier`] will result in a deadlock.
 pub struct Verifier {
     inner: AsyncVerifier,
     rt: tokio::runtime::Runtime,
 }
 
 impl Verifier {
+    /// Constructs a synchronous Sigstore verifier.
+    ///
+    /// For verifications against the public-good trust root, use [`Verifier::production`].
     pub fn new<R: Repository>(
         rekor_config: RekorConfiguration,
         trust_repo: R,
@@ -207,6 +222,8 @@ impl Verifier {
         Ok(Self { rt, inner })
     }
 
+    /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
+    /// [`VerificationPolicy`].
     pub fn verify<R: Read>(
         &self,
         mut input: R,
@@ -223,6 +240,7 @@ impl Verifier {
 }
 
 impl Verifier {
+    /// Constructs a synchronous [`Verifier`] against the public-good trust root.
     pub fn production() -> SigstoreResult<Verifier> {
         let updater = SigstoreRepository::new(None)?;
 
