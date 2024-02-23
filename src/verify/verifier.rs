@@ -155,7 +155,7 @@ impl AsyncVerifier {
         Ok(())
     }
 
-    pub async fn verify<R: AsyncRead + Unpin + Send + 'static>(
+    pub async fn verify<R: AsyncRead + Unpin + Send>(
         &self,
         mut input: R,
         bundle: Bundle,
