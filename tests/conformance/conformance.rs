@@ -23,7 +23,6 @@ use clap::{Parser, Subcommand};
 use sigstore::{
     oauth::IdentityToken,
     sign::SigningContext,
-    verify::VerificationMaterials,
     verify::{policy, Verifier},
 };
 
@@ -162,14 +161,13 @@ fn verify_bundle(args: VerifyBundle) -> anyhow::Result<()> {
     let mut artifact = fs::File::open(artifact)?;
 
     let bundle: sigstore::Bundle = serde_json::from_reader(bundle)?;
-    let materials = VerificationMaterials::from_bundle(&mut artifact, bundle, true)
-        .ok_or(anyhow!("Unable to construct VerificationMaterials"))?;
-
     let verifier = Verifier::production()?;
 
     verifier.verify(
-        materials,
+        &mut artifact,
+        bundle,
         &policy::Identity::new(certificate_identity, certificate_oidc_issuer),
+        true,
     )?;
 
     Ok(())

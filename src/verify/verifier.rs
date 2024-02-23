@@ -12,57 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::OnceCell;
+use std::io::{self, Read};
 
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::debug;
 use webpki::types::{CertificateDer, UnixTime};
-
 use x509_cert::der::Encode;
 
 use crate::{
+    bundle::Bundle,
     crypto::{CertificatePool, CosignVerificationKey, Signature},
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
     tuf::{Repository, SigstoreRepository},
-    verify::VerificationError,
+    verify::{
+        models::{CertificateErrorKind, SignatureErrorKind},
+        VerificationError,
+    },
 };
 
-use super::{models::VerificationMaterials, policy::VerificationPolicy, VerificationResult};
+use super::{models::CheckedBundle, policy::VerificationPolicy, VerificationResult};
 
-pub struct Verifier<'a, R: Repository> {
+pub struct AsyncVerifier {
     #[allow(dead_code)]
     rekor_config: RekorConfiguration,
-    trust_repo: R,
-    cert_pool: OnceCell<CertificatePool<'a>>,
+    cert_pool: CertificatePool,
 }
 
-impl<'a, R: Repository> Verifier<'a, R> {
-    pub fn new(rekor_config: RekorConfiguration, trust_repo: R) -> SigstoreResult<Self> {
+impl AsyncVerifier {
+    pub fn new<R: Repository>(
+        rekor_config: RekorConfiguration,
+        trust_repo: R,
+    ) -> SigstoreResult<Self> {
+        let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
+
         Ok(Self {
             rekor_config,
-            cert_pool: Default::default(),
-            trust_repo,
+            cert_pool,
         })
     }
 
-    fn cert_pool(&'a self) -> SigstoreResult<&CertificatePool<'a>> {
-        let init_cert_pool = || {
-            let certs = self.trust_repo.fulcio_certs()?;
-            CertificatePool::from_certificates(certs, [])
-        };
-
-        let cert_pool = init_cert_pool()?;
-        Ok(self.cert_pool.get_or_init(|| cert_pool))
-    }
-
-    pub fn verify(
-        &'a self,
-        materials: VerificationMaterials,
+    async fn verify_digest(
+        &self,
+        input_digest: Sha256,
+        bundle: Bundle,
         policy: &impl VerificationPolicy,
+        offline: bool,
     ) -> VerificationResult {
-        let store = self
-            .cert_pool()
-            .expect("Failed to construct certificate pool");
+        let input_digest = input_digest.finalize();
+        let materials: CheckedBundle = bundle.try_into()?;
 
         // In order to verify an artifact, we need to achieve the following:
         //
@@ -91,46 +90,38 @@ impl<'a, R: Repository> Verifier<'a, R> {
             .to_der()
             .expect("failed to DER-encode constructed Certificate!")
             .into();
-        let Ok(ee_cert) = (&cert_der).try_into() else {
-            return Err(VerificationError::CertificateVerificationFailure);
-        };
+        let ee_cert = (&cert_der)
+            .try_into()
+            .map_err(CertificateErrorKind::Malformed)?;
 
-        let Ok(_trusted_chain) =
-            store.verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
-        else {
-            return Err(VerificationError::CertificateVerificationFailure);
-        };
+        let _trusted_chain = self
+            .cert_pool
+            .verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
+            .map_err(CertificateErrorKind::VerificationFailed)?;
 
         debug!("signing certificate chains back to trusted root");
 
         // TODO(tnytown): verify SCT here, sigstore-rs#326
 
         // 2) Verify that the signing certificate belongs to the signer.
-        if let Some(err) = policy.verify(&materials.certificate) {
-            return Err(err)?;
-        }
+        policy.verify(&materials.certificate)?;
         debug!("signing certificate conforms to policy");
 
         // 3) Verify that the signature was signed by the public key in the signing certificate
-        let Ok(signing_key): SigstoreResult<CosignVerificationKey> =
-            (&tbs_certificate.subject_public_key_info).try_into()
-        else {
-            return Err(VerificationError::CertificateMalformed);
-        };
+        let signing_key: CosignVerificationKey = (&tbs_certificate.subject_public_key_info)
+            .try_into()
+            .map_err(SignatureErrorKind::AlgoUnsupported)?;
 
-        let verify_sig = signing_key.verify_prehash(
-            Signature::Raw(&materials.signature),
-            &materials.input_digest,
-        );
-        if verify_sig.is_err() {
-            return Err(VerificationError::SignatureVerificationFailure);
-        }
+        let verify_sig =
+            signing_key.verify_prehash(Signature::Raw(&materials.signature), &input_digest);
+        verify_sig.map_err(SignatureErrorKind::VerificationFailed)?;
+
         debug!("signature corresponds to public key");
 
         // 4) Verify that the Rekor entry is consistent with the other signing
         //    materials
-        let Some(log_entry) = materials.rekor_entry() else {
-            return Err(VerificationError::CertificateMalformed);
+        let Some(log_entry) = materials.tlog_entry(offline, &input_digest) else {
+            return Err(SignatureErrorKind::Transparency)?;
         };
         debug!("log entry is consistent with other materials");
 
@@ -156,19 +147,85 @@ impl<'a, R: Repository> Verifier<'a, R> {
             .to_unix_duration()
             .as_secs();
         if !(not_before <= integrated_time && integrated_time <= not_after) {
-            return Err(VerificationError::CertificateExpired);
+            return Err(CertificateErrorKind::Expired)?;
         }
         debug!("data signed during validity period");
 
         debug!("successfully verified!");
         Ok(())
     }
+
+    pub async fn verify<R: AsyncRead + Unpin + Send + 'static>(
+        &self,
+        mut input: R,
+        bundle: Bundle,
+        policy: &impl VerificationPolicy,
+        offline: bool,
+    ) -> VerificationResult {
+        // arbitrary buffer size, chosen to be a multiple of the digest size.
+        let mut buf = [0u8; 1024];
+        let mut hasher = Sha256::new();
+
+        loop {
+            match input
+                .read(&mut buf)
+                .await
+                .map_err(VerificationError::Input)?
+            {
+                0 => break,
+                n => hasher.update(&buf[..n]),
+            }
+        }
+
+        self.verify_digest(hasher, bundle, policy, offline).await
+    }
 }
 
-impl<'a> Verifier<'a, SigstoreRepository> {
-    pub fn production() -> SigstoreResult<Verifier<'a, SigstoreRepository>> {
+impl AsyncVerifier {
+    pub fn production() -> SigstoreResult<AsyncVerifier> {
         let updater = SigstoreRepository::new(None)?;
 
-        Verifier::<'a, SigstoreRepository>::new(Default::default(), updater)
+        AsyncVerifier::new(Default::default(), updater)
+    }
+}
+
+pub struct Verifier {
+    inner: AsyncVerifier,
+    rt: tokio::runtime::Runtime,
+}
+
+impl Verifier {
+    pub fn new<R: Repository>(
+        rekor_config: RekorConfiguration,
+        trust_repo: R,
+    ) -> SigstoreResult<Self> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let inner = AsyncVerifier::new(rekor_config, trust_repo)?;
+
+        Ok(Self { rt, inner })
+    }
+
+    pub fn verify<R: Read>(
+        &self,
+        mut input: R,
+        bundle: Bundle,
+        policy: &impl VerificationPolicy,
+        offline: bool,
+    ) -> VerificationResult {
+        let mut hasher = Sha256::new();
+        io::copy(&mut input, &mut hasher).map_err(VerificationError::Input)?;
+
+        self.rt
+            .block_on(self.inner.verify_digest(hasher, bundle, policy, offline))
+    }
+}
+
+impl Verifier {
+    pub fn production() -> SigstoreResult<Verifier> {
+        let updater = SigstoreRepository::new(None)?;
+
+        Verifier::new(Default::default(), updater)
     }
 }

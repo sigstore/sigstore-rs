@@ -15,10 +15,10 @@
 
 //! Verifier for Sigstore bundles and associated types and policies.
 mod models;
-pub use models::{VerificationError, VerificationMaterials, VerificationResult};
+pub use models::{VerificationError, VerificationResult};
 
 pub mod policy;
 pub use policy::{PolicyError, VerificationPolicy};
 
 mod verifier;
-pub use verifier::Verifier;
+pub use verifier::{AsyncVerifier, Verifier};

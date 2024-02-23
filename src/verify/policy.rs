@@ -88,6 +88,8 @@ pub enum PolicyError {
     AnyOf { total: usize },
 }
 
+pub type PolicyResult = Result<(), PolicyError>;
+
 /// A policy that checks a single textual value against a X.509 extension.
 pub trait SingleX509ExtPolicy {
     fn new<S: AsRef<str>>(val: S) -> Self;
@@ -96,13 +98,13 @@ pub trait SingleX509ExtPolicy {
 }
 
 impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T {
-    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
+    fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
         let extensions = cert.tbs_certificate.extensions.as_deref().unwrap_or(&[]);
         let mut extensions = extensions.iter().filter(|ext| ext.extn_id == T::OID);
 
         // Check for exactly one extension.
         let (Some(ext), None) = (extensions.next(), extensions.next()) else {
-            return Some(PolicyError::ExtensionNotFound);
+            return Err(PolicyError::ExtensionNotFound);
         };
 
         // Parse raw string without DER encoding.
@@ -110,13 +112,13 @@ impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T
             .expect("failed to parse constructed Extension!");
 
         if val != self.value() {
-            Some(PolicyError::ExtensionCheckFailed {
+            Err(PolicyError::ExtensionCheckFailed {
                 extension: T::name().to_owned(),
                 expected: self.value().to_owned(),
                 actual: val.to_owned(),
             })
         } else {
-            None
+            Ok(())
         }
     }
 }
@@ -159,7 +161,7 @@ impl_policy!(
 
 /// An interface that all policies must conform to.
 pub trait VerificationPolicy {
-    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError>;
+    fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult;
 }
 
 /// The "any of" policy, corresponding to a logical OR between child policies.
@@ -178,12 +180,14 @@ impl<'a> AnyOf<'a> {
 }
 
 impl VerificationPolicy for AnyOf<'_> {
-    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
+    fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
         self.children
             .iter()
-            .find(|policy| policy.verify(cert).is_some())
-            .map(|_| PolicyError::AnyOf {
-                total: self.children.len(),
+            .find(|policy| policy.verify(cert).is_err())
+            .map_or(Ok(()), |_| {
+                Err(PolicyError::AnyOf {
+                    total: self.children.len(),
+                })
             })
     }
 }
@@ -212,14 +216,14 @@ impl<'a> AllOf<'a> {
 }
 
 impl VerificationPolicy for AllOf<'_> {
-    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
-        let results = self.children.iter().map(|policy| policy.verify(cert));
+    fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
+        let results = self.children.iter().map(|policy| policy.verify(cert).err());
         let failures: Vec<_> = results.flatten().collect();
 
         if failures.is_empty() {
-            None
+            Ok(())
         } else {
-            Some(PolicyError::AllOf {
+            Err(PolicyError::AllOf {
                 total: self.children.len(),
                 errors: failures,
             })
@@ -230,9 +234,9 @@ impl VerificationPolicy for AllOf<'_> {
 pub(crate) struct UnsafeNoOp;
 
 impl VerificationPolicy for UnsafeNoOp {
-    fn verify(&self, _cert: &x509_cert::Certificate) -> Option<PolicyError> {
+    fn verify(&self, _cert: &x509_cert::Certificate) -> PolicyResult {
         warn!("unsafe (no-op) verification policy used! no verification performed!");
-        None
+        Ok(())
     }
 }
 
@@ -260,14 +264,12 @@ impl Identity {
 }
 
 impl VerificationPolicy for Identity {
-    fn verify(&self, cert: &x509_cert::Certificate) -> Option<PolicyError> {
-        if let err @ Some(_) = self.issuer.verify(cert) {
-            return err;
-        }
+    fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
+        self.issuer.verify(cert)?;
 
         let (_, san): (bool, SubjectAltName) = match cert.tbs_certificate.get() {
             Ok(Some(result)) => result,
-            _ => return Some(PolicyError::ExtensionNotFound),
+            _ => return Err(PolicyError::ExtensionNotFound),
         };
 
         let names: Vec<_> = san
@@ -284,9 +286,9 @@ impl VerificationPolicy for Identity {
             .collect();
 
         if names.contains(&self.identity.as_str()) {
-            None
+            Ok(())
         } else {
-            Some(PolicyError::ExtensionCheckFailed {
+            Err(PolicyError::ExtensionCheckFailed {
                 extension: "SubjectAltName".to_owned(),
                 expected: self.identity.clone(),
                 actual: names.join(", "),

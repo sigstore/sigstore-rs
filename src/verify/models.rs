@@ -13,106 +13,143 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    io::{self, Read},
-    str::FromStr,
-};
+use std::str::FromStr;
 
 use crate::{
     bundle::Version as BundleVersion,
-    crypto::certificate::{is_leaf, is_root_ca},
+    crypto::certificate::{is_leaf, is_root_ca, CertificateValidationError},
     rekor::models as rekor,
 };
 
 use crate::Bundle;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use pkcs8::der::{Decode, EncodePem};
-use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::dev::sigstore::{
     bundle::v1::{bundle, verification_material},
     rekor::v1::{InclusionProof, TransparencyLogEntry},
 };
 use thiserror::Error;
 use tracing::{debug, error, warn};
-use x509_cert::Certificate;
+use x509_cert::{
+    der::{Decode, EncodePem},
+    Certificate,
+};
 
 use super::policy::PolicyError;
 
 #[derive(Error, Debug)]
-pub enum VerificationError {
-    #[error("Certificate expired before time of signing")]
-    CertificateExpired,
+pub enum Bundle01ProfileErrorKind {
+    #[error("bundle must contain inclusion promise")]
+    InclusionPromiseMissing,
+}
 
-    #[error("Certificate malformed")]
-    CertificateMalformed,
+#[derive(Error, Debug)]
+pub enum Bundle02ProfileErrorKind {
+    #[error("bundle must contain inclusion proof")]
+    InclusionProofMissing,
 
-    #[error("Failed to verify certificate")]
-    CertificateVerificationFailure,
+    #[error("bundle must contain checkpoint")]
+    CheckpointMissing,
+}
 
-    #[error("Certificate cannot be used for verification: {0}")]
-    CertificateTypeError(String),
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub enum BundleProfileErrorKind {
+    Bundle01Profile(#[from] Bundle01ProfileErrorKind),
 
-    #[error("Failed to verify that the signature corresponds to the input")]
-    SignatureVerificationFailure,
+    Bundle02Profile(#[from] Bundle02ProfileErrorKind),
+
+    #[error("unknown bundle profile {0}")]
+    Unknown(String),
+}
+
+#[derive(Error, Debug)]
+pub enum BundleErrorKind {
+    #[error("bundle missing VerificationMaterial")]
+    VerificationMaterialMissing,
+
+    #[error("bundle includes unsupported VerificationMaterial::Content")]
+    VerificationMaterialContentUnsupported,
+
+    #[error("bundle's certificate(s) are malformed")]
+    CertificateMalformed(#[source] x509_cert::der::Error),
+
+    #[error("bundle contains a root certificate")]
+    RootInChain,
+
+    #[error("bundle does not contain the signing (leaf) certificate")]
+    NoLeaf(#[source] CertificateValidationError),
+
+    #[error("bundle does not contain any certificates")]
+    CertificatesMissing,
+
+    #[error("bundle does not contain signature")]
+    SignatureMissing,
+
+    #[error("bundle includes unsupported DSSE signature")]
+    DsseUnsupported,
+
+    #[error("bundle needs 1 tlog entry, got {0}")]
+    TlogEntry(usize),
 
     #[error(transparent)]
-    PolicyFailure(#[from] PolicyError),
+    BundleProfile(#[from] BundleProfileErrorKind),
 }
+
+#[derive(Error, Debug)]
+pub enum CertificateErrorKind {
+    #[error("certificate malformed")]
+    Malformed(#[source] webpki::Error),
+
+    #[error("certificate expired before time of signing")]
+    Expired,
+
+    #[error("certificate verification failed")]
+    VerificationFailed(#[source] webpki::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum SignatureErrorKind {
+    #[error("unsupported signature algorithm")]
+    AlgoUnsupported(#[source] crate::errors::SigstoreError),
+
+    #[error("signature verification failed")]
+    VerificationFailed(#[source] crate::errors::SigstoreError),
+
+    #[error("signature transparency materials are inconsistent")]
+    Transparency,
+}
+
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub enum VerificationError {
+    #[error("unable to read input")]
+    Input(#[source] std::io::Error),
+
+    Bundle(#[from] BundleErrorKind),
+
+    Certificate(#[from] CertificateErrorKind),
+
+    Signature(#[from] SignatureErrorKind),
+
+    Policy(#[from] PolicyError),
+}
+
 pub type VerificationResult = Result<(), VerificationError>;
 
-pub struct VerificationMaterials {
-    pub(crate) input_digest: Vec<u8>,
+pub struct CheckedBundle {
     pub(crate) certificate: Certificate,
     pub(crate) signature: Vec<u8>,
-    rekor_entry: TransparencyLogEntry,
 
-    offline: bool,
+    tlog_entry: TransparencyLogEntry,
 }
 
-impl VerificationMaterials {
-    pub fn new<R: Read>(
-        input: &mut R,
-        certificate: Certificate,
-        signature: Vec<u8>,
-        offline: bool,
-        rekor_entry: TransparencyLogEntry,
-    ) -> Option<VerificationMaterials> {
-        let mut hasher = Sha256::new();
-        io::copy(input, &mut hasher).ok()?;
+impl TryFrom<Bundle> for CheckedBundle {
+    type Error = BundleErrorKind;
 
-        if matches!(
-            rekor_entry,
-            TransparencyLogEntry {
-                inclusion_promise: None,
-                inclusion_proof: None,
-                ..
-            }
-        ) {
-            error!("encountered TransparencyLogEntry without any inclusion materials");
-            return None;
-        }
-
-        Some(Self {
-            input_digest: hasher.finalize().to_vec(),
-            rekor_entry,
-            certificate,
-            signature,
-            offline,
-        })
-    }
-
-    /// Constructs a VerificationMaterials from the given Bundle.
-    ///
-    /// For details on bundle semantics, please refer to [VerificationMaterial].
-    ///
-    /// [VerificationMaterial]: sigstore_protobuf_specs::dev::sigstore::bundle::v1::VerificationMaterial
-    pub fn from_bundle<R: Read>(input: &mut R, bundle: Bundle, offline: bool) -> Option<Self> {
-        let (content, mut tlog_entries) = match bundle.verification_material {
+    fn try_from(input: Bundle) -> Result<Self, Self::Error> {
+        let (content, mut tlog_entries) = match input.verification_material {
             Some(m) => (m.content, m.tlog_entries),
-            _ => {
-                error!("bundle missing VerificationMaterial");
-                return None;
-            }
+            _ => return Err(BundleErrorKind::VerificationMaterialMissing),
         };
 
         // Parse the certificates. The first entry in the chain MUST be a leaf certificate, and the
@@ -123,98 +160,98 @@ impl VerificationMaterials {
             Some(verification_material::Content::Certificate(cert)) => {
                 vec![cert]
             }
-            _ => {
-                error!("bundle includes unsupported VerificationMaterial Content");
-                return None;
-            }
+            _ => return Err(BundleErrorKind::VerificationMaterialContentUnsupported),
         };
         let certs = certs
             .iter()
             .map(|c| c.raw_bytes.as_slice())
             .map(Certificate::from_der)
             .collect::<Result<Vec<_>, _>>()
-            .ok()?;
+            .map_err(BundleErrorKind::CertificateMalformed)?;
 
         let [leaf_cert, chain_certs @ ..] = &certs[..] else {
-            return None;
+            return Err(BundleErrorKind::CertificatesMissing);
         };
 
-        if is_leaf(leaf_cert).is_err() {
-            return None;
-        }
+        is_leaf(leaf_cert).map_err(BundleErrorKind::NoLeaf)?;
 
         for chain_cert in chain_certs {
-            if matches!(is_root_ca(chain_cert), Ok(true)) {
-                return None;
+            if is_root_ca(chain_cert).is_ok() {
+                return Err(BundleErrorKind::RootInChain);
             }
         }
 
-        let signature = match bundle.content? {
+        let signature = match input.content.ok_or(BundleErrorKind::SignatureMissing)? {
             bundle::Content::MessageSignature(s) => s.signature,
-            _ => {
-                error!("bundle includes unsupported DSSE signature");
-                return None;
-            }
+            _ => return Err(BundleErrorKind::DsseUnsupported),
         };
 
         if tlog_entries.len() != 1 {
-            error!("bundle expected 1 tlog entry; got {}", tlog_entries.len());
-            return None;
+            return Err(BundleErrorKind::TlogEntry(tlog_entries.len()));
         }
         let tlog_entry = tlog_entries.remove(0);
 
         let (inclusion_promise, inclusion_proof) =
             (&tlog_entry.inclusion_promise, &tlog_entry.inclusion_proof);
 
-        // `inclusion_proof` is now a required field in the protobuf spec,
-        // but older versions of Rekor didn't provide inclusion proofs.
+        // `inclusion_proof` is a required field in the current protobuf spec,
+        // but older versions of Rekor didn't provide it. Check invariants
+        // here and selectively allow for this case.
         //
         // https://github.com/sigstore/sigstore-python/pull/634#discussion_r1182769140
-        match BundleVersion::from_str(&bundle.media_type) {
-            Ok(BundleVersion::Bundle0_1) => {
-                if inclusion_promise.is_none() {
-                    error!("bundle must contain inclusion promise");
-                    return None;
-                }
+        let check_01_bundle = || -> Result<(), BundleProfileErrorKind> {
+            if inclusion_promise.is_none() {
+                return Err(Bundle01ProfileErrorKind::InclusionPromiseMissing)?;
+            }
 
-                if matches!(
-                    inclusion_proof,
-                    Some(InclusionProof {
-                        checkpoint: None,
-                        ..
-                    })
-                ) {
-                    debug!("0.1 bundle contains inclusion proof without checkpoint");
-                }
+            if matches!(
+                inclusion_proof,
+                Some(InclusionProof {
+                    checkpoint: None,
+                    ..
+                })
+            ) {
+                debug!("0.1 bundle contains inclusion proof without checkpoint");
             }
-            Ok(BundleVersion::Bundle0_2) => {
-                if inclusion_proof.is_none() {
-                    error!("bundle must contain inclusion proof");
-                    return None;
-                }
 
-                if matches!(
-                    inclusion_proof,
-                    Some(InclusionProof {
-                        checkpoint: None,
-                        ..
-                    })
-                ) {
-                    error!("bundle must contain checkpoint");
-                    return None;
-                }
+            Ok(())
+        };
+        let check_02_bundle = || -> Result<(), BundleProfileErrorKind> {
+            if inclusion_proof.is_none() {
+                error!("bundle must contain inclusion proof");
+                return Err(Bundle02ProfileErrorKind::InclusionProofMissing)?;
             }
-            Err(_) => {
-                error!("unknown bundle version");
-                return None;
+
+            if matches!(
+                inclusion_proof,
+                Some(InclusionProof {
+                    checkpoint: None,
+                    ..
+                })
+            ) {
+                error!("bundle must contain checkpoint");
+                return Err(Bundle02ProfileErrorKind::CheckpointMissing)?;
             }
+
+            Ok(())
+        };
+        match BundleVersion::from_str(&input.media_type) {
+            Ok(BundleVersion::Bundle0_1) => check_01_bundle()?,
+            Ok(BundleVersion::Bundle0_2) => check_02_bundle()?,
+            Err(_) => return Err(BundleProfileErrorKind::Unknown(input.media_type))?,
         }
 
-        Self::new(input, leaf_cert.clone(), signature, offline, tlog_entry)
+        Ok(Self {
+            certificate: leaf_cert.clone(),
+            signature,
+            tlog_entry,
+        })
     }
+}
 
-    /// Retrieves the [LogEntry] for the materials.
-    pub fn rekor_entry(&self) -> Option<&TransparencyLogEntry> {
+impl CheckedBundle {
+    /// Retrieves and checks consistency of the bundle's [TransparencyLogEntry].
+    pub fn tlog_entry(&self, offline: bool, input_digest: &[u8]) -> Option<&TransparencyLogEntry> {
         let base64_pem_certificate =
             base64.encode(self.certificate.to_pem(pkcs8::LineEnding::LF).ok()?);
 
@@ -229,21 +266,21 @@ impl VerificationMaterials {
                 data: rekor::hashedrekord::Data {
                     hash: rekor::hashedrekord::Hash {
                         algorithm: rekor::hashedrekord::AlgorithmKind::sha256,
-                        value: hex::encode(&self.input_digest),
+                        value: hex::encode(input_digest),
                     },
                 },
             },
         };
 
-        let entry = if !self.offline && self.rekor_entry.inclusion_proof.is_none() {
+        let entry = if !offline && self.tlog_entry.inclusion_proof.is_none() {
             warn!("online rekor fetching is not implemented yet, but is necessary for this bundle");
             return None;
         } else {
-            &self.rekor_entry
+            &self.tlog_entry
         };
 
         let actual: serde_json::Value =
-            serde_json::from_slice(&self.rekor_entry.canonicalized_body).ok()?;
+            serde_json::from_slice(&self.tlog_entry.canonicalized_body).ok()?;
         let expected: serde_json::Value = serde_json::to_value(expected_entry).ok()?;
 
         if actual != expected {

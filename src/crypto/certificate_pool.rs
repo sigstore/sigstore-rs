@@ -19,31 +19,34 @@ use webpki::{
     EndEntityCert, KeyUsage, VerifiedPath,
 };
 
-use crate::errors::{Result, SigstoreError};
+use crate::errors::{Result as SigstoreResult, SigstoreError};
 
 /// A collection of trusted root certificates.
 #[derive(Default, Debug)]
-pub(crate) struct CertificatePool<'a> {
-    trusted_roots: Vec<TrustAnchor<'a>>,
-    intermediates: Vec<CertificateDer<'a>>,
+pub(crate) struct CertificatePool {
+    trusted_roots: Vec<TrustAnchor<'static>>,
+    intermediates: Vec<CertificateDer<'static>>,
 }
 
-impl<'a> CertificatePool<'a> {
+impl CertificatePool {
     /// Builds a `CertificatePool` instance using the provided list of [`Certificate`].
-    pub(crate) fn from_certificates<R, I>(
+    pub(crate) fn from_certificates<'r, 'i, R, I>(
         trusted_roots: R,
         untrusted_intermediates: I,
-    ) -> Result<CertificatePool<'a>>
+    ) -> SigstoreResult<CertificatePool>
     where
-        R: IntoIterator<Item = CertificateDer<'a>>,
-        I: IntoIterator<Item = CertificateDer<'a>>,
+        R: IntoIterator<Item = CertificateDer<'r>>,
+        I: IntoIterator<Item = CertificateDer<'i>>,
     {
         Ok(CertificatePool {
             trusted_roots: trusted_roots
                 .into_iter()
                 .map(|x| Ok(webpki::anchor_from_trusted_cert(&x)?.to_owned()))
                 .collect::<std::result::Result<Vec<_>, webpki::Error>>()?,
-            intermediates: untrusted_intermediates.into_iter().collect(),
+            intermediates: untrusted_intermediates
+                .into_iter()
+                .map(|i| i.into_owned())
+                .collect(),
         })
     }
 
@@ -59,7 +62,7 @@ impl<'a> CertificatePool<'a> {
         &self,
         cert_pem: &[u8],
         verification_time: Option<UnixTime>,
-    ) -> Result<()> {
+    ) -> SigstoreResult<()> {
         let cert_pem = pem::parse(cert_pem)?;
         if cert_pem.tag() != "CERTIFICATE" {
             return Err(SigstoreError::CertificatePoolError(
@@ -82,7 +85,7 @@ impl<'a> CertificatePool<'a> {
         &self,
         der: &[u8],
         verification_time: Option<UnixTime>,
-    ) -> Result<()> {
+    ) -> SigstoreResult<()> {
         let der = CertificateDer::from(der);
         let cert = EndEntityCert::try_from(&der)?;
 
@@ -91,18 +94,18 @@ impl<'a> CertificatePool<'a> {
         Ok(())
     }
 
-    pub(crate) fn verify_cert_with_time<'cert>(
+    pub(crate) fn verify_cert_with_time<'a, 'cert>(
         &'a self,
         cert: &'cert EndEntityCert<'cert>,
         verification_time: UnixTime,
-    ) -> Result<VerifiedPath<'cert>>
+    ) -> Result<VerifiedPath<'cert>, webpki::Error>
     where
         'a: 'cert,
     {
         let signing_algs = webpki::ALL_VERIFICATION_ALGS;
         let eku_code_signing = ID_KP_CODE_SIGNING.as_bytes();
 
-        Ok(cert.verify_for_usage(
+        cert.verify_for_usage(
             signing_algs,
             &self.trusted_roots,
             self.intermediates.as_slice(),
@@ -110,6 +113,6 @@ impl<'a> CertificatePool<'a> {
             KeyUsage::required(eku_code_signing),
             None,
             None,
-        )?)
+        )
     }
 }

@@ -232,7 +232,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tu
     if cli.use_sigstore_tuf_data {
         let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
             info!("Downloading data from Sigstore TUF repository");
-            SigstoreRepository::new(None)?.prefetch()
+            SigstoreRepository::new(None)
         })
         .await
         .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
