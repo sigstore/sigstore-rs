@@ -127,7 +127,7 @@ zeroize = "1.5.7"
 rustls-webpki = { version = "0.102.1", features = ["alloc"] }
 serde_repr = "0.1.16"
 hex = "0.4.3"
-json-syntax = { version = "0.11.1", features = ["canonicalize", "serde"] }
+json-syntax = { version = "0.12.2", features = ["canonicalize", "serde"] }
 tls_codec = { version = "0.4.1", features = ["derive"] }
 ring = "0.17.6"
 
