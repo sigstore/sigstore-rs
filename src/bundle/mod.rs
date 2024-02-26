@@ -90,8 +90,7 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
 
     fn try_from(value: RekorLogEntry) -> Result<Self, Self::Error> {
         let canonicalized_body = {
-            let mut body =
-                json_syntax::to_value(value.body).expect("failed to parse constructed Body!");
+            let mut body = json_syntax::to_value(value.body).or(Err(()))?;
             body.canonicalize();
             body.compact_print().to_string().into_bytes()
         };

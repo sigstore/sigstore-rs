@@ -112,14 +112,14 @@ impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T
             .expect("failed to parse constructed Extension!");
 
         if val != self.value() {
-            Err(PolicyError::ExtensionCheckFailed {
+            return Err(PolicyError::ExtensionCheckFailed {
                 extension: T::name().to_owned(),
                 expected: self.value().to_owned(),
                 actual: val.to_owned(),
-            })
-        } else {
-            Ok(())
+            });
         }
+
+        Ok(())
     }
 }
 
@@ -220,14 +220,14 @@ impl VerificationPolicy for AllOf<'_> {
         let results = self.children.iter().map(|policy| policy.verify(cert).err());
         let failures: Vec<_> = results.flatten().collect();
 
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(PolicyError::AllOf {
+        if !failures.is_empty() {
+            return Err(PolicyError::AllOf {
                 total: self.children.len(),
                 errors: failures,
-            })
+            });
         }
+
+        Ok(())
     }
 }
 
@@ -285,14 +285,14 @@ impl VerificationPolicy for Identity {
             })
             .collect();
 
-        if names.contains(&self.identity.as_str()) {
-            Ok(())
-        } else {
-            Err(PolicyError::ExtensionCheckFailed {
+        if !names.contains(&self.identity.as_str()) {
+            return Err(PolicyError::ExtensionCheckFailed {
                 extension: "SubjectAltName".to_owned(),
                 expected: self.identity.clone(),
                 actual: names.join(", "),
-            })
+            });
         }
+
+        Ok(())
     }
 }

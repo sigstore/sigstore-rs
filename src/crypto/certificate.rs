@@ -248,7 +248,7 @@ pub(crate) fn is_ca(
     // - `BasicConstraints.ca`
     //
     // Any other combination of states is inconsistent and invalid, meaning
-    // that we won't consider the certificate a valid non-CA leaf.
+    // that we won't treat the certificate as neither a leaf nor a CA.
 
     let ca = match tbs
         .get::<constraints::BasicConstraints>()
@@ -270,17 +270,16 @@ pub(crate) fn is_ca(
         Some((_, v)) => v.key_cert_sign(),
     };
 
-    // both states set, this is a CA.
-    if ca && key_cert_sign {
-        return Ok(());
+    if !ca || !key_cert_sign {
+        Err(NotCAErrorKind::Invalid { ca, key_cert_sign })?
     }
 
     if !(ca || key_cert_sign) {
         Err(NotCAErrorKind::NotCA)?;
     }
 
-    // Anything else is an invalid state that should never occur.
-    Err(NotCAErrorKind::Invalid { ca, key_cert_sign })?
+    // both states set, this is a CA.
+    return Ok(());
 }
 
 /// Returns `True` if and only if the given `Certificate` indicates
@@ -306,11 +305,11 @@ pub(crate) fn is_root_ca(
     is_ca(certificate)?;
 
     // A certificate that is its own issuer and signer is considered a root CA.
-    if tbs.issuer == tbs.subject {
-        Ok(())
-    } else {
+    if tbs.issuer != tbs.subject {
         Err(NotCAErrorKind::NotRootCA)?
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
