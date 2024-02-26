@@ -92,7 +92,7 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::tuf::ManualRepository {
+//!   let mut repo = sigstore::repository::ManualRepository {
 //!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
 //!     rekor_key: Some(rekor_pub_key),
 //!     ..Default::default()
@@ -281,7 +281,10 @@ pub mod registry;
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
-#[cfg(feature = "tuf")]
+#[cfg(feature = "repository")]
+pub mod repository;
+
+#[cfg(all(feature = "tuf", feature = "repository"))]
 pub mod tuf;
 
 // Don't export yet -- these types should only be useful internally.

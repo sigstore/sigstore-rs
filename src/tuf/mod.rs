@@ -49,36 +49,6 @@ use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, 
 
 use super::errors::{Result, SigstoreError};
 
-/// A `Repository` owns all key material necessary for establishing a root of trust.
-pub trait Repository {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>>;
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
-}
-
-/// A `ManualRepository` is a [Repository] with out-of-band trust materials.
-/// As it does not establish a trust root with TUF, users must initialize its materials themselves.
-#[derive(Debug, Default)]
-pub struct ManualRepository<'a> {
-    pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
-    pub rekor_key: Option<Vec<u8>>,
-}
-
-impl Repository for ManualRepository<'_> {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
-        Ok(match &self.fulcio_certs {
-            Some(certs) => certs.clone(),
-            None => Vec::new(),
-        })
-    }
-
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        Ok(match &self.rekor_key {
-            Some(key) => vec![&key[..]],
-            None => Vec::new(),
-        })
-    }
-}
-
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
 pub struct SigstoreRepository {
@@ -177,7 +147,7 @@ impl SigstoreRepository {
     }
 }
 
-impl Repository for SigstoreRepository {
+impl crate::repository::Repository for SigstoreRepository {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///
