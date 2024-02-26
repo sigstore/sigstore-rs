@@ -270,16 +270,17 @@ pub(crate) fn is_ca(
         Some((_, v)) => v.key_cert_sign(),
     };
 
-    if !ca || !key_cert_sign {
-        Err(NotCAErrorKind::Invalid { ca, key_cert_sign })?
+    // both states set, this is a CA.
+    if ca && key_cert_sign {
+        return Ok(());
     }
 
     if !(ca || key_cert_sign) {
         Err(NotCAErrorKind::NotCA)?;
     }
 
-    // both states set, this is a CA.
-    return Ok(());
+    // Anything else is an invalid state that should never occur.
+    Err(NotCAErrorKind::Invalid { ca, key_cert_sign })?
 }
 
 /// Returns `True` if and only if the given `Certificate` indicates
