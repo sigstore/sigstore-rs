@@ -49,6 +49,8 @@ use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, 
 
 use super::errors::{Result, SigstoreError};
 
+pub use crate::repository::{Repository, ManualRepository};
+
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
 pub struct SigstoreRepository {
