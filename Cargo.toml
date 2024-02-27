@@ -40,8 +40,7 @@ rekor-native-tls = ["reqwest/native-tls", "rekor"]
 rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-repository = []
-tuf = ["tough", "regex", "repository"]
+tuf = ["tough", "regex"]
 
 sign = []
 
@@ -57,7 +56,7 @@ cosign-rustls-tls = [
   "cosign",
   "registry-rustls-tls",
 ]
-cosign = ["repository"]
+cosign = []
 cert = []
 
 registry-native-tls = ["oci-distribution/native-tls", "registry"]

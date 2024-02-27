@@ -260,6 +260,7 @@
 #![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
+pub mod repository;
 
 #[cfg(feature = "mock-client")]
 mod mock_client;
@@ -281,10 +282,7 @@ pub mod registry;
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
-#[cfg(feature = "repository")]
-pub mod repository;
-
-#[cfg(all(feature = "tuf", feature = "repository"))]
+#[cfg(all(feature = "tuf"))]
 pub mod tuf;
 
 // Don't export yet -- these types should only be useful internally.
