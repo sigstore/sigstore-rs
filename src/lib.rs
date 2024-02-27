@@ -259,8 +259,6 @@
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
 
-pub use repository::{Repository, ManualRepository};
-
 pub mod crypto;
 
 #[cfg(feature = "mock-client")]
