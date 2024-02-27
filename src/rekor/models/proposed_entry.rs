@@ -68,7 +68,7 @@ pub enum ProposedEntry {
         #[serde(rename = "spec")]
         spec: serde_json::Value,
     },
-    #[serde(rename = "tuf")]
+    #[serde(rename = "sigstore-repository")]
     Tuf {
         #[serde(rename = "apiVersion")]
         api_version: String,

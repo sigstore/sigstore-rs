@@ -41,7 +41,7 @@ pub enum Format {
     Minisign,
     #[serde(rename = "ssh")]
     Ssh,
-    #[serde(rename = "tuf")]
+    #[serde(rename = "sigstore-repository")]
     Tuf,
 }
 
