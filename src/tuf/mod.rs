@@ -49,7 +49,7 @@ use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, 
 
 use super::errors::{Result, SigstoreError};
 
-pub use crate::repository::{Repository, ManualRepository};
+pub use crate::repo::{Repository, ManualRepository};
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
@@ -149,7 +149,7 @@ impl SigstoreRepository {
     }
 }
 
-impl crate::repository::Repository for SigstoreRepository {
+impl crate::repo::Repository for SigstoreRepository {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///

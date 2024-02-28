@@ -21,7 +21,7 @@ use crate::crypto::SigningScheme;
 use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
-use crate::repository::Repository;
+use crate::repo::Repository;
 
 /// A builder that generates Client objects.
 ///

@@ -92,7 +92,7 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::repository::ManualRepository {
+//!   let mut repo = sigstore::repo::ManualRepository {
 //!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
 //!     rekor_key: Some(rekor_pub_key),
 //!     ..Default::default()
@@ -260,7 +260,7 @@
 #![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
-pub mod repository;
+pub mod repo;
 
 #[cfg(feature = "mock-client")]
 mod mock_client;
