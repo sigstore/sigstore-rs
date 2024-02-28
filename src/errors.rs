@@ -161,7 +161,7 @@ pub enum SigstoreError {
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,
 
-    #[cfg(feature = "sigstore-repository")]
+    #[cfg(feature = "tuf")]
     #[error(transparent)]
     TufError(#[from] Box<tough::error::Error>),
 

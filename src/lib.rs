@@ -282,7 +282,7 @@ pub mod registry;
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
-#[cfg(all(feature = "sigstore-repository"))]
+#[cfg(all(feature = "tuf"))]
 pub mod tuf;
 
 // Don't export yet -- these types should only be useful internally.
