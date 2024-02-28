@@ -110,7 +110,7 @@ struct Cli {
 
 async fn run_app(
     cli: &Cli,
-    frd: &dyn sigstore::repository::Repository,
+    frd: &dyn sigstore::repo::Repository,
 ) -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
     // Note well: this a limitation deliberately introduced by this example.
     if cli.cert_email.is_some() && cli.cert_url.is_some() {
@@ -228,7 +228,7 @@ async fn run_app(
     Ok((trusted_layers, verification_constraints))
 }
 
-async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::repository::Repository>> {
+async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::repo::Repository>> {
     if cli.use_sigstore_tuf_data {
         let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
             info!("Downloading data from Sigstore TUF repository");
@@ -240,7 +240,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::re
         return Ok(Box::new(repo?));
     };
 
-    let mut data = sigstore::repository::ManualRepository::default();
+    let mut data = sigstore::repo::ManualRepository::default();
     if let Some(path) = cli.rekor_pub_key.as_ref() {
         data.rekor_key = Some(
             fs::read(path)
