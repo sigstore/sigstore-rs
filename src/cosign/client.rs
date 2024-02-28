@@ -37,15 +37,15 @@ pub const CONFIG_DATA: &str = "{}";
 /// Cosign Client
 ///
 /// Instances of `Client` can be built via [`sigstore::cosign::ClientBuilder`](crate::cosign::ClientBuilder).
-pub struct Client<'a> {
+pub struct Client {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
     pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
-    pub(crate) fulcio_cert_pool: Option<CertificatePool<'a>>,
+    pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl CosignCapabilities for Client<'_> {
+impl CosignCapabilities for Client {
     async fn triangulate(
         &mut self,
         image: &OciReference,
@@ -140,7 +140,7 @@ impl CosignCapabilities for Client<'_> {
     }
 }
 
-impl Client<'_> {
+impl Client {
     /// Internal helper method used to fetch data from an OCI registry
     async fn fetch_manifest_and_layers(
         &mut self,
@@ -177,7 +177,7 @@ mod tests {
     use crate::crypto::SigningScheme;
     use crate::mock_client::test::MockOciClient;
 
-    fn build_test_client(mock_client: MockOciClient) -> Client<'static> {
+    fn build_test_client(mock_client: MockOciClient) -> Client {
         let rekor_pub_key =
             CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
                 .expect("Cannot create CosignVerificationKey");

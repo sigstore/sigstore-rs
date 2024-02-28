@@ -91,7 +91,7 @@ impl<'a> ClientBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Result<Client<'a>> {
+    pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {
                 info!("Rekor public key not provided. Rekor integration disabled");

@@ -109,6 +109,9 @@ pub enum SigstoreError {
     #[error("Certificate pool error: {0}")]
     CertificatePoolError(String),
 
+    #[error("Certificate invalid: {0}")]
+    InvalidCertError(String),
+
     #[error("Signing session expired")]
     ExpiredSigningSession(),
 
@@ -132,6 +135,14 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
+
+    #[cfg(feature = "cert")]
+    #[error(transparent)]
+    KeyringError(#[from] crate::crypto::keyring::KeyringError),
+
+    #[cfg(feature = "sign")]
+    #[error(transparent)]
+    SCTError(#[from] crate::crypto::transparency::SCTError),
 
     #[cfg(feature = "sign")]
     #[error(transparent)]
