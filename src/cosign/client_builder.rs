@@ -28,17 +28,17 @@ use crate::trust::TrustRoot;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::tuf::ManualTrustRoot`].
+/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
 ///
-/// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+/// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
 ///
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
-/// This can be provided via a [`crate::tuf::ManualTrustRoot`].
+/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
 ///
-/// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+/// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
 ///
 /// ## Registry caching
@@ -71,7 +71,7 @@ impl<'a> ClientBuilder<'a> {
     /// Optional - Configures the roots of trust.
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
-    /// See [crate::tuf::TrustRoot] for more details on trust repositories.
+    /// See [crate::sigstore::TrustRoot] for more details on trust repositories.
     pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
         let rekor_keys = repo.rekor_keys()?;
         if !rekor_keys.is_empty() {

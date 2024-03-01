@@ -102,12 +102,12 @@ pub trait CosignCapabilities {
     /// must be satisfied:
     ///
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Rekor integration enabled (see [`crate::tuf::ManualTrustRoot`])
+    ///   have been created with Rekor integration enabled (see [`crate::sigstore::ManualTrustRoot`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see [`crate::tuf::ManualTrustRoot])
+    ///   have been created with Fulcio integration enabled (see [`crate::sigstore::ManualTrustRoot])
     /// * The layer must include a bundle produced by Rekor
     ///
-    /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
+    /// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
     /// > to obtain this data from the official TUF repository of the Sigstore project.
     ///
     /// When the embedded certificate cannot be verified, [`SignatureLayer::certificate_signature`]
