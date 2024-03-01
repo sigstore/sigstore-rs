@@ -15,7 +15,7 @@
 
 //! Helper Structs to interact with the Sigstore TUF repository.
 //!
-//! The main interaction point is [`SigstoreRootTrust`], which fetches Rekor's
+//! The main interaction point is [`SigstoreTrustRoot`], which fetches Rekor's
 //! public key and Fulcio's certificate.
 //!
 //! These can later be given to [`cosign::ClientBuilder`](crate::cosign::ClientBuilder)
@@ -23,12 +23,12 @@
 //!
 //! # Example
 //!
-//! The `SigstoreRootTrust` instance can be created via the [`SigstoreRootTrust::prefetch`]
+//! The `SigstoreRootTrust` instance can be created via the [`SigstoreTrustRoot::prefetch`]
 //! method.
 //!
 //! ```rust,no_run
-//! use sigstore::trust::sigstore::SigstoreRootTrust;
-//! let repo = SigstoreRootTrust::new(None).unwrap().prefetch().unwrap();
+//! use sigstore::trust::sigstore::SigstoreTrustRoot;
+//! let repo = SigstoreTrustRoot::new(None).unwrap().prefetch().unwrap();
 //! ```
 use std::{
     cell::OnceCell,
@@ -53,13 +53,13 @@ pub use crate::trust::{ManualTrustRoot, TrustRoot};
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
-pub struct SigstoreRootTrust {
+pub struct SigstoreTrustRoot {
     repository: tough::Repository,
     checkout_dir: Option<PathBuf>,
     trusted_root: OnceCell<TrustedRoot>,
 }
 
-impl SigstoreRootTrust {
+impl SigstoreTrustRoot {
     /// Constructs a new trust repository established by a [tough::Repository].
     pub fn new(checkout_dir: Option<&Path>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
@@ -108,17 +108,17 @@ impl SigstoreRootTrust {
 
     /// Prefetches trust materials.
     ///
-    /// [TrustRoot::fulcio_certs()] and [TrustRoot::rekor_keys()] on [SigstoreRootTrust] lazily
+    /// [TrustRoot::fulcio_certs()] and [TrustRoot::rekor_keys()] on [SigstoreTrustRoot] lazily
     /// fetches the requested data, which is problematic for async callers. Those callers should
     /// use this method to fetch the trust root ahead of time.
     ///
     /// ```rust
     /// # use tokio::task::spawn_blocking;
-    /// # use sigstore::trust::sigstore::SigstoreRootTrust;
+    /// # use sigstore::trust::sigstore::SigstoreTrustRoot;
     /// # use sigstore::errors::Result;
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), anyhow::Error> {
-    /// let repo: Result<SigstoreRootTrust> = spawn_blocking(|| Ok(SigstoreRootTrust::new(None)?.prefetch()?)).await?;
+    /// let repo: Result<SigstoreTrustRoot> = spawn_blocking(|| Ok(SigstoreTrustRoot::new(None)?.prefetch()?)).await?;
     /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRootTrust`
     /// # Ok(())
     /// # }
@@ -149,7 +149,7 @@ impl SigstoreRootTrust {
     }
 }
 
-impl crate::trust::TrustRoot for SigstoreRootTrust {
+impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///
