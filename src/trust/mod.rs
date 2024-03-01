@@ -15,7 +15,7 @@
 
 use webpki::types::CertificateDer;
 
-#[cfg(feature = "tuf")]
+#[cfg(feature = "sigstore-trust-root")]
 pub mod sigstore;
 
 /// A `TrustRoot` owns all key material necessary for establishing a root of trust.
