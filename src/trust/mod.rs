@@ -15,6 +15,9 @@
 
 use webpki::types::CertificateDer;
 
+#[cfg(feature = "tuf")]
+pub mod sigstore;
+
 /// A `TrustRoot` owns all key material necessary for establishing a root of trust.
 pub trait TrustRoot {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>>;
