@@ -22,7 +22,7 @@ use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
-use sigstore::tuf::SigstoreRepository;
+use sigstore::sigstore::SigstoreRepository;
 use std::boxed::Box;
 use std::convert::TryFrom;
 use std::time::Instant;

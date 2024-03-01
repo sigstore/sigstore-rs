@@ -228,7 +228,7 @@
 //! requires the following data to work: Fulcio's certificate and Rekor's public key.
 //!
 //! These files are safely distributed by the Sigstore project via a TUF repository.
-//! The [`sigstore::tuf`](crate::tuf) module provides the helper structures to deal
+//! The [`sigstore::sigstore`](crate::sigstore) module provides the helper structures to deal
 //! with it.
 //!
 //! # Feature Flags
@@ -283,7 +283,7 @@ pub mod registry;
 pub mod rekor;
 
 #[cfg(feature = "tuf")]
-pub mod tuf;
+pub mod sigstore;
 
 // Don't export yet -- these types should only be useful internally.
 mod bundle;

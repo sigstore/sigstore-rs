@@ -27,7 +27,7 @@
 //! method.
 //!
 //! ```rust,no_run
-//! use sigstore::tuf::SigstoreRepository;
+//! use sigstore::sigstore::SigstoreRepository;
 //! let repo = SigstoreRepository::new(None).unwrap().prefetch().unwrap();
 //! ```
 use std::{
@@ -114,7 +114,7 @@ impl SigstoreRepository {
     ///
     /// ```rust
     /// # use tokio::task::spawn_blocking;
-    /// # use sigstore::tuf::SigstoreRepository;
+    /// # use sigstore::sigstore::SigstoreRepository;
     /// # use sigstore::errors::Result;
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), anyhow::Error> {
