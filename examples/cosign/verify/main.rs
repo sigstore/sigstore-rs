@@ -22,7 +22,7 @@ use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
-use sigstore::trust::sigstore::SigstoreRepository;
+use sigstore::trust::sigstore::SigstoreTrustRoot;
 use std::boxed::Box;
 use std::convert::TryFrom;
 use std::time::Instant;
@@ -230,9 +230,9 @@ async fn run_app(
 
 async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::trust::TrustRoot>> {
     if cli.use_sigstore_tuf_data {
-        let repo: sigstore::errors::Result<SigstoreRepository> = spawn_blocking(|| {
+        let repo: sigstore::errors::Result<SigstoreTrustRoot> = spawn_blocking(|| {
             info!("Downloading data from Sigstore TUF repository");
-            SigstoreRepository::new(None)?.prefetch()
+            SigstoreTrustRoot::new(None)?.prefetch()
         })
         .await
         .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
