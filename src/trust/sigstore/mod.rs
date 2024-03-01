@@ -27,7 +27,7 @@
 //! method.
 //!
 //! ```rust,no_run
-//! use sigstore::sigstore::SigstoreRepository;
+//! use sigstore::trust::sigstore::SigstoreRepository;
 //! let repo = SigstoreRepository::new(None).unwrap().prefetch().unwrap();
 //! ```
 use std::{
@@ -47,7 +47,7 @@ use webpki::types::CertificateDer;
 
 use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, TrustedRoot};
 
-use super::errors::{Result, SigstoreError};
+use crate::errors::{Result, SigstoreError};
 
 pub use crate::trust::{ManualTrustRoot, TrustRoot};
 
@@ -114,7 +114,7 @@ impl SigstoreRepository {
     ///
     /// ```rust
     /// # use tokio::task::spawn_blocking;
-    /// # use sigstore::sigstore::SigstoreRepository;
+    /// # use sigstore::trust::sigstore::SigstoreRepository;
     /// # use sigstore::errors::Result;
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), anyhow::Error> {
