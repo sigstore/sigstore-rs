@@ -49,7 +49,7 @@ use self::trustroot::{CertificateAuthority, TimeRange, TransparencyLogInstance, 
 
 use super::errors::{Result, SigstoreError};
 
-pub use crate::repo::{ManualRepository, Repository};
+pub use crate::trust::{ManualTrustRoot, TrustRoot};
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
@@ -108,7 +108,7 @@ impl SigstoreRepository {
 
     /// Prefetches trust materials.
     ///
-    /// [Repository::fulcio_certs()] and [Repository::rekor_keys()] on [SigstoreRepository] lazily
+    /// [TrustRoot::fulcio_certs()] and [TrustRoot::rekor_keys()] on [SigstoreRepository] lazily
     /// fetches the requested data, which is problematic for async callers. Those callers should
     /// use this method to fetch the trust root ahead of time.
     ///
@@ -149,7 +149,7 @@ impl SigstoreRepository {
     }
 }
 
-impl crate::repo::Repository for SigstoreRepository {
+impl crate::trust::TrustRoot for SigstoreRepository {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///

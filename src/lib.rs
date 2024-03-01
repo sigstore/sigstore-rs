@@ -58,7 +58,7 @@
 //!
 //! Verify the signature of a container image/oci artifact:
 //!
-//! ```rust,no_run
+//!```rust,no_run
 //! use crate::sigstore::cosign::{
 //!     CosignCapabilities,
 //!     verify_constraints,
@@ -92,7 +92,7 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::repo::ManualRepository {
+//!   let mut repo = sigstore::trust::ManualTrustRoot {
 //!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
 //!     rekor_key: Some(rekor_pub_key),
 //!     ..Default::default()
@@ -260,7 +260,7 @@
 #![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
-pub mod repo;
+pub mod trust;
 
 #[cfg(feature = "mock-client")]
 mod mock_client;

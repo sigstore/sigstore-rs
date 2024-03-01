@@ -21,14 +21,14 @@ use crate::crypto::SigningScheme;
 use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
-use crate::repo::Repository;
+use crate::trust::TrustRoot;
 
 /// A builder that generates Client objects.
 ///
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::tuf::ManualRepository`].
+/// This can be provided via a [`crate::tuf::ManualTrustRoot`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -36,7 +36,7 @@ use crate::repo::Repository;
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
-/// This can be provided via a [`crate::tuf::ManualRepository`].
+/// This can be provided via a [`crate::tuf::ManualTrustRoot`].
 ///
 /// > Note well: the [`tuf`](crate::tuf) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -71,8 +71,8 @@ impl<'a> ClientBuilder<'a> {
     /// Optional - Configures the roots of trust.
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
-    /// See [crate::tuf::Repository] for more details on trust repositories.
-    pub fn with_trust_repository<R: Repository + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
+    /// See [crate::tuf::TrustRoot] for more details on trust repositories.
+    pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
         let rekor_keys = repo.rekor_keys()?;
         if !rekor_keys.is_empty() {
             self.rekor_pub_key = Some(rekor_keys[0]);

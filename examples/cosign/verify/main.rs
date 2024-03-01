@@ -240,7 +240,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::re
         return Ok(Box::new(repo?));
     };
 
-    let mut data = sigstore::repo::ManualRepository::default();
+    let mut data = sigstore::trust::ManualTrustRoot::default();
     if let Some(path) = cli.rekor_pub_key.as_ref() {
         data.rekor_key = Some(
             fs::read(path)

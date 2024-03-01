@@ -15,21 +15,21 @@
 
 use webpki::types::CertificateDer;
 
-/// A `Repository` owns all key material necessary for establishing a root of trust.
-pub trait Repository {
+/// A `TrustRoot` owns all key material necessary for establishing a root of trust.
+pub trait TrustRoot {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>>;
     fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
 }
 
-/// A `ManualRepository` is a [Repository] with out-of-band trust materials.
+/// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
 /// As it does not establish a trust root with TUF, users must initialize its materials themselves.
 #[derive(Debug, Default)]
-pub struct ManualRepository<'a> {
+pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
     pub rekor_key: Option<Vec<u8>>,
 }
 
-impl Repository for ManualRepository<'_> {
+impl TrustRoot for ManualTrustRoot<'_> {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>> {
         Ok(match &self.fulcio_certs {
             Some(certs) => certs.clone(),
