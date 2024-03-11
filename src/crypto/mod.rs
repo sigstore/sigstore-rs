@@ -190,7 +190,7 @@ pub mod signing_key;
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use chrono::{DateTime, Duration, Utc};
+    use chrono::{DateTime, TimeDelta, Utc};
     use openssl::asn1::{Asn1Integer, Asn1Time};
     use openssl::bn::{BigNum, MsbOption};
     use openssl::conf::{Conf, ConfMethod};
@@ -231,8 +231,12 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 
     impl Default for CertGenerationOptions {
         fn default() -> Self {
-            let not_before = Utc::now().checked_sub_signed(Duration::days(1)).unwrap();
-            let not_after = Utc::now().checked_add_signed(Duration::days(1)).unwrap();
+            let not_before = Utc::now()
+                .checked_sub_signed(TimeDelta::try_days(1).unwrap())
+                .unwrap();
+            let not_after = Utc::now()
+                .checked_add_signed(TimeDelta::try_days(1).unwrap())
+                .unwrap();
 
             // Sigstore relies on NIST P-256
             // NIST P-256 is a Weierstrass curve specified in FIPS 186-4: Digital Signature Standard (DSS):
