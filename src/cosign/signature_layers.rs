@@ -876,7 +876,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     use crate::cosign::bundle::Payload;
     use crate::crypto::tests::{generate_certificate, CertGenerationOptions};
     use crate::crypto::SigningScheme;
-    use chrono::{Duration, Utc};
+    use chrono::{TimeDelta, Utc};
 
     impl TryFrom<X509> for crate::registry::Certificate {
         type Error = anyhow::Error;
@@ -908,7 +908,9 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             .try_into()?];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now()
+            .checked_sub_signed(TimeDelta::try_minutes(1).unwrap())
+            .unwrap();
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {
@@ -957,7 +959,9 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             .try_into()?];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now()
+            .checked_sub_signed(TimeDelta::try_minutes(1).unwrap())
+            .unwrap();
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {
@@ -1005,7 +1009,9 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             .try_into()?];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
-        let integrated_time = Utc::now().checked_sub_signed(Duration::minutes(1)).unwrap();
+        let integrated_time = Utc::now()
+            .checked_sub_signed(TimeDelta::try_minutes(1).unwrap())
+            .unwrap();
         let bundle = Bundle {
             signed_entry_timestamp: "not relevant".to_string(),
             payload: Payload {

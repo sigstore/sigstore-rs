@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use const_oid::db::rfc5912::ID_KP_CODE_SIGNING;
 use x509_cert::{
     ext::pkix::{ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName},
@@ -92,8 +92,9 @@ pub(crate) fn verify_validity(certificate: &Certificate) -> Result<()> {
 
 fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<()> {
     let it = DateTime::<Utc>::from_naive_utc_and_offset(
-        NaiveDateTime::from_timestamp_opt(integrated_time, 0)
-            .ok_or(SigstoreError::X509Error("timestamp is not legal".into()))?,
+        DateTime::from_timestamp(integrated_time, 0)
+            .ok_or(SigstoreError::X509Error("timestamp is not legal".into()))?
+            .naive_utc(),
         Utc,
     );
     let validity = &certificate.tbs_certificate.validity;
@@ -125,7 +126,7 @@ mod tests {
     use super::*;
     use crate::crypto::tests::*;
 
-    use chrono::{Duration, Utc};
+    use chrono::{TimeDelta, Utc};
     use x509_cert::der::Decode;
 
     #[test]
@@ -238,8 +239,12 @@ mod tests {
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_add_signed(Duration::days(5)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(6)).unwrap(),
+                not_before: Utc::now()
+                    .checked_add_signed(TimeDelta::try_days(5).unwrap())
+                    .unwrap(),
+                not_after: Utc::now()
+                    .checked_add_signed(TimeDelta::try_days(6).unwrap())
+                    .unwrap(),
                 ..Default::default()
             },
         )?;
@@ -266,8 +271,12 @@ mod tests {
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
+                not_before: Utc::now()
+                    .checked_sub_signed(TimeDelta::try_days(1).unwrap())
+                    .unwrap(),
+                not_after: Utc::now()
+                    .checked_add_signed(TimeDelta::try_days(1).unwrap())
+                    .unwrap(),
                 ..Default::default()
             },
         )?;
@@ -284,13 +293,19 @@ mod tests {
     fn verify_cert_expiration_failure() -> anyhow::Result<()> {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
-        let integrated_time = Utc::now().checked_add_signed(Duration::days(5)).unwrap();
+        let integrated_time = Utc::now()
+            .checked_add_signed(TimeDelta::try_days(5).unwrap())
+            .unwrap();
 
         let issued_cert = generate_certificate(
             Some(&ca_data),
             CertGenerationOptions {
-                not_before: Utc::now().checked_sub_signed(Duration::days(1)).unwrap(),
-                not_after: Utc::now().checked_add_signed(Duration::days(1)).unwrap(),
+                not_before: Utc::now()
+                    .checked_sub_signed(TimeDelta::try_days(1).unwrap())
+                    .unwrap(),
+                not_after: Utc::now()
+                    .checked_add_signed(TimeDelta::try_days(1).unwrap())
+                    .unwrap(),
                 ..Default::default()
             },
         )?;

@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use pkcs8::der::Decode;
 use std::convert::TryFrom;
 use tracing::warn;
@@ -89,9 +89,11 @@ impl VerificationConstraint for CertificateVerifier {
         match &signature_layer.bundle {
             Some(bundle) => {
                 let it = DateTime::<Utc>::from_naive_utc_and_offset(
-                    NaiveDateTime::from_timestamp_opt(bundle.payload.integrated_time, 0).ok_or(
-                        SigstoreError::UnexpectedError("timestamp is not legal".into()),
-                    )?,
+                    DateTime::from_timestamp(bundle.payload.integrated_time, 0)
+                        .ok_or(SigstoreError::UnexpectedError(
+                            "timestamp is not legal".into(),
+                        ))?
+                        .naive_utc(),
                     Utc,
                 );
                 let not_before: DateTime<Utc> =
