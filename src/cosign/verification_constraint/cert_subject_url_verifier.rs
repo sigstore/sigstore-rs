@@ -75,6 +75,7 @@ mod tests {
         build_correct_signature_layer_without_bundle,
     };
     use crate::cosign::signature_layers::CertificateSubject;
+    use crate::cosign::verification_constraint::cert_subject_email_verifier::StringVerifier;
     use crate::cosign::verification_constraint::CertSubjectEmailVerifier;
 
     #[test]
@@ -109,8 +110,8 @@ mod tests {
 
         // A Cert email verifier should also report a non match
         let vc = CertSubjectEmailVerifier {
-            email: "alice@example.com".to_string(),
-            issuer: Some(issuer),
+            email: StringVerifier::ExactMatch("alice@example.com".to_string()),
+            issuer: Some(StringVerifier::ExactMatch(issuer)),
         };
         assert!(!vc.verify(&sl).unwrap());
     }
