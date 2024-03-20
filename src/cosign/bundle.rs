@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use olpc_cjson::CanonicalFormatter;
+use json_syntax::Print;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 
@@ -78,17 +78,15 @@ impl Bundle {
         bundle: &Bundle,
         rekor_pub_key: &CosignVerificationKey,
     ) -> Result<()> {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        bundle.payload.serialize(&mut ser).map_err(|e| {
-            SigstoreError::UnexpectedError(format!(
-                "Cannot create canonical JSON representation of bundle: {e:?}"
-            ))
+        let mut body = json_syntax::to_value(&bundle.payload).map_err(|_| {
+            SigstoreError::UnexpectedError("failed to serialize with json_syntax".to_string())
         })?;
+        body.canonicalize();
+        let encoded = body.compact_print().to_string();
 
         rekor_pub_key.verify_signature(
             Signature::Base64Encoded(bundle.signed_entry_timestamp.as_bytes()),
-            &buf,
+            encoded.as_bytes(),
         )?;
         Ok(())
     }

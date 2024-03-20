@@ -7,6 +7,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use digest::Output;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -90,11 +91,10 @@ impl CheckpointNote {
     // Output is the part of the checkpoint that is signed.
     fn marshal(&self) -> String {
         let hash_b64 = BASE64_STANDARD.encode(self.hash);
-        let other_content: String = self
-            .other_content
-            .iter()
-            .map(|c| format!("{c}\n"))
-            .collect();
+        let other_content: String = self.other_content.iter().fold(String::new(), |mut acc, c| {
+            writeln!(acc, "{c}").expect("failed to write to string");
+            acc
+        });
         format!(
             "{}\n{}\n{hash_b64}\n{other_content}",
             self.origin, self.size
