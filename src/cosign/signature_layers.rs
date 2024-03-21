@@ -17,7 +17,6 @@ use const_oid::ObjectIdentifier;
 use digest::Digest;
 use oci_distribution::client::ImageLayer;
 use serde::Serialize;
-use std::convert::TryFrom;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, info, warn};
 use x509_cert::der::DecodePem;
@@ -550,8 +549,6 @@ pub(crate) mod tests {
     use super::*;
     use openssl::x509::X509;
     use serde_json::json;
-    use std::collections::HashMap;
-    use std::convert::TryFrom;
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
 

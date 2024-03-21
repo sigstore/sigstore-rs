@@ -100,6 +100,7 @@
 //!
 //!   let mut client = sigstore::cosign::ClientBuilder::default()
 //!     .with_trust_repository(&repo)
+//!     .await
 //!     .expect("Cannot construct cosign client from given materials")
 //!     .build()
 //!     .expect("Unexpected failure while building Client");

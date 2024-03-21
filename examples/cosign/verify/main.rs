@@ -23,8 +23,6 @@ use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
 use sigstore::trust::sigstore::SigstoreTrustRoot;
-use std::boxed::Box;
-use std::convert::TryFrom;
 use std::time::Instant;
 
 extern crate anyhow;
@@ -34,7 +32,6 @@ extern crate clap;
 use clap::Parser;
 
 use std::{collections::HashMap, fs};
-use tokio::task::spawn_blocking;
 
 extern crate tracing_subscriber;
 use tracing::{info, warn};
@@ -133,7 +130,7 @@ async fn run_app(
 
     let mut client_builder =
         sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
-    client_builder = client_builder.with_trust_repository(frd)?;
+    client_builder = client_builder.with_trust_repository(frd).await?;
 
     let cert_chain: Option<Vec<sigstore::registry::Certificate>> = match cli.cert_chain.as_ref() {
         None => None,
@@ -187,7 +184,7 @@ async fn run_app(
     }
     if let Some(path_to_cert) = cli.cert.as_ref() {
         let cert = fs::read(path_to_cert).map_err(|e| anyhow!("Cannot read cert: {:?}", e))?;
-        let require_rekor_bundle = if !frd.rekor_keys()?.is_empty() {
+        let require_rekor_bundle = if !frd.rekor_keys().await?.is_empty() {
             true
         } else {
             warn!("certificate based verification is weaker when Rekor integration is disabled");
@@ -230,12 +227,10 @@ async fn run_app(
 
 async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::trust::TrustRoot>> {
     if cli.use_sigstore_tuf_data {
-        let repo: sigstore::errors::Result<SigstoreTrustRoot> = spawn_blocking(|| {
-            info!("Downloading data from Sigstore TUF repository");
-            SigstoreTrustRoot::new(None)?.prefetch()
-        })
-        .await
-        .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
+        info!("Downloading data from Sigstore TUF repository");
+
+        let repo: sigstore::errors::Result<SigstoreTrustRoot> =
+            SigstoreTrustRoot::new(None).await?.prefetch().await;
 
         return Ok(Box::new(repo?));
     };

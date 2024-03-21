@@ -61,7 +61,6 @@
 //! ```
 
 use ed25519::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
-use std::convert::TryFrom;
 
 use ed25519::KeypairBytes;
 use ed25519_dalek::{Signer as _, SigningKey};
