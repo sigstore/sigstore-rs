@@ -18,7 +18,6 @@ use std::io::{self, Read};
 use std::time::SystemTime;
 
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use hex;
 use json_syntax::Print;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};

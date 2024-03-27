@@ -99,8 +99,8 @@ impl From<CoreIdToken> for IdentityToken {
     }
 }
 
-impl ToString for IdentityToken {
-    fn to_string(&self) -> String {
-        self.original_token.clone()
+impl std::fmt::Display for IdentityToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.original_token.clone())
     }
 }

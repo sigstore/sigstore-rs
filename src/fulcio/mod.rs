@@ -14,7 +14,6 @@ use pkcs8::der::Decode;
 use reqwest::{header, Body};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
-use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Display, Formatter};
 use tracing::debug;
 use url::Url;
@@ -55,7 +54,7 @@ impl TryFrom<Csr> for Body {
 struct PublicKey(String, SigningScheme);
 
 impl Serialize for PublicKey {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

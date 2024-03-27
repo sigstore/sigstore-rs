@@ -126,7 +126,7 @@ mod tests {
     use super::*;
     use crate::crypto::tests::*;
 
-    use chrono::{TimeDelta, Utc};
+    use chrono::TimeDelta;
     use x509_cert::der::Decode;
 
     #[test]

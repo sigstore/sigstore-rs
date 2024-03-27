@@ -19,7 +19,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use pem::Pem;
 use pkcs8::der::EncodePem;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_repr::Deserialize_repr;
 use x509_cert::Certificate;
 
@@ -36,26 +36,6 @@ where
     let encoded = BASE64_STD_ENGINE.encode(encoded);
 
     ser.serialize_str(&encoded)
-}
-
-fn deserialize_base64<'de, D>(de: D) -> std::result::Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let buf: &str = Deserialize::deserialize(de)?;
-
-    BASE64_STD_ENGINE
-        .decode(buf)
-        .map_err(serde::de::Error::custom)
-}
-
-fn deserialize_inner_detached_sct<'de, D>(de: D) -> std::result::Result<InnerDetachedSCT, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let buf = deserialize_base64(de)?;
-
-    serde_json::from_slice(&buf).map_err(serde::de::Error::custom)
 }
 
 #[derive(Serialize)]
@@ -76,8 +56,6 @@ pub enum SigningCertificate {
 #[serde(rename_all = "camelCase")]
 pub struct SigningCertificateDetachedSCT {
     pub chain: CertificateChain,
-    #[serde(deserialize_with = "deserialize_inner_detached_sct")]
-    pub signed_certificate_timestamp: InnerDetachedSCT,
 }
 
 #[derive(Deserialize)]
@@ -89,18 +67,6 @@ pub struct SigningCertificateEmbeddedSCT {
 #[derive(Deserialize)]
 pub struct CertificateChain {
     pub certificates: Vec<Pem>,
-}
-
-#[derive(Deserialize)]
-pub struct InnerDetachedSCT {
-    pub sct_version: SCTVersion,
-    #[serde(deserialize_with = "deserialize_base64")]
-    pub id: Vec<u8>,
-    pub timestamp: u64,
-    #[serde(deserialize_with = "deserialize_base64")]
-    pub signature: Vec<u8>,
-    #[serde(deserialize_with = "deserialize_base64")]
-    pub extensions: Vec<u8>,
 }
 
 #[derive(Deserialize_repr, PartialEq, Debug)]

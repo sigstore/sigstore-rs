@@ -73,8 +73,6 @@
 //! // verify
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature_data),message).is_ok());
 /// ```
-use p256;
-
 use crate::errors::*;
 
 use self::ec::{EcdsaKeys, EcdsaSigner};
@@ -88,13 +86,12 @@ pub enum ECDSAKeys {
     P384(EcdsaKeys<p384::NistP384>),
 }
 
-impl ToString for ECDSAKeys {
-    fn to_string(&self) -> String {
-        let str = match self {
-            ECDSAKeys::P256(_) => "ECDSA P256",
-            ECDSAKeys::P384(_) => "ECDSA P384",
-        };
-        String::from(str)
+impl std::fmt::Display for ECDSAKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ECDSAKeys::P256(_) => write!(f, "ECDSA P256"),
+            ECDSAKeys::P384(_) => write!(f, "ECDSA P384"),
+        }
     }
 }
 
