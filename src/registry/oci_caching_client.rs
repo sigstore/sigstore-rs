@@ -18,7 +18,7 @@ use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
 use cached::proc_macro::cached;
-use olpc_cjson::CanonicalFormatter;
+use json_syntax::Print;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error};
@@ -103,15 +103,18 @@ impl<'a> PullSettings<'a> {
     // Because of that the method will return the '0' value when something goes
     // wrong during the serialization operation. This is very unlikely to happen
     pub fn hash(&self) -> String {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        if let Err(e) = self.serialize(&mut ser) {
-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
-            return "0".to_string();
-        }
+        let mut body = match json_syntax::to_value(self) {
+            Ok(body) => body,
+            Err(_e) => {
+                error!(err=?_e, settings=?self, "Cannot perform canonical serialization");
+                return "0".to_string();
+            }
+        };
+        body.canonicalize();
+        let encoded = body.compact_print().to_string();
 
         let mut hasher = Sha256::new();
-        hasher.update(&buf);
+        hasher.update(encoded.as_bytes());
         let result = hasher.finalize();
         result
             .iter()
@@ -194,15 +197,18 @@ impl PullManifestSettings {
     // Because of that the method will return the '0' value when something goes
     // wrong during the serialization operation. This is very unlikely to happen
     pub fn hash(&self) -> String {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        if let Err(e) = self.serialize(&mut ser) {
-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
-            return "0".to_string();
-        }
+        let mut body = match json_syntax::to_value(self) {
+            Ok(body) => body,
+            Err(_e) => {
+                error!(err=?_e, settings=?self, "Cannot perform canonical serialization");
+                return "0".to_string();
+            }
+        };
+        body.canonicalize();
+        let encoded = body.compact_print().to_string();
 
         let mut hasher = Sha256::new();
-        hasher.update(&buf);
+        hasher.update(encoded.as_bytes());
         let result = hasher.finalize();
         result
             .iter()
@@ -243,7 +249,7 @@ async fn pull_manifest_cached(
 impl ClientCapabilitiesDeps for OciCachingClient {}
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(target_arch = "wasm32", async_trait(? Send))]
 impl ClientCapabilities for OciCachingClient {
     async fn fetch_manifest_digest(
         &mut self,

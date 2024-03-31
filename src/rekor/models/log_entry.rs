@@ -17,6 +17,11 @@ use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 
+use crate::crypto::CosignVerificationKey;
+use crate::errors::SigstoreError::UnexpectedError;
+use crate::rekor::models::checkpoint::Checkpoint;
+use crate::rekor::models::InclusionProof as InclusionProof2;
+use json_syntax::Print;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Error, Value};
 use std::collections::HashMap;
@@ -100,6 +105,70 @@ pub struct Verification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inclusion_proof: Option<InclusionProof>,
     pub signed_entry_timestamp: String,
+}
+
+impl LogEntry {
+    /// Verifies that the log entry was included by a log in possession of `rekor_key`.
+    ///
+    /// Example:
+    /// ```rust
+    /// use sigstore::rekor::apis::configuration::Configuration;
+    /// use sigstore::rekor::apis::pubkey_api::get_public_key;
+    /// use sigstore::rekor::apis::tlog_api::get_log_info;
+    /// use sigstore::crypto::{CosignVerificationKey, SigningScheme};
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     use sigstore::rekor::apis::entries_api::get_log_entry_by_index;
+    ///     let rekor_config = Configuration::default();
+    ///     // Important: in practice obtain the rekor key via TUF repo or another secure channel!
+    ///     let rekor_key = get_public_key(&rekor_config, None)
+    ///         .await
+    ///         .expect("failed to fetch pubkey from remote log");
+    ///     let rekor_key =  CosignVerificationKey::from_pem(
+    ///         rekor_key.as_bytes(),
+    ///         &SigningScheme::ECDSA_P256_SHA256_ASN1,
+    ///     ).expect("failed to parse rekor key");
+    ///
+    ///     // fetch log info and then the most recent entry
+    ///     let log_info = get_log_info(&rekor_config)
+    ///         .await
+    ///         .expect("failed to fetch log info");
+    ///     let entry = get_log_entry_by_index(&rekor_config, (log_info.tree_size - 1) as i32)
+    ///         .await.expect("failed to fetch log entry");
+    ///     entry.verify_inclusion(&rekor_key)
+    ///         .expect("failed to verify inclusion");
+    /// }
+    /// ```
+    pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+        self.verification
+            .inclusion_proof
+            .as_ref()
+            .ok_or(UnexpectedError("missing inclusion proof".to_string()))
+            .and_then(|proof| {
+                Checkpoint::from_str(&proof.checkpoint)
+                    .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
+                    .map(|checkpoint| {
+                        InclusionProof2::new(
+                            proof.log_index,
+                            proof.root_hash.clone(),
+                            proof.tree_size,
+                            proof.hashes.clone(),
+                            Some(checkpoint),
+                        )
+                    })
+            })
+            .and_then(|proof| {
+                // encode as canonical JSON
+                let mut body = json_syntax::to_value(&self.body).map_err(|_| {
+                    SigstoreError::UnexpectedError(
+                        "failed to serialize with json_syntax".to_string(),
+                    )
+                })?;
+                body.canonicalize();
+                let encoded_entry = body.compact_print().to_string();
+                proof.verify(encoded_entry.as_bytes(), rekor_key)
+            })
+    }
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
