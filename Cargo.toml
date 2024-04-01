@@ -84,7 +84,7 @@ elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
 futures = "0.3"
 futures-util = { version = "0.3.30", optional = true }
 lazy_static = "1.4.0"
-oci-distribution = { version = "0.10", default-features = false, optional = true }
+oci-distribution = { version = "0.11", default-features = false, optional = true }
 olpc-cjson = "0.1"
 openidconnect = { version = "3.0", default-features = false, features = [
   "reqwest",
