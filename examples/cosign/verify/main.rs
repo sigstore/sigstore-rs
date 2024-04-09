@@ -237,10 +237,8 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
 
     let mut data = sigstore::trust::ManualTrustRoot::default();
     if let Some(path) = cli.rekor_pub_key.as_ref() {
-        data.rekor_key = Some(
-            fs::read(path)
-                .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
-        );
+        data.rekor_keys = Some(vec![fs::read(path)
+            .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?]);
     }
 
     if let Some(path) = cli.fulcio_cert.as_ref() {

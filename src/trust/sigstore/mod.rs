@@ -312,15 +312,24 @@ fn is_local_file_outdated(
 
 #[cfg(test)]
 mod tests {
-    use crate::trust::sigstore::SigstoreTrustRoot;
+    use super::*;
 
     #[tokio::test]
     async fn prefetch() {
-        let _repo = SigstoreTrustRoot::new(None)
+        let repo = SigstoreTrustRoot::new(None)
             .await
             .expect("initialize SigstoreRepository")
             .prefetch()
             .await
             .expect("prefetch");
+
+        let fulcio_certs = repo
+            .fulcio_certs()
+            .await
+            .expect("cannot fetch Fulcio certs");
+        assert!(!fulcio_certs.is_empty());
+
+        let rekor_keys = repo.rekor_keys().await.expect("cannot fetch Rekor keys");
+        assert!(!rekor_keys.is_empty());
     }
 }

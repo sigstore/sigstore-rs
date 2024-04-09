@@ -32,7 +32,7 @@ pub trait TrustRoot: Send + Sync {
 #[derive(Debug, Default)]
 pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
-    pub rekor_key: Option<Vec<u8>>,
+    pub rekor_keys: Option<Vec<Vec<u8>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -47,8 +47,8 @@ impl TrustRoot for ManualTrustRoot<'_> {
     }
 
     async fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
-        Ok(match &self.rekor_key {
-            Some(key) => vec![&key[..]],
+        Ok(match &self.rekor_keys {
+            Some(keys) => keys.iter().map(|k| k.as_slice()).collect(),
             None => Vec::new(),
         })
     }
