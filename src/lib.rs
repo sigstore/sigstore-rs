@@ -58,7 +58,7 @@
 //!
 //! Verify the signature of a container image/oci artifact:
 //!
-//! ```rust,no_run
+//!```rust,no_run
 //! use crate::sigstore::cosign::{
 //!     CosignCapabilities,
 //!     verify_constraints,
@@ -92,7 +92,7 @@
 //!     data: fulcio_cert_data
 //!   };
 //!
-//!   let mut repo = sigstore::tuf::ManualRepository {
+//!   let mut repo = sigstore::trust::ManualTrustRoot {
 //!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
 //!     rekor_key: Some(rekor_pub_key),
 //!     ..Default::default()
@@ -228,7 +228,7 @@
 //! requires the following data to work: Fulcio's certificate and Rekor's public key.
 //!
 //! These files are safely distributed by the Sigstore project via a TUF repository.
-//! The [`sigstore::tuf`](crate::tuf) module provides the helper structures to deal
+//! The [`sigstore::trust::sigstore`](crate::trust::sigstore) module provides the helper structures to deal
 //! with it.
 //!
 //! # Feature Flags
@@ -254,12 +254,13 @@
 //! - `cached-client`: Enables support for OCI registry client caching.
 //!
 //! - `test-registry`: Enables tests based on a temporary OCI registry.
-//! - `tuf`: Enables support for TUF to request for fulcio certs and rekor public key.
+//! - `sigstore-trust-root`: Enables support for TUF to request for fulcio certs and rekor public key.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
 
 pub mod crypto;
+pub mod trust;
 
 #[cfg(feature = "mock-client")]
 mod mock_client;
@@ -280,9 +281,6 @@ pub mod registry;
 
 #[cfg(feature = "rekor")]
 pub mod rekor;
-
-#[cfg(feature = "tuf")]
-pub mod tuf;
 
 // Don't export yet -- these types should only be useful internally.
 #[cfg(feature = "bundle")]

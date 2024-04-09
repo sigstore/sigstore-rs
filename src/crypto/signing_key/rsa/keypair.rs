@@ -39,8 +39,6 @@
 //! let rsa_keys2 = RSAKeys::from_encrypted_pem(privkey_pem.as_bytes(), b"password").unwrap();
 //! ```
 
-use std::convert::TryFrom;
-
 use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use rsa::{
     pkcs1::DecodeRsaPrivateKey, pkcs1v15::SigningKey, pss::BlindedSigningKey, RsaPrivateKey,

@@ -25,12 +25,15 @@ use crate::{
     crypto::{CertificatePool, CosignVerificationKey, Signature},
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
-    tuf::{Repository, SigstoreRepository},
+    trust::TrustRoot,
     verify::{
         models::{CertificateErrorKind, SignatureErrorKind},
         VerificationError,
     },
 };
+
+#[cfg(feature = "sigstore-trust-root")]
+use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{models::CheckedBundle, policy::VerificationPolicy, VerificationResult};
 
@@ -47,7 +50,7 @@ impl AsyncVerifier {
     /// Constructs an [`AsyncVerifier`].
     ///
     /// For verifications against the public-good trust root, use [`AsyncVerifier::production`].
-    pub fn new<R: Repository>(
+    pub fn new<R: TrustRoot>(
         rekor_config: RekorConfiguration,
         trust_repo: R,
     ) -> SigstoreResult<Self> {
@@ -191,8 +194,9 @@ impl AsyncVerifier {
 
 impl AsyncVerifier {
     /// Constructs an [`AsyncVerifier`] against the public-good trust root.
-    pub fn production() -> SigstoreResult<AsyncVerifier> {
-        let updater = SigstoreRepository::new(None)?;
+    #[cfg(feature = "sigstore-trust-root")]
+    pub async fn production() -> SigstoreResult<AsyncVerifier> {
+        let updater = SigstoreTrustRoot::new(None).await?;
 
         AsyncVerifier::new(Default::default(), updater)
     }
@@ -210,7 +214,7 @@ impl Verifier {
     /// Constructs a synchronous Sigstore verifier.
     ///
     /// For verifications against the public-good trust root, use [`Verifier::production`].
-    pub fn new<R: Repository>(
+    pub fn new<R: TrustRoot>(
         rekor_config: RekorConfiguration,
         trust_repo: R,
     ) -> SigstoreResult<Self> {
@@ -241,9 +245,13 @@ impl Verifier {
 
 impl Verifier {
     /// Constructs a synchronous [`Verifier`] against the public-good trust root.
+    #[cfg(feature = "sigstore-trust-root")]
     pub fn production() -> SigstoreResult<Verifier> {
-        let updater = SigstoreRepository::new(None)?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let inner = rt.block_on(AsyncVerifier::production())?;
 
-        Verifier::new(Default::default(), updater)
+        Ok(Verifier { inner, rt })
     }
 }

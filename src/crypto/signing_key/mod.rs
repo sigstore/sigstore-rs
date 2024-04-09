@@ -139,12 +139,12 @@ pub enum SigStoreKeyPair {
     RSA(RSAKeys),
 }
 
-impl ToString for SigStoreKeyPair {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for SigStoreKeyPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SigStoreKeyPair::ECDSA(_) => String::from("EC Key"),
-            SigStoreKeyPair::ED25519(_) => String::from("Ed25519 Key"),
-            SigStoreKeyPair::RSA(_) => String::from("RSA Key"),
+            SigStoreKeyPair::ECDSA(_) => write!(f, "EC Key"),
+            SigStoreKeyPair::ED25519(_) => write!(f, "Ed25519 Key"),
+            SigStoreKeyPair::RSA(_) => write!(f, "RSA Key"),
         }
     }
 }

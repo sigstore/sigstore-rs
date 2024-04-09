@@ -63,7 +63,7 @@
 //! let signature = ec_signer.sign(b"some message");
 //! ```
 
-use std::{convert::TryFrom, marker::PhantomData, ops::Add};
+use std::{marker::PhantomData, ops::Add};
 
 use digest::{
     core_api::BlockSizeUser,

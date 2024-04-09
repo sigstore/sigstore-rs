@@ -15,7 +15,7 @@
 
 //! Helper Structs to interact with the Sigstore TUF repository.
 //!
-//! The main interaction point is [`SigstoreRepository`], which fetches Rekor's
+//! The main interaction point is [`SigstoreTrustRoot`], which fetches Rekor's
 //! public key and Fulcio's certificate.
 //!
 //! These can later be given to [`cosign::ClientBuilder`](crate::cosign::ClientBuilder)
@@ -23,21 +23,24 @@
 //!
 //! # Example
 //!
-//! The `SigstoreRepository` instance can be created via the [`SigstoreRepository::new`]
+//! The `SigstoreRootTrust` instance can be created via the [`SigstoreTrustRoot::prefetch`]
 //! method.
 //!
-//! ```rust,no_run
-//! use sigstore::tuf::SigstoreRepository;
-//! let repo = SigstoreRepository::new(None).unwrap();
-//! ```
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
-
-mod constants;
-
+/// ```rust
+/// # use sigstore::trust::sigstore::SigstoreTrustRoot;
+/// # use sigstore::errors::Result;
+/// # #[tokio::main]
+/// # async fn main() -> std::result::Result<(), anyhow::Error> {
+/// let repo: Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
+/// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRootTrust`
+/// # Ok(())
+/// # }
+/// ```
+use futures_util::TryStreamExt;
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+use tokio_util::bytes::BytesMut;
+
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::TimeRange,
     trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
@@ -46,95 +49,45 @@ use tough::TargetName;
 use tracing::debug;
 use webpki::types::CertificateDer;
 
-use super::errors::{Result, SigstoreError};
+mod constants;
 
-/// A `Repository` owns all key material necessary for establishing a root of trust.
-pub trait Repository {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer<'static>>>;
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>>;
-    fn ctfe_keys(&self) -> Result<Vec<&[u8]>>;
-}
-
-/// A `ManualRepository` is a [Repository] with out-of-band trust materials.
-/// As it does not establish a trust root with TUF, users must initialize its materials themselves.
-#[derive(Debug, Default)]
-pub struct ManualRepository {
-    pub fulcio_certs: Option<Vec<CertificateDer<'static>>>,
-    pub rekor_key: Option<Vec<u8>>,
-    pub ctfe_keys: Option<Vec<Vec<u8>>>,
-}
-
-impl Repository for ManualRepository {
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer<'static>>> {
-        Ok(match &self.fulcio_certs {
-            Some(certs) => certs.clone(),
-            None => Vec::new(),
-        })
-    }
-
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        Ok(match &self.rekor_key {
-            Some(key) => vec![&key[..]],
-            None => Vec::new(),
-        })
-    }
-
-    fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
-        Ok(match &self.ctfe_keys {
-            Some(keys) => keys.iter().map(|v| &v[..]).collect(),
-            None => Vec::new(),
-        })
-    }
-}
+use crate::errors::{Result, SigstoreError};
+pub use crate::trust::{ManualTrustRoot, TrustRoot};
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
-pub struct SigstoreRepository {
+pub struct SigstoreTrustRoot {
     trusted_root: TrustedRoot,
 }
 
-impl SigstoreRepository {
+impl SigstoreTrustRoot {
     /// Constructs a new trust repository established by a [tough::Repository].
-    ///
-    /// This method synchronously fetches trust materials, from TUF, which is problematic for async
-    /// callers. Those callers should do the following to fetch the trust root ahead of time.
-    ///
-    /// ```rust
-    /// # use tokio::task::spawn_blocking;
-    /// # use sigstore::tuf::SigstoreRepository;
-    /// # use sigstore::errors::Result;
-    /// # #[tokio::main]
-    /// # async fn main() -> std::result::Result<(), anyhow::Error> {
-    /// let repo: Result<SigstoreRepository> = spawn_blocking(|| Ok(SigstoreRepository::new(None)?)).await?;
-    /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRepository`
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new(checkout_dir: Option<&Path>) -> Result<Self> {
+    pub async fn new(checkout_dir: Option<&Path>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
         let repository = tough::RepositoryLoader::new(
-            constants::static_resource("root.json").expect("Failed to fetch embedded TUF root!"),
+            &constants::static_resource("root.json").expect("Failed to fetch embedded TUF root!"),
             metadata_base,
             target_base,
         )
         .expiration_enforcement(tough::ExpirationEnforcement::Safe)
         .load()
+        .await
         .map_err(Box::new)?;
 
         let checkout_dir = checkout_dir.map(ToOwned::to_owned);
 
         let trusted_root = {
-            let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json")?;
+            let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json").await?;
             serde_json::from_slice(&data[..])?
         };
 
         Ok(Self { trusted_root })
     }
 
-    fn fetch_target<N>(
+    async fn fetch_target<N>(
         repository: &tough::Repository,
         checkout_dir: &Option<PathBuf>,
         name: N,
@@ -142,20 +95,15 @@ impl SigstoreRepository {
     where
         N: TryInto<TargetName, Error = tough::error::Error>,
     {
-        let read_remote_target = |name: &TargetName| -> Result<Vec<u8>> {
-            let Some(mut reader) = repository.read_target(name).map_err(Box::new)? else {
-                return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
-            };
-
-            debug!("fetching target {} from remote", name.raw());
-
-            let mut repo_data = Vec::new();
-            reader.read_to_end(&mut repo_data)?;
-            Ok(repo_data)
-        };
-
         let name: TargetName = name.try_into().map_err(Box::new)?;
         let local_path = checkout_dir.as_ref().map(|d| d.join(name.raw()));
+
+        let read_remote_target = || async {
+            match repository.read_target(&name).await {
+                Ok(Some(s)) => Ok(s.try_collect::<BytesMut>().await.map_err(Box::new)?),
+                _ => Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned())),
+            }
+        };
 
         // Try reading the target from disk cache.
         let data = if let Some(Ok(local_data)) = local_path.as_ref().map(std::fs::read) {
@@ -165,8 +113,8 @@ impl SigstoreRepository {
             debug!("read embedded target {}", name.raw());
             embedded_data.to_vec()
         // If all else fails, read the data from the TUF repo.
-        } else if let Ok(remote_data) = read_remote_target(&name) {
-            remote_data
+        } else if let Ok(remote_data) = read_remote_target().await {
+            remote_data.to_vec()
         } else {
             return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
         };
@@ -180,7 +128,7 @@ impl SigstoreRepository {
         };
 
         let data = if Sha256::digest(&data)[..] != target.hashes.sha256[..] {
-            read_remote_target(&name)?
+            read_remote_target().await?.to_vec()
         } else {
             data
         };
@@ -217,15 +165,12 @@ impl SigstoreRepository {
     }
 }
 
-impl Repository for SigstoreRepository {
+impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer<'static>>> {
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
         // Allow expired certificates: they may have been active when the
         // certificate was used to sign.
         let certs = Self::ca_keys(&self.trusted_root.certificate_authorities, true);
@@ -246,9 +191,6 @@ impl Repository for SigstoreRepository {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
     fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
         let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
 
@@ -265,9 +207,6 @@ impl Repository for SigstoreRepository {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    ///
-    /// **Warning:** this method needs special handling when invoked from
-    /// an async function because it performs blocking operations.
     fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
         let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
 

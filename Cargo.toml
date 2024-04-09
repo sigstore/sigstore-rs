@@ -1,7 +1,7 @@
 [package]
 name = "sigstore"
 description = "An experimental crate to interact with sigstore"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["sigstore-rs developers"]
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
 [features]
-default = ["full-native-tls", "cached-client", "tuf", "sign", "verify"]
+default = ["full-native-tls", "cached-client", "sigstore-trust-root", "sign", "verify"]
 wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js"]
 
 full-native-tls = [
@@ -40,7 +40,7 @@ rekor-native-tls = ["reqwest/native-tls", "rekor"]
 rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-tuf = ["tough", "regex"]
+sigstore-trust-root = ["futures-util", "tough", "regex", "tokio/sync"]
 
 bundle = []
 sign = ["bundle"]
@@ -73,7 +73,7 @@ cached-client = ["cached"]
 
 [dependencies]
 async-trait = "0.1.52"
-base64 = "0.21.0"
+base64 = "0.22.0"
 cached = { version = "0.49.2", optional = true, features = ["async"] }
 cfg-if = "1.0.0"
 chrono = { version = "0.4.27", default-features = false, features = ["serde"] }
@@ -83,8 +83,10 @@ ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
 ed25519 = { version = "2.2.1", features = ["alloc"] }
 ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
 elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
+futures = "0.3"
+futures-util = { version = "0.3.30", optional = true }
 lazy_static = "1.4.0"
-oci-distribution = { version = "0.10", default-features = false, optional = true }
+oci-distribution = { version = "0.11", default-features = false, optional = true }
 olpc-cjson = "0.1"
 openidconnect = { version = "3.0", default-features = false, features = [
   "reqwest",
@@ -103,7 +105,7 @@ pkcs8 = { version = "0.10.2", features = [
 rand = { version = "0.8.5", features = ["getrandom", "std"] }
 getrandom = "0.2.8"
 regex = { version = "1.5.5", optional = true }
-reqwest = { version = "0.11", default-features = false, features = [
+reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "multipart",
 ], optional = true }
@@ -118,7 +120,7 @@ sigstore_protobuf_specs = "0.3.2"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
 tokio-util = { version = "0.7.10", features = ["io-util"] }
-tough = { version = "0.14", features = ["http"], optional = true }
+tough = { version = "0.17.1", features = ["http"], optional = true }
 tracing = "0.1.31"
 url = "2.2.2"
 x509-cert = { version = "0.2.5", features = ["builder", "pem", "std", "sct"] }
@@ -142,6 +144,7 @@ rstest = "0.18.1"
 serial_test = "3.0.0"
 tempfile = "3.3.0"
 testcontainers = "0.15"
+tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
 
 # cosign example mappings
