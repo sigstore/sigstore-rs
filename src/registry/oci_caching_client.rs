@@ -29,6 +29,7 @@ use tracing::{debug, error};
 ///
 /// For testing purposes, use instead the client inside of the
 /// `mock_client` module.
+#[derive(Clone)]
 pub(crate) struct OciCachingClient {
     pub registry_client: oci_distribution::Client,
 }

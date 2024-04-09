@@ -12,24 +12,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::collections::HashMap;
-use std::ops::Add;
-
 use async_trait::async_trait;
 use oci_distribution::manifest::OCI_IMAGE_MEDIA_TYPE;
-use tracing::warn;
+use std::{collections::HashMap, ops::Add};
+use tracing::{debug, warn};
 
-use super::constants::{SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION};
-use super::{CosignCapabilities, SignatureLayer};
-use crate::cosign::signature_layers::build_signature_layers;
-use crate::crypto::CosignVerificationKey;
-use crate::registry::{Auth, OciReference, PushResponse};
 use crate::{
-    crypto::certificate_pool::CertificatePool,
+    cosign::{
+        constants::{SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION},
+        signature_layers::build_signature_layers,
+        CosignCapabilities, SignatureLayer,
+    },
+    crypto::{certificate_pool::CertificatePool, CosignVerificationKey},
     errors::{Result, SigstoreError},
+    registry::{Auth, OciReference, PushResponse},
 };
-use tracing::debug;
 
 /// Used to generate an empty [OCI Configuration](https://github.com/opencontainers/image-spec/blob/v1.0.0/config.md).
 pub const CONFIG_DATA: &str = "{}";
@@ -41,6 +38,17 @@ pub struct Client<'a> {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
     pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
     pub(crate) fulcio_cert_pool: Option<CertificatePool<'a>>,
+}
+
+impl Client<'_> {
+    /// Yield a `'static` lifetime of the `Client`
+    pub fn to_owned(&self) -> Client<'static> {
+        Client {
+            registry_client: self.registry_client.to_owned(),
+            rekor_pub_key: self.rekor_pub_key.as_ref().map(|k| k.to_owned()),
+            fulcio_cert_pool: self.fulcio_cert_pool.as_ref().map(|cp| cp.to_owned()),
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -176,6 +184,7 @@ mod tests {
     use crate::cosign::tests::{get_fulcio_cert_pool, REKOR_PUB_KEY};
     use crate::crypto::SigningScheme;
     use crate::mock_client::test::MockOciClient;
+    use std::sync::Arc;
 
     fn build_test_client(mock_client: MockOciClient) -> Client<'static> {
         let rekor_pub_key =
@@ -196,7 +205,7 @@ mod tests {
             String::from("sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b");
         let expected_image = "docker.io/library/busybox:sha256-f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b.sig".parse().unwrap();
         let mock_client = MockOciClient {
-            fetch_manifest_digest_response: Some(Ok(image_digest.clone())),
+            fetch_manifest_digest_response: Some(Arc::new(Ok(image_digest.clone()))),
             pull_response: None,
             pull_manifest_response: None,
             push_response: None,

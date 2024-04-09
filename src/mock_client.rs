@@ -24,13 +24,15 @@ pub(crate) mod test {
         secrets::RegistryAuth,
         Reference,
     };
+    use std::sync::Arc;
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     pub struct MockOciClient {
-        pub fetch_manifest_digest_response: Option<anyhow::Result<String>>,
-        pub pull_response: Option<anyhow::Result<ImageData>>,
-        pub pull_manifest_response: Option<anyhow::Result<(OciManifest, String)>>,
-        pub push_response: Option<anyhow::Result<PushResponse>>,
+        // Note: all the `Result` objects have to be wrapped inside of an `Arc` to be able to clone them
+        pub fetch_manifest_digest_response: Option<Arc<anyhow::Result<String>>>,
+        pub pull_response: Option<Arc<anyhow::Result<ImageData>>>,
+        pub pull_manifest_response: Option<Arc<anyhow::Result<(OciManifest, String)>>>,
+        pub push_response: Option<Arc<anyhow::Result<PushResponse>>>,
     }
 
     impl crate::registry::ClientCapabilitiesDeps for MockOciClient {}
@@ -51,7 +53,7 @@ pub(crate) mod test {
                     error: String::from("No fetch_manifest_digest_response provided!"),
                 })?;
 
-            match mock_response {
+            match mock_response.as_ref() {
                 Ok(r) => Ok(r.clone()),
                 Err(e) => Err(SigstoreError::RegistryFetchManifestError {
                     image: image.whole(),
@@ -74,7 +76,7 @@ pub(crate) mod test {
                         error: String::from("No pull_response provided!"),
                     })?;
 
-            match mock_response {
+            match mock_response.as_ref() {
                 Ok(r) => Ok(r.clone()),
                 Err(e) => Err(SigstoreError::RegistryPullError {
                     image: image.whole(),
@@ -95,7 +97,7 @@ pub(crate) mod test {
                 }
             })?;
 
-            match mock_response {
+            match mock_response.as_ref() {
                 Ok(r) => Ok(r.clone()),
                 Err(e) => Err(SigstoreError::RegistryPullError {
                     image: image.whole(),
@@ -120,7 +122,7 @@ pub(crate) mod test {
                         error: String::from("No push_response provided!"),
                     })?;
 
-            match mock_response {
+            match mock_response.as_ref() {
                 Ok(r) => Ok(PushResponse {
                     config_url: r.config_url.clone(),
                     manifest_url: r.manifest_url.clone(),
