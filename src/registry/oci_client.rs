@@ -23,6 +23,7 @@ use async_trait::async_trait;
 ///
 /// For testing purposes, use instead the client inside of the
 /// `mock_client` module.
+#[derive(Clone)]
 pub(crate) struct OciClient {
     pub registry_client: oci_distribution::Client,
 }

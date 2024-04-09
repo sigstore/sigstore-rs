@@ -28,6 +28,20 @@ pub(crate) struct CertificatePool<'a> {
     intermediates: Vec<CertificateDer<'a>>,
 }
 
+impl CertificatePool<'_> {
+    /// Yield a `'static` lifetime of the `CertificatePool`
+    pub(crate) fn to_owned(&self) -> CertificatePool<'static> {
+        CertificatePool {
+            trusted_roots: self.trusted_roots.iter().map(|ta| ta.to_owned()).collect(),
+            intermediates: self
+                .intermediates
+                .iter()
+                .map(|c| c.as_ref().to_owned().into())
+                .collect(),
+        }
+    }
+}
+
 impl<'a> CertificatePool<'a> {
     /// Builds a `CertificatePool` instance using the provided list of [`Certificate`].
     pub(crate) fn from_certificates<R, I>(

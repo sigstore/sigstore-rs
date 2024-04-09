@@ -34,6 +34,7 @@ pub(crate) use oci_caching_client::*;
 use crate::errors::Result;
 
 use async_trait::async_trait;
+use dyn_clone::DynClone;
 
 /// Workaround to ensure the `Send + Sync` supertraits are
 /// required by ClientCapabilities only when the target
@@ -43,7 +44,7 @@ use async_trait::async_trait;
 /// to define ClientCapabilities twice (one with `#[cfg(target_arch = "wasm32")]`,
 /// the other with `#[cfg(not(target_arch = "wasm32"))]`
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) trait ClientCapabilitiesDeps: Send + Sync {}
+pub(crate) trait ClientCapabilitiesDeps: Send + Sync + DynClone {}
 
 /// Workaround to ensure the `Send + Sync` supertraits are
 /// required by ClientCapabilities only when the target
@@ -53,7 +54,7 @@ pub(crate) trait ClientCapabilitiesDeps: Send + Sync {}
 /// to define ClientCapabilities twice (one with `#[cfg(target_arch = "wasm32")]`,
 /// the other with `#[cfg(not(target_arch = "wasm32"))]`
 #[cfg(target_arch = "wasm32")]
-pub(crate) trait ClientCapabilitiesDeps {}
+pub(crate) trait ClientCapabilitiesDeps: DynClone {}
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -87,3 +88,5 @@ pub(crate) trait ClientCapabilities: ClientCapabilitiesDeps {
         manifest: Option<oci_distribution::manifest::OciImageManifest>,
     ) -> Result<oci_distribution::client::PushResponse>;
 }
+
+dyn_clone::clone_trait_object!(ClientCapabilities);
