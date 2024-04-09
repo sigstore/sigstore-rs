@@ -48,6 +48,19 @@ jobs:
           command: test
           args: --workspace --features full-native-tls,test-registry
 
+  doc:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - run: |
+          make doc
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
