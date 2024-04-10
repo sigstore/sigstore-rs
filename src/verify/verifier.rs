@@ -62,7 +62,7 @@ impl AsyncVerifier {
         })
     }
 
-    async fn verify_digest<P>(
+    pub async fn verify_digest<P>(
         &self,
         input_digest: Sha256,
         bundle: Bundle,
@@ -233,6 +233,20 @@ impl Verifier {
         Ok(Self { rt, inner })
     }
 
+    pub fn verify_digest<P>(
+        &self,
+        input_digest: Sha256,
+        bundle: Bundle,
+        policy: &P,
+        offline: bool,
+    ) -> VerificationResult
+    where
+        P: VerificationPolicy,
+    {
+        self.rt
+            .block_on(self.inner.verify_digest(input_digest, bundle, policy, offline))
+    }
+
     /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
     /// [`VerificationPolicy`].
     pub fn verify<R, P>(
@@ -249,8 +263,7 @@ impl Verifier {
         let mut hasher = Sha256::new();
         io::copy(&mut input, &mut hasher).map_err(VerificationError::Input)?;
 
-        self.rt
-            .block_on(self.inner.verify_digest(hasher, bundle, policy, offline))
+        self.verify_digest(hasher, bundle, policy, offline)
     }
 }
 
