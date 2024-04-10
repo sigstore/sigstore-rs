@@ -88,8 +88,12 @@ impl CertificatePool {
     ) -> SigstoreResult<()> {
         let der = CertificateDer::from(der);
         let cert = EndEntityCert::try_from(&der)?;
+        let time = std::time::Duration::from_secs(chrono::Utc::now().timestamp() as u64);
 
-        self.verify_cert_with_time(&cert, verification_time.unwrap_or(UnixTime::now()))?;
+        self.verify_cert_with_time(
+            &cert,
+            verification_time.unwrap_or(UnixTime::since_unix_epoch(time)),
+        )?;
 
         Ok(())
     }
