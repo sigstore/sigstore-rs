@@ -62,13 +62,16 @@ impl AsyncVerifier {
         })
     }
 
-    async fn verify_digest(
+    async fn verify_digest<P>(
         &self,
         input_digest: Sha256,
         bundle: Bundle,
-        policy: &impl VerificationPolicy,
+        policy: &P,
         offline: bool,
-    ) -> VerificationResult {
+    ) -> VerificationResult
+    where
+        P: VerificationPolicy,
+    {
         let input_digest = input_digest.finalize();
         let materials: CheckedBundle = bundle.try_into()?;
 
@@ -129,9 +132,9 @@ impl AsyncVerifier {
 
         // 4) Verify that the Rekor entry is consistent with the other signing
         //    materials
-        let Some(log_entry) = materials.tlog_entry(offline, &input_digest) else {
-            return Err(SignatureErrorKind::Transparency)?;
-        };
+        let log_entry = materials
+            .tlog_entry(offline, &input_digest)
+            .ok_or(SignatureErrorKind::Transparency)?;
         debug!("log entry is consistent with other materials");
 
         // 5) Verify the inclusion proof supplied by Rekor for this artifact,
@@ -166,13 +169,17 @@ impl AsyncVerifier {
 
     /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
     /// [`VerificationPolicy`].
-    pub async fn verify<R: AsyncRead + Unpin + Send>(
+    pub async fn verify<R, P>(
         &self,
         mut input: R,
         bundle: Bundle,
-        policy: &impl VerificationPolicy,
+        policy: &P,
         offline: bool,
-    ) -> VerificationResult {
+    ) -> VerificationResult
+    where
+        R: AsyncRead + Unpin + Send,
+        P: VerificationPolicy,
+    {
         // arbitrary buffer size, chosen to be a multiple of the digest size.
         let mut buf = [0u8; 1024];
         let mut hasher = Sha256::new();
@@ -228,13 +235,17 @@ impl Verifier {
 
     /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
     /// [`VerificationPolicy`].
-    pub fn verify<R: Read>(
+    pub fn verify<R, P>(
         &self,
         mut input: R,
         bundle: Bundle,
-        policy: &impl VerificationPolicy,
+        policy: &P,
         offline: bool,
-    ) -> VerificationResult {
+    ) -> VerificationResult
+    where
+        R: Read,
+        P: VerificationPolicy,
+    {
         let mut hasher = Sha256::new();
         io::copy(&mut input, &mut hasher).map_err(VerificationError::Input)?;
 

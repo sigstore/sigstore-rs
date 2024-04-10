@@ -19,7 +19,7 @@ pub(crate) const SIGSTORE_TARGET_BASE: &str = "https://tuf-repo-cdn.sigstore.dev
 macro_rules! impl_static_resource {
     {$($name:literal,)+} => {
         #[inline]
-        pub(crate) fn static_resource(name: impl AsRef<str>) -> Option<&'static [u8]> {
+        pub(crate) fn static_resource<N>(name: N) -> Option<&'static [u8]> where N: AsRef<str> {
             match name.as_ref() {
             $(
                 $name => Some(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/trust_root/prod/", $name)))

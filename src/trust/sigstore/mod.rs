@@ -38,7 +38,7 @@
 /// ```
 use futures_util::TryStreamExt;
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio_util::bytes::BytesMut;
 
 use sigstore_protobuf_specs::dev::sigstore::{
@@ -62,7 +62,7 @@ pub struct SigstoreTrustRoot {
 
 impl SigstoreTrustRoot {
     /// Constructs a new trust repository established by a [tough::Repository].
-    pub async fn new(checkout_dir: Option<&Path>) -> Result<Self> {
+    pub async fn new(checkout_dir: Option<PathBuf>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
@@ -76,8 +76,6 @@ impl SigstoreTrustRoot {
         .load()
         .await
         .map_err(Box::new)?;
-
-        let checkout_dir = checkout_dir.map(ToOwned::to_owned);
 
         let trusted_root = {
             let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json").await?;
@@ -105,12 +103,13 @@ impl SigstoreTrustRoot {
             }
         };
 
-        // Try reading the target from disk cache.
+        // First, try reading the target from disk cache.
         let data = if let Some(Ok(local_data)) = local_path.as_ref().map(std::fs::read) {
+            debug!("{}: reading from embedded resources", name.raw());
             local_data.to_vec()
         // Try reading the target embedded into the binary.
         } else if let Some(embedded_data) = constants::static_resource(name.raw()) {
-            debug!("read embedded target {}", name.raw());
+            debug!("{}: reading from remote", name.raw());
             embedded_data.to_vec()
         // If all else fails, read the data from the TUF repo.
         } else if let Ok(remote_data) = read_remote_target().await {
@@ -128,15 +127,15 @@ impl SigstoreTrustRoot {
         };
 
         let data = if Sha256::digest(&data)[..] != target.hashes.sha256[..] {
+            debug!("{}: out of date", name.raw());
             read_remote_target().await?.to_vec()
         } else {
             data
         };
 
-        // Write the up-to-date data back to the disk. This doesn't need to succeed, as we can
-        // always fetch the target again later.
+        // Write our updated data back to the disk.
         if let Some(local_path) = local_path {
-            let _ = std::fs::write(local_path, &data);
+            std::fs::write(local_path, &data)?;
         }
 
         Ok(data)

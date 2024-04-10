@@ -109,7 +109,7 @@ impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T
 
         // Parse raw string without DER encoding.
         let val = std::str::from_utf8(ext.extn_value.as_bytes())
-            .expect("failed to parse constructed Extension!");
+            .or(Err(PolicyError::ExtensionNotFound))?;
 
         if val != self.value() {
             return Err(PolicyError::ExtensionCheckFailed {
@@ -172,7 +172,10 @@ pub struct AnyOf<'a> {
 }
 
 impl<'a> AnyOf<'a> {
-    pub fn new<I: IntoIterator<Item = &'a dyn VerificationPolicy>>(policies: I) -> Self {
+    pub fn new<I>(policies: I) -> Self
+    where
+        I: IntoIterator<Item = &'a dyn VerificationPolicy>,
+    {
         Self {
             children: policies.into_iter().collect(),
         }
@@ -200,7 +203,10 @@ pub struct AllOf<'a> {
 }
 
 impl<'a> AllOf<'a> {
-    pub fn new<I: IntoIterator<Item = &'a dyn VerificationPolicy>>(policies: I) -> Option<Self> {
+    pub fn new<I>(policies: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = &'a dyn VerificationPolicy>,
+    {
         let children: Vec<_> = policies.into_iter().collect();
 
         // Without this, we'd be able to construct an `AllOf` containing an empty list of child
