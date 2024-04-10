@@ -243,8 +243,10 @@ impl Verifier {
     where
         P: VerificationPolicy,
     {
-        self.rt
-            .block_on(self.inner.verify_digest(input_digest, bundle, policy, offline))
+        self.rt.block_on(
+            self.inner
+                .verify_digest(input_digest, bundle, policy, offline),
+        )
     }
 
     /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
