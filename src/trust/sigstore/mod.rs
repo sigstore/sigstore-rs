@@ -23,20 +23,18 @@
 //!
 //! # Example
 //!
-//! The `SigstoreRootTrust` instance can be created via the [`SigstoreTrustRoot::prefetch`]
+//! The `SigstoreRootTrust` instance can be created via the [`SigstoreTrustRoot::new`]
 //! method.
 //!
 /// ```rust
 /// # use sigstore::trust::sigstore::SigstoreTrustRoot;
-/// # use sigstore::errors::Result;
 /// # #[tokio::main]
 /// # async fn main() -> std::result::Result<(), anyhow::Error> {
-/// let repo: Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await?.prefetch().await;
+/// let repo: SigstoreTrustRoot = SigstoreTrustRoot::new(None).await?;
 /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRootTrust`
 /// # Ok(())
 /// # }
 /// ```
-use async_trait::async_trait;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use std::{
@@ -77,11 +75,14 @@ impl SigstoreTrustRoot {
                 .await
                 .map_err(Box::new)?;
 
-        Ok(Self {
+        let tr = Self {
             repository,
             checkout_dir: checkout_dir.map(ToOwned::to_owned),
             trusted_root: OnceCell::default(),
-        })
+        };
+        tr.trusted_root().await?;
+
+        Ok(tr)
     }
 
     async fn trusted_root(&self) -> Result<&TrustedRoot> {
@@ -111,27 +112,6 @@ impl SigstoreTrustRoot {
             .await
     }
 
-    /// Prefetches trust materials.
-    ///
-    /// [TrustRoot::fulcio_certs()] and [TrustRoot::rekor_keys()] on [SigstoreTrustRoot] lazily
-    /// fetches the requested data, which is problematic for async callers. Those callers should
-    /// use this method to fetch the trust root ahead of time.
-    ///
-    /// ```rust
-    /// # use sigstore::trust::sigstore::SigstoreTrustRoot;
-    /// # use sigstore::errors::Result;
-    /// # #[tokio::main]
-    /// # async fn main() -> std::result::Result<(), anyhow::Error> {
-    /// let repo: Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await?.prefetch().await;
-    /// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRootTrust`
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn prefetch(self) -> Result<Self> {
-        let _ = self.trusted_root().await?;
-        Ok(self)
-    }
-
     #[inline]
     fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
         tlogs
@@ -153,16 +133,15 @@ impl SigstoreTrustRoot {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait]
 impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
-        let root = self.trusted_root().await?;
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+        let root = self.trusted_root.get().ok_or_else(|| {
+            SigstoreError::TufMetadataError("Trusted root not initialized".into())
+        })?;
 
         // Allow expired certificates: they may have been active when the
         // certificate was used to sign.
@@ -182,8 +161,10 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    async fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        let root = self.trusted_root().await?;
+    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+        let root = self.trusted_root.get().ok_or_else(|| {
+            SigstoreError::TufMetadataError("Trusted root not initialized".into())
+        })?;
         let keys: Vec<_> = Self::tlog_keys(&root.tlogs).collect();
 
         if keys.len() != 1 {
@@ -315,21 +296,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn prefetch() {
+    async fn initialize() {
         let repo = SigstoreTrustRoot::new(None)
             .await
-            .expect("initialize SigstoreRepository")
-            .prefetch()
-            .await
-            .expect("prefetch");
+            .expect("initialize SigstoreRepository");
 
-        let fulcio_certs = repo
-            .fulcio_certs()
-            .await
-            .expect("cannot fetch Fulcio certs");
+        let fulcio_certs = repo.fulcio_certs().expect("cannot fetch Fulcio certs");
         assert!(!fulcio_certs.is_empty());
 
-        let rekor_keys = repo.rekor_keys().await.expect("cannot fetch Rekor keys");
+        let rekor_keys = repo.rekor_keys().expect("cannot fetch Rekor keys");
         assert!(!rekor_keys.is_empty());
     }
 }

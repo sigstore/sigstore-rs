@@ -130,7 +130,7 @@ async fn run_app(
 
     let mut client_builder =
         sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
-    client_builder = client_builder.with_trust_repository(frd).await?;
+    client_builder = client_builder.with_trust_repository(frd)?;
 
     let cert_chain: Option<Vec<sigstore::registry::Certificate>> = match cli.cert_chain.as_ref() {
         None => None,
@@ -184,7 +184,7 @@ async fn run_app(
     }
     if let Some(path_to_cert) = cli.cert.as_ref() {
         let cert = fs::read(path_to_cert).map_err(|e| anyhow!("Cannot read cert: {:?}", e))?;
-        let require_rekor_bundle = if !frd.rekor_keys().await?.is_empty() {
+        let require_rekor_bundle = if !frd.rekor_keys()?.is_empty() {
             true
         } else {
             warn!("certificate based verification is weaker when Rekor integration is disabled");
@@ -229,8 +229,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
     if cli.use_sigstore_tuf_data {
         info!("Downloading data from Sigstore TUF repository");
 
-        let repo: sigstore::errors::Result<SigstoreTrustRoot> =
-            SigstoreTrustRoot::new(None).await?.prefetch().await;
+        let repo: sigstore::errors::Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
 
         return Ok(Box::new(repo?));
     };
