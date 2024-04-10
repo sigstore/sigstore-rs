@@ -16,12 +16,11 @@
 use std::str::FromStr;
 
 use crate::{
-    bundle::Version as BundleVersion,
+    bundle::{Bundle, Version as BundleVersion},
     crypto::certificate::{is_leaf, is_root_ca, CertificateValidationError},
     rekor::models as rekor,
 };
 
-use crate::Bundle;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use sigstore_protobuf_specs::dev::sigstore::{
     bundle::v1::{bundle, verification_material},

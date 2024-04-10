@@ -18,7 +18,6 @@
 
 use std::{fs, process::exit};
 
-use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use sigstore::{
     oauth::IdentityToken,
@@ -113,6 +112,7 @@ struct VerifyBundle {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     let result = match cli.command {
@@ -160,7 +160,7 @@ fn verify_bundle(args: VerifyBundle) -> anyhow::Result<()> {
     let bundle = fs::File::open(bundle)?;
     let mut artifact = fs::File::open(artifact)?;
 
-    let bundle: sigstore::Bundle = serde_json::from_reader(bundle)?;
+    let bundle: sigstore::bundle::Bundle = serde_json::from_reader(bundle)?;
     let verifier = Verifier::production()?;
 
     verifier.verify(

@@ -62,6 +62,8 @@ impl AsyncVerifier {
         })
     }
 
+    /// Verifies an input digest against the given Sigstore Bundle, ensuring conformance to the
+    /// provided [`VerificationPolicy`].
     pub async fn verify_digest<P>(
         &self,
         input_digest: Sha256,
@@ -233,6 +235,8 @@ impl Verifier {
         Ok(Self { rt, inner })
     }
 
+    /// Verifies an input digest against the given Sigstore Bundle, ensuring conformance to the
+    /// provided [`VerificationPolicy`].
     pub fn verify_digest<P>(
         &self,
         input_digest: Sha256,

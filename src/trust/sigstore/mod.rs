@@ -105,14 +105,15 @@ impl SigstoreTrustRoot {
 
         // First, try reading the target from disk cache.
         let data = if let Some(Ok(local_data)) = local_path.as_ref().map(std::fs::read) {
-            debug!("{}: reading from embedded resources", name.raw());
+            debug!("{}: reading from disk cache", name.raw());
             local_data.to_vec()
         // Try reading the target embedded into the binary.
         } else if let Some(embedded_data) = constants::static_resource(name.raw()) {
-            debug!("{}: reading from remote", name.raw());
+            debug!("{}: reading from embedded resources", name.raw());
             embedded_data.to_vec()
         // If all else fails, read the data from the TUF repo.
         } else if let Ok(remote_data) = read_remote_target().await {
+            debug!("{}: reading from remote", name.raw());
             remote_data.to_vec()
         } else {
             return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));

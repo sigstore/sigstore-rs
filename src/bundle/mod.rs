@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Useful types for Sigstore bundles.
+//! Common types for Sigstore Bundle support.
 
 use std::fmt::Display;
 use std::str::FromStr;

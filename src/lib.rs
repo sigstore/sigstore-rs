@@ -282,11 +282,8 @@ pub mod registry;
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
-// Don't export yet -- these types should only be useful internally.
-#[cfg(feature = "bundle")]
-mod bundle;
-#[cfg(feature = "bundle")]
-pub use bundle::Bundle;
+#[cfg(any(feature = "sign", feature = "verify"))]
+pub mod bundle;
 
 #[cfg(feature = "verify")]
 pub mod verify;

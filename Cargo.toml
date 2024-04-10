@@ -9,7 +9,7 @@ readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
 [features]
-default = ["full-native-tls", "cached-client", "sigstore-trust-root", "sign", "verify"]
+default = ["full-native-tls", "cached-client", "sigstore-trust-root", "bundle"]
 wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js"]
 
 full-native-tls = [
@@ -28,23 +28,23 @@ full-rustls-tls = [
 # This features is used by tests that use docker to create a registry
 test-registry = []
 
-fulcio-native-tls = ["oauth-native-tls", "reqwest/native-tls", "fulcio"]
-fulcio-rustls-tls = ["oauth-rustls-tls", "reqwest/rustls-tls", "fulcio"]
-fulcio = ["serde_with"]
-
 oauth-native-tls = ["openidconnect/native-tls", "oauth"]
 oauth-rustls-tls = ["openidconnect/rustls-tls", "oauth"]
-oauth = []
+oauth = ["openidconnect"]
+
+fulcio-native-tls = ["oauth-native-tls", "reqwest/native-tls", "fulcio"]
+fulcio-rustls-tls = ["oauth-rustls-tls", "reqwest/rustls-tls", "fulcio"]
+fulcio = ["oauth", "serde_with"]
 
 rekor-native-tls = ["reqwest/native-tls", "rekor"]
 rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-bundle = ["sigstore_protobuf_specs"]
-sign = ["bundle"]
-verify = ["bundle"]
+sign = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
+verify = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
+bundle = ["sign", "verify"]
 
-sigstore-trust-root = ["bundle", "futures-util", "tough", "regex", "tokio/sync"]
+sigstore-trust-root = ["sigstore_protobuf_specs", "futures-util", "tough", "regex", "tokio/sync"]
 
 cosign-native-tls = [
   "oci-distribution/native-tls",
@@ -58,12 +58,12 @@ cosign-rustls-tls = [
   "cosign",
   "registry-rustls-tls",
 ]
-cosign = []
+cosign = ["olpc-cjson"]
 cert = []
 
 registry-native-tls = ["oci-distribution/native-tls", "registry"]
 registry-rustls-tls = ["oci-distribution/rustls-tls", "registry"]
-registry = []
+registry = ["olpc-cjson"]
 
 mock-client-native-tls = ["oci-distribution/native-tls", "mock-client"]
 mock-client-rustls-tls = ["oci-distribution/rustls-tls", "mock-client"]
@@ -87,7 +87,7 @@ futures = "0.3"
 futures-util = { version = "0.3.30", optional = true }
 lazy_static = "1.4.0"
 oci-distribution = { version = "0.11", default-features = false, optional = true }
-olpc-cjson = "0.1"
+olpc-cjson = { version = "0.1", optional = true }
 openidconnect = { version = "3.0", default-features = false, features = [
   "reqwest",
 ], optional = true }
