@@ -61,8 +61,21 @@ pub struct SigstoreTrustRoot {
 }
 
 impl SigstoreTrustRoot {
-    /// Constructs a new trust repository established by a [tough::Repository].
-    pub async fn new(checkout_dir: Option<PathBuf>) -> Result<Self> {
+    /// Constructs a new trust root from a [`tough::Repository`].
+    async fn from_tough(
+        repository: &tough::Repository,
+        checkout_dir: Option<PathBuf>,
+    ) -> Result<Self> {
+        let trusted_root = {
+            let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json").await?;
+            serde_json::from_slice(&data[..])?
+        };
+
+        Ok(Self { trusted_root })
+    }
+
+    /// Constructs a new trust root backed by the Sigstore Public Good Instance.
+    pub async fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
@@ -77,12 +90,7 @@ impl SigstoreTrustRoot {
         .await
         .map_err(Box::new)?;
 
-        let trusted_root = {
-            let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json").await?;
-            serde_json::from_slice(&data[..])?
-        };
-
-        Ok(Self { trusted_root })
+        Self::from_tough(&repository, cache_dir).await
     }
 
     async fn fetch_target<N>(
@@ -240,5 +248,132 @@ fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
         (_, None) => true,
         // If we have an expiry date, check it.
         (_, Some(end)) => now <= end,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+    use std::time::SystemTime;
+    use tempfile::TempDir;
+
+    fn verify(root: &SigstoreTrustRoot, cache_dir: Option<&Path>) {
+        if let Some(cache_dir) = cache_dir {
+            assert!(
+                cache_dir.join("trusted_root.json").exists(),
+                "the trusted root was not cached"
+            );
+        }
+
+        assert!(
+            root.fulcio_certs().is_ok_and(|v| !v.is_empty()),
+            "no Fulcio certs established"
+        );
+        assert!(
+            root.rekor_keys().is_ok_and(|v| !v.is_empty()),
+            "no Rekor keys established"
+        );
+        assert!(
+            root.ctfe_keys().is_ok_and(|v| !v.is_empty()),
+            "no CTFE keys established"
+        );
+    }
+
+    macro_rules! impl_test {
+        ($name:ident, cache=$cache:literal $(,setup=$setup:expr)? $(,verify=$verify:expr)?) => {
+            #[test]
+            fn $name() -> Result<()> {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+
+                let cache_dir = if $cache {
+                    let tmp = TempDir::new().expect("cannot create temp cache dir");
+                    Some(tmp.into_path())
+                } else {
+                    None
+                };
+                let cache_dir_borrowed = cache_dir.as_ref().map(|p| p.as_path());
+
+                $(
+                    $setup(cache_dir_borrowed);
+                )?
+
+                let root = rt
+                    .block_on(SigstoreTrustRoot::new(cache_dir.clone()))
+                    .expect("failed to create trust root");
+
+                verify(&root, cache_dir_borrowed);
+
+                $($verify(&root, cache_dir_borrowed);)?
+
+                Ok(())
+            }
+        }
+    }
+
+    impl_test!(no_local_cache, cache = false);
+    impl_test!(
+        current_local_cache,
+        cache = true,
+        verify = |_, cache_dir: Option<&Path>| {
+            assert!(
+                cache_dir.unwrap().join("trusted_root.json").exists(),
+                "TUF cache was requested but not used"
+            );
+        }
+    );
+    impl_test!(
+        outdated_local_cache,
+        cache = true,
+        setup = |cache_dir: Option<&Path>| {
+            fs::write(
+                cache_dir.unwrap().join("trusted_root.json"),
+                b"fake trusted root",
+            )
+            .expect("cannot write file to cache dir");
+        },
+        verify = |_, cache_dir: Option<&Path>| {
+            let data = fs::read(cache_dir.unwrap().join("trusted_root.json"))
+                .expect("cannot read trusted_root.json from cache");
+
+            assert_ne!(
+                data, b"fake trusted root",
+                "TUF cache was not properly updated"
+            );
+        }
+    );
+
+    #[test]
+    fn test_is_timerange_valid() {
+        fn range_from(start: i64, end: i64) -> TimeRange {
+            let base = chrono::Utc::now();
+            let start: SystemTime = (base + chrono::TimeDelta::seconds(start)).into();
+            let end: SystemTime = (base + chrono::TimeDelta::seconds(end)).into();
+
+            TimeRange {
+                start: Some(start.into()),
+                end: Some(end.into()),
+            }
+        }
+
+        assert!(is_timerange_valid(None, true));
+        assert!(is_timerange_valid(None, false));
+
+        // Test lower bound conditions
+
+        // Valid: 1 ago, 1 from now
+        assert!(is_timerange_valid(Some(&range_from(-1, 1)), false));
+        // Invalid: 1 from now, 1 from now
+        assert!(!is_timerange_valid(Some(&range_from(1, 1)), false));
+
+        // Test upper bound conditions
+
+        // Invalid: 1 ago, 1 ago
+        assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
+        // Valid: 1 ago, 1 ago
+        assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
     }
 }
