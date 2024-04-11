@@ -28,7 +28,7 @@ use crate::trust::TrustRoot;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
+/// This can be provided via a [`crate::trust::ManualTrustRoot`].
 ///
 /// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.

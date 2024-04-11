@@ -284,9 +284,3 @@ pub mod rekor;
 
 #[cfg(any(feature = "sign", feature = "verify"))]
 pub mod bundle;
-
-#[cfg(feature = "verify")]
-pub mod verify;
-
-#[cfg(feature = "sign")]
-pub mod sign;

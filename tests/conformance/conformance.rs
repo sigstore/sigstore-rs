@@ -20,9 +20,9 @@ use std::{fs, process::exit};
 
 use clap::{Parser, Subcommand};
 use sigstore::{
+    bundle::sign::SigningContext,
+    bundle::verify::{blocking::Verifier, policy},
     oauth::IdentityToken,
-    sign::SigningContext,
-    verify::{policy, Verifier},
 };
 
 #[derive(Parser, Debug)]
@@ -140,7 +140,7 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
     let mut artifact = fs::File::open(artifact)?;
 
     let context = SigningContext::production()?;
-    let signer = context.signer(identity_token);
+    let signer = context.blocking_signer(identity_token);
 
     let signing_artifact = signer?.sign(&mut artifact)?;
     let bundle_data = signing_artifact.to_bundle();

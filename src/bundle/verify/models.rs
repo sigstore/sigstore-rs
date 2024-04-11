@@ -16,7 +16,7 @@
 use std::str::FromStr;
 
 use crate::{
-    bundle::{Bundle, Version as BundleVersion},
+    bundle::{models::Version as BundleVersion, Bundle},
     crypto::certificate::{is_leaf, is_root_ca, CertificateValidationError},
     rekor::models as rekor,
 };

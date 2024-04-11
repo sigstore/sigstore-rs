@@ -20,22 +20,6 @@
 //!
 //! These can later be given to [`cosign::ClientBuilder`](crate::cosign::ClientBuilder)
 //! to enable Fulcio and Rekor integrations.
-//!
-//! # Example
-//!
-//! The `SigstoreRootTrust` instance can be created via the [`SigstoreTrustRoot::prefetch`]
-//! method.
-//!
-/// ```rust
-/// # use sigstore::trust::sigstore::SigstoreTrustRoot;
-/// # use sigstore::errors::Result;
-/// # #[tokio::main]
-/// # async fn main() -> std::result::Result<(), anyhow::Error> {
-/// let repo: Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
-/// // Now, get Fulcio and Rekor trust roots with the returned `SigstoreRootTrust`
-/// # Ok(())
-/// # }
-/// ```
 use futures_util::TryStreamExt;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -67,7 +51,7 @@ impl SigstoreTrustRoot {
         checkout_dir: Option<PathBuf>,
     ) -> Result<Self> {
         let trusted_root = {
-            let data = Self::fetch_target(&repository, &checkout_dir, "trusted_root.json").await?;
+            let data = Self::fetch_target(repository, &checkout_dir, "trusted_root.json").await?;
             serde_json::from_slice(&data[..])?
         };
 

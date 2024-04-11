@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Verifiers for certificate metadata.
+//! Verification constraints for certificate metadata.
 //!
 //! <https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md#extension-values>
 
