@@ -22,7 +22,7 @@
 //! to enable Fulcio and Rekor integrations.
 use futures_util::TryStreamExt;
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::Path;
 use tokio_util::bytes::BytesMut;
 
 use sigstore_protobuf_specs::dev::sigstore::{
@@ -48,10 +48,10 @@ impl SigstoreTrustRoot {
     /// Constructs a new trust root from a [`tough::Repository`].
     async fn from_tough(
         repository: &tough::Repository,
-        checkout_dir: Option<PathBuf>,
+        checkout_dir: Option<&Path>,
     ) -> Result<Self> {
         let trusted_root = {
-            let data = Self::fetch_target(repository, &checkout_dir, "trusted_root.json").await?;
+            let data = Self::fetch_target(repository, checkout_dir, "trusted_root.json").await?;
             serde_json::from_slice(&data[..])?
         };
 
@@ -59,7 +59,7 @@ impl SigstoreTrustRoot {
     }
 
     /// Constructs a new trust root backed by the Sigstore Public Good Instance.
-    pub async fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
+    pub async fn new(cache_dir: Option<&Path>) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
@@ -79,7 +79,7 @@ impl SigstoreTrustRoot {
 
     async fn fetch_target<N>(
         repository: &tough::Repository,
-        checkout_dir: &Option<PathBuf>,
+        checkout_dir: Option<&Path>,
         name: N,
     ) -> Result<Vec<u8>>
     where
@@ -238,6 +238,7 @@ fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::{fixture, rstest};
     use std::fs;
     use std::path::Path;
     use std::time::SystemTime;
@@ -265,70 +266,41 @@ mod tests {
         );
     }
 
-    macro_rules! impl_test {
-        ($name:ident, cache=$cache:literal $(,setup=$setup:expr)? $(,verify=$verify:expr)?) => {
-            #[test]
-            fn $name() -> Result<()> {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?;
-
-                let cache_dir = if $cache {
-                    let tmp = TempDir::new().expect("cannot create temp cache dir");
-                    Some(tmp.into_path())
-                } else {
-                    None
-                };
-                let cache_dir_borrowed = cache_dir.as_ref().map(|p| p.as_path());
-
-                $(
-                    $setup(cache_dir_borrowed);
-                )?
-
-                let root = rt
-                    .block_on(SigstoreTrustRoot::new(cache_dir.clone()))
-                    .expect("failed to create trust root");
-
-                verify(&root, cache_dir_borrowed);
-
-                $($verify(&root, cache_dir_borrowed);)?
-
-                Ok(())
-            }
-        }
+    #[fixture]
+    fn cache_dir() -> TempDir {
+        TempDir::new().expect("cannot create temp cache dir")
     }
 
-    impl_test!(no_local_cache, cache = false);
-    impl_test!(
-        current_local_cache,
-        cache = true,
-        verify = |_, cache_dir: Option<&Path>| {
-            assert!(
-                cache_dir.unwrap().join("trusted_root.json").exists(),
-                "TUF cache was requested but not used"
-            );
-        }
-    );
-    impl_test!(
-        outdated_local_cache,
-        cache = true,
-        setup = |cache_dir: Option<&Path>| {
-            fs::write(
-                cache_dir.unwrap().join("trusted_root.json"),
-                b"fake trusted root",
-            )
-            .expect("cannot write file to cache dir");
-        },
-        verify = |_, cache_dir: Option<&Path>| {
-            let data = fs::read(cache_dir.unwrap().join("trusted_root.json"))
-                .expect("cannot read trusted_root.json from cache");
+    async fn trust_root(cache: Option<&Path>) -> SigstoreTrustRoot {
+        SigstoreTrustRoot::new(cache)
+            .await
+            .expect("failed to construct SigstoreTrustRoot")
+    }
 
-            assert_ne!(
-                data, b"fake trusted root",
-                "TUF cache was not properly updated"
-            );
-        }
-    );
+    #[rstest]
+    #[tokio::test]
+    async fn trust_root_fetch(#[values(None, Some(cache_dir()))] cache: Option<TempDir>) {
+        let cache = cache.as_ref().map(|t| t.path());
+        let root = trust_root(cache).await;
+
+        verify(&root, cache);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn trust_root_outdated(cache_dir: TempDir) {
+        let trusted_root_path = cache_dir.path().join("trusted_root.json");
+        let outdated_data = b"fake trusted root";
+        fs::write(&trusted_root_path, outdated_data)
+            .expect("failed to write to trusted root cache");
+
+        let cache = Some(cache_dir.path());
+        let root = trust_root(cache).await;
+        verify(&root, cache);
+
+        let data = fs::read(&trusted_root_path).expect("failed to read from trusted root cache");
+        assert_ne!(data, outdated_data, "TUF cache was not properly updated");
+    }
 
     #[test]
     fn test_is_timerange_valid() {
