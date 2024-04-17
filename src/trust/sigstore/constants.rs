@@ -16,10 +16,21 @@
 pub(crate) const SIGSTORE_METADATA_BASE: &str = "https://tuf-repo-cdn.sigstore.dev";
 pub(crate) const SIGSTORE_TARGET_BASE: &str = "https://tuf-repo-cdn.sigstore.dev/targets";
 
-macro_rules! tuf_resource {
-    ($path:literal) => {
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/trust_root/", $path))
+macro_rules! impl_static_resource {
+    {$($name:literal,)+} => {
+        #[inline]
+        pub(crate) fn static_resource<N>(name: N) -> Option<&'static [u8]> where N: AsRef<str> {
+            match name.as_ref() {
+            $(
+                $name => Some(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/trust_root/prod/", $name)))
+            ),+,
+                    _ => None,
+            }
+        }
     };
 }
 
-pub(crate) const SIGSTORE_ROOT: &[u8] = tuf_resource!("prod/root.json");
+impl_static_resource! {
+    "root.json",
+    "trusted_root.json",
+}

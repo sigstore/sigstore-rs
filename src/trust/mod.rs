@@ -13,18 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use webpki::types::CertificateDer;
 
 #[cfg(feature = "sigstore-trust-root")]
 pub mod sigstore;
 
 /// A `TrustRoot` owns all key material necessary for establishing a root of trust.
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-pub trait TrustRoot: Send + Sync {
-    async fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>>;
-    async fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
+pub trait TrustRoot {
+    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>>;
+    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
+    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
@@ -33,23 +31,25 @@ pub trait TrustRoot: Send + Sync {
 pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
     pub rekor_key: Option<Vec<u8>>,
+    pub ctfe_keys: Vec<Vec<u8>>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait]
 impl TrustRoot for ManualTrustRoot<'_> {
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>> {
+    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>> {
         Ok(match &self.fulcio_certs {
             Some(certs) => certs.clone(),
             None => Vec::new(),
         })
     }
 
-    async fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
+    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
         Ok(match &self.rekor_key {
             Some(key) => vec![&key[..]],
             None => Vec::new(),
         })
+    }
+
+    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
+        Ok(self.ctfe_keys.iter().map(|v| &v[..]).collect())
     }
 }

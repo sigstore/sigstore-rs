@@ -175,6 +175,8 @@ pub enum Signature<'a> {
 pub(crate) mod certificate;
 #[cfg(feature = "cert")]
 pub(crate) mod certificate_pool;
+#[cfg(feature = "cert")]
+pub(crate) use certificate_pool::CertificatePool;
 
 pub mod verification_key;
 

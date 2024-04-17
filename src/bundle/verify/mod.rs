@@ -1,3 +1,4 @@
+//
 // Copyright 2023 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Sigstore bundle support.
-
-pub use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle;
+//! Types for verifying Sigstore bundles with policies.
 
 mod models;
 
-#[cfg(feature = "sign")]
-pub mod sign;
+pub use models::{VerificationError, VerificationResult};
 
-#[cfg(feature = "verify")]
-pub mod verify;
+pub mod policy;
+pub use policy::{PolicyError, VerificationPolicy};
+
+mod verifier;
+pub use verifier::*;

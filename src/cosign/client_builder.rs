@@ -28,7 +28,7 @@ use crate::trust::TrustRoot;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
+/// This can be provided via a [`crate::trust::ManualTrustRoot`].
 ///
 /// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
@@ -72,15 +72,12 @@ impl<'a> ClientBuilder<'a> {
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
     /// See [crate::sigstore::TrustRoot] for more details on trust repositories.
-    pub async fn with_trust_repository<R: TrustRoot + ?Sized>(
-        mut self,
-        repo: &'a R,
-    ) -> Result<Self> {
-        let rekor_keys = repo.rekor_keys().await?;
+    pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
+        let rekor_keys = repo.rekor_keys()?;
         if !rekor_keys.is_empty() {
             self.rekor_pub_key = Some(rekor_keys[0]);
         }
-        self.fulcio_certs = repo.fulcio_certs().await?;
+        self.fulcio_certs = repo.fulcio_certs()?;
 
         Ok(self)
     }
@@ -94,7 +91,7 @@ impl<'a> ClientBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Result<Client<'a>> {
+    pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {
                 info!("Rekor public key not provided. Rekor integration disabled");
