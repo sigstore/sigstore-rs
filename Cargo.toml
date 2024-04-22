@@ -93,7 +93,7 @@ openidconnect = { version = "3.0", default-features = false, features = [
 ], optional = true }
 p256 = "0.13"
 p384 = "0.13"
-webbrowser = "0.8.12"
+webbrowser = "1.0.0"
 pem = { version = "3.0", features = ["serde"] }
 pkcs1 = { version = "0.7.5", features = ["std"] }
 pkcs8 = { version = "0.10.2", features = [
