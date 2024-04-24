@@ -40,11 +40,11 @@ rekor-native-tls = ["reqwest/native-tls", "rekor"]
 rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
 rekor = ["reqwest"]
 
-sign = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
-verify = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
+sign = ["fulcio", "rekor", "cert"]
+verify = ["fulcio", "rekor", "cert"]
 bundle = ["sign", "verify"]
 
-sigstore-trust-root = ["sigstore_protobuf_specs", "futures-util", "tough", "regex", "tokio/sync"]
+sigstore-trust-root = ["futures-util", "tough", "regex", "tokio/sync"]
 
 cosign-native-tls = [
   "oci-distribution/native-tls",
@@ -116,7 +116,7 @@ serde_json = "1.0.79"
 serde_with = { version = "3.4", features = ["base64", "json"], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = { version = "2.0" }
-sigstore_protobuf_specs = { version = "0.3", optional = true }
+sigstore_protobuf_specs = "0.3"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt"] }
 tokio-util = { version = "0.7.10", features = ["io-util"] }

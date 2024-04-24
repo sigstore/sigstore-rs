@@ -14,6 +14,7 @@
 
 //! Types for signing artifacts and producing Sigstore bundles.
 
+use std::error::Error;
 use std::io::{self, Read};
 use std::time::SystemTime;
 
@@ -39,19 +40,15 @@ use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
 
 use crate::bundle::models::Version;
-use crate::crypto::keyring::Keyring;
 use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
-use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
+use crate::fulcio::{self, FulcioClient};
 use crate::oauth::IdentityToken;
 use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
-use crate::trust::TrustRoot;
-
-#[cfg(feature = "sigstore-trust-root")]
-use crate::trust::sigstore::SigstoreTrustRoot;
+use crate::trust::{CTFEKeyring, TrustConfig, TrustRoot};
 
 /// An asynchronous Sigstore signing session.
 ///
@@ -85,25 +82,27 @@ impl<'ctx> SigningSession<'ctx> {
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
-        let subject =
-                // SEQUENCE OF RelativeDistinguishedName
-                vec![
-                    // SET OF AttributeTypeAndValue
-                    vec![
-                        // AttributeTypeAndValue, `emailAddress=...`
-                        AttributeTypeAndValue {
-                            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
-                            value: AttributeValue::new(
-                                pkcs8::der::Tag::Utf8String,
-                                token.unverified_claims().email.as_ref(),
-                            )?,
-                        }
-                    ].try_into()?
-                ].into();
+        let subject = token
+            .unverified_claims()
+            .subject()
+            .ok_or(SigstoreError::UnexpectedError(
+                "OIDC token does not contain a subject".into(),
+            ))?;
+        // AttributeTypeAndValue, `emailAddress=...`
+        let subject_attr = AttributeTypeAndValue {
+            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
+            value: AttributeValue::new(pkcs8::der::Tag::Utf8String, subject.as_ref())?,
+        };
+        // SEQUENCE OF RelativeDistinguishedName
+        let subject_seq = vec![
+            // SET OF AttributeTypeAndValue
+            vec![subject_attr].try_into()?,
+        ]
+        .into();
 
         let mut rng = rand::thread_rng();
         let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rng));
-        let mut builder = CertRequestBuilder::new(subject, &private_key)?;
+        let mut builder = CertRequestBuilder::new(subject_seq, &private_key)?;
         builder.add_extension(&x509_ext::BasicConstraints {
             ca: false,
             path_len_constraint: None,
@@ -258,49 +257,30 @@ pub mod blocking {
 pub struct SigningContext {
     fulcio: FulcioClient,
     rekor_config: RekorConfiguration,
-    ctfe_keyring: Keyring,
+    ctfe_keyring: CTFEKeyring,
 }
 
 impl SigningContext {
-    /// Manually constructs a [`SigningContext`] from its constituent data.
-    pub fn new(
-        fulcio: FulcioClient,
-        rekor_config: RekorConfiguration,
-        ctfe_keyring: Keyring,
-    ) -> Self {
-        Self {
+    pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, Box<dyn Error + Send + Sync>>
+    where
+        R: TrustRoot,
+    {
+        let fulcio_url = Url::parse(&trust.signing_config.ca_url)?;
+        let oauth = OauthTokenProvider::default().with_issuer(&trust.signing_config.oidc_url);
+        let fulcio = FulcioClient::new(fulcio_url, crate::fulcio::TokenProvider::Oauth(oauth));
+
+        let mut rekor_config: RekorConfiguration = Default::default();
+        // XX: At the time of writing, the ecosystem only uses one log. In the future, we
+        // may want to check multiple logs to mitigate split-view attacks.
+        rekor_config.base_path = trust.signing_config.tlog_urls[0].clone();
+
+        let ctfe_keyring = trust.trust_root.ctfe_keys()?;
+
+        Ok(Self {
             fulcio,
             rekor_config,
             ctfe_keyring,
-        }
-    }
-
-    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
-    /// infrastructure.
-    #[cfg(feature = "sigstore-trust-root")]
-    pub async fn async_production() -> SigstoreResult<Self> {
-        let trust_root = SigstoreTrustRoot::new(None).await?;
-        Ok(Self::new(
-            FulcioClient::new(
-                Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
-                crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
-            ),
-            Default::default(),
-            Keyring::new(trust_root.ctfe_keys()?)?,
-        ))
-    }
-
-    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
-    /// infrastructure.
-    ///
-    /// Async callers should use [`SigningContext::async_production`].
-    #[cfg(feature = "sigstore-trust-root")]
-    pub fn production() -> SigstoreResult<Self> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-
-        rt.block_on(Self::async_production())
+        })
     }
 
     /// Configures and returns a [`SigningSession`] with the held context.

@@ -93,8 +93,8 @@
 //!   };
 //!
 //!   let mut repo = sigstore::trust::ManualTrustRoot {
-//!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
-//!     rekor_key: Some(rekor_pub_key),
+//!     ca_certs: vec![fulcio_cert.try_into().unwrap()],
+//!     ctfe_keys: vec![rekor_pub_key],
 //!     ..Default::default()
 //!   };
 //!
@@ -284,3 +284,5 @@ pub mod rekor;
 
 #[cfg(any(feature = "sign", feature = "verify"))]
 pub mod bundle;
+
+pub use sigstore_protobuf_specs as protobuf_specs;

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helper Structs to interact with the Sigstore TUF repository.
+//! Helper structs to interact with the Sigstore TUF repository.
 //!
 //! The main interaction point is [`SigstoreTrustRoot`], which fetches Rekor's
 //! public key and Fulcio's certificate.
@@ -22,76 +22,171 @@
 //! to enable Fulcio and Rekor integrations.
 use futures_util::TryStreamExt;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
+use std::{fmt::Debug, path::PathBuf};
 use tokio_util::bytes::BytesMut;
-
-use sigstore_protobuf_specs::dev::sigstore::{
-    common::v1::TimeRange,
-    trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
-};
 use tough::TargetName;
 use tracing::debug;
-use webpki::types::CertificateDer;
 
-mod constants;
+use super::{BundledTrustRoot, Result, TrustConfig, TrustRootError};
 
-use crate::errors::{Result, SigstoreError};
-pub use crate::trust::{ManualTrustRoot, TrustRoot};
-
-/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
-#[derive(Debug)]
-pub struct SigstoreTrustRoot {
-    trusted_root: TrustedRoot,
+macro_rules! trust_root_resource {
+    ($dir:literal, $match_on:ident) => {
+        trust_root_resource!(@with_resources $dir, $match_on, [
+            "root.json",
+            "trusted_root.json",
+            "signing_config.json",
+        ])
+    };
+    (@with_resources $dir:literal, $match_on:ident, [$($rsrc:literal,)+]) => {
+        match $match_on.as_ref() {
+        $(
+            $rsrc => Some(include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/trust_root/",
+                $dir,
+                "/",
+                $rsrc
+            )))
+        ),+,
+            _ => None,
+        }
+    };
 }
 
-impl SigstoreTrustRoot {
-    /// Constructs a new trust root from a [`tough::Repository`].
-    async fn from_tough(
-        repository: &tough::Repository,
-        checkout_dir: Option<&Path>,
-    ) -> Result<Self> {
-        let trusted_root = {
-            let data = Self::fetch_target(repository, checkout_dir, "trusted_root.json").await?;
-            serde_json::from_slice(&data[..])?
+/// Configuration used in fetching the root of trust.
+#[derive(Default, Debug)]
+pub struct TrustRootOptions {
+    /// A directory for caching the root of trust and related artifacts. If `None`, the caching
+    /// mechanism is disabled.
+    pub cache_dir: Option<PathBuf>,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RootUpdateError {
+    #[error("TUF target not found")]
+    NotFound,
+
+    #[error("failed to parse target data: {0}")]
+    Parse(#[source] serde_json::Error),
+
+    #[error("TUF returned error on repository fetch: {0}")]
+    Fetch(#[source] tough::error::Error),
+
+    #[error("failed to cache target: {0}")]
+    Cache(#[source] std::io::Error),
+}
+
+type UpdateResult<T> = std::result::Result<T, RootUpdateError>;
+
+/// An instance of the Sigstore Public Good Infrastructure.
+#[derive(Copy, Clone, Debug)]
+pub enum Instance {
+    Prod,
+    Staging,
+}
+
+impl Instance {
+    /// Returns the [`TrustConfig`] of the Sigstore instance, which encapsulates all data necessary
+    /// for Sigstore signing ([`SigningConfig`]) and verification ([`BundledTrustRoot`]).
+    pub async fn trust_config(
+        &self,
+        trust_root_options: TrustRootOptions,
+    ) -> Result<TrustConfig<BundledTrustRoot>> {
+        let tuf_url: url::Url = match self {
+            Instance::Prod => "https://tuf-repo-cdn.sigstore.dev",
+            Instance::Staging => "https://tuf-repo-cdn.sigstage.dev",
+        }
+        .parse()
+        .expect("failed to parse constant URL!");
+
+        let targets_url = tuf_url
+            .clone()
+            .join("targets")
+            .expect("failed to construct constant URL!");
+
+        let tuf_root = &self
+            .static_resource("root.json")
+            .expect("failed to fetch embedded TUF root!");
+
+        let repository = tough::RepositoryLoader::new(tuf_root, tuf_url, targets_url)
+            .expiration_enforcement(tough::ExpirationEnforcement::Safe)
+            .load()
+            .await
+            .map_err(|e| TrustRootError::RootUpdate(RootUpdateError::Fetch(e)))?;
+
+        let trust_root = BundledTrustRoot::from_tough(trust_root_options, &repository, |name| {
+            self.static_resource(name)
+        })
+        .await?;
+
+        let signing_config: SigningConfig = {
+            let data = self
+                .static_resource("signing_config.json")
+                .expect("failed to read static signing config!");
+            serde_json::from_slice(data).expect("failed to parse static signing config!")
         };
+
+        Ok(TrustConfig {
+            trust_root,
+            signing_config,
+        })
+    }
+
+    #[inline]
+    pub fn static_resource<N>(&self, name: N) -> Option<&'static [u8]>
+    where
+        N: AsRef<str>,
+    {
+        match self {
+            Instance::Prod => trust_root_resource!("prod", name),
+            Instance::Staging => trust_root_resource!("staging", name),
+        }
+    }
+}
+
+/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
+impl BundledTrustRoot {
+    /// Constructs a new trust root from a [`tough::Repository`].
+    async fn from_tough<F>(
+        options: TrustRootOptions,
+        repository: &tough::Repository,
+        static_reader: F,
+    ) -> UpdateResult<Self>
+    where
+        F: Fn(&str) -> Option<&'static [u8]>,
+    {
+        let TrustRootOptions { cache_dir } = options;
+        let trusted_root =
+            Self::fetch_target(cache_dir, static_reader, repository, "trusted_root.json")
+                .await
+                .map(|x: Vec<u8>| serde_json::from_slice(&x[..]))?
+                .map_err(RootUpdateError::Parse)?;
 
         Ok(Self { trusted_root })
     }
 
-    /// Constructs a new trust root backed by the Sigstore Public Good Instance.
-    pub async fn new(cache_dir: Option<&Path>) -> Result<Self> {
-        // These are statically defined and should always parse correctly.
-        let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
-        let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
-
-        let repository = tough::RepositoryLoader::new(
-            &constants::static_resource("root.json").expect("Failed to fetch embedded TUF root!"),
-            metadata_base,
-            target_base,
-        )
-        .expiration_enforcement(tough::ExpirationEnforcement::Safe)
-        .load()
-        .await
-        .map_err(Box::new)?;
-
-        Self::from_tough(&repository, cache_dir).await
-    }
-
-    async fn fetch_target<N>(
+    async fn fetch_target<N, F>(
+        cache_dir: Option<PathBuf>,
+        static_reader: F,
         repository: &tough::Repository,
-        checkout_dir: Option<&Path>,
         name: N,
-    ) -> Result<Vec<u8>>
+    ) -> UpdateResult<Vec<u8>>
     where
+        F: Fn(&str) -> Option<&'static [u8]>,
         N: TryInto<TargetName, Error = tough::error::Error>,
     {
-        let name: TargetName = name.try_into().map_err(Box::new)?;
-        let local_path = checkout_dir.as_ref().map(|d| d.join(name.raw()));
+        let name: TargetName = name.try_into().map_err(RootUpdateError::Fetch)?;
+        let local_path = cache_dir.as_ref().map(|d| d.join(name.raw()));
 
         let read_remote_target = || async {
             match repository.read_target(&name).await {
-                Ok(Some(s)) => Ok(s.try_collect::<BytesMut>().await.map_err(Box::new)?),
-                _ => Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned())),
+                Ok(Some(s)) => Ok(s
+                    .try_collect::<BytesMut>()
+                    .await
+                    .map_err(RootUpdateError::Fetch)?),
+                Err(e) => Err(RootUpdateError::Fetch(e)),
+                _ => Err(RootUpdateError::NotFound),
             }
         };
 
@@ -100,7 +195,7 @@ impl SigstoreTrustRoot {
             debug!("{}: reading from disk cache", name.raw());
             local_data.to_vec()
         // Try reading the target embedded into the binary.
-        } else if let Some(embedded_data) = constants::static_resource(name.raw()) {
+        } else if let Some(embedded_data) = static_reader(name.raw()) {
             debug!("{}: reading from embedded resources", name.raw());
             embedded_data.to_vec()
         // If all else fails, read the data from the TUF repo.
@@ -108,15 +203,12 @@ impl SigstoreTrustRoot {
             debug!("{}: reading from remote", name.raw());
             remote_data.to_vec()
         } else {
-            return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
+            return Err(RootUpdateError::NotFound);
         };
 
         // Get metadata (hash) of the target and update the disk copy if it doesn't match.
         let Some(target) = repository.targets().signed.targets.get(&name) else {
-            return Err(SigstoreError::TufMetadataError(format!(
-                "couldn't get metadata for {}",
-                name.raw()
-            )));
+            return Err(RootUpdateError::NotFound);
         };
 
         let data = if Sha256::digest(&data)[..] != target.hashes.sha256[..] {
@@ -128,123 +220,24 @@ impl SigstoreTrustRoot {
 
         // Write our updated data back to the disk.
         if let Some(local_path) = local_path {
-            std::fs::write(local_path, &data)?;
+            std::fs::write(local_path, &data).map_err(RootUpdateError::Cache)?;
         }
 
         Ok(data)
-    }
-
-    #[inline]
-    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
-        tlogs
-            .iter()
-            .filter_map(|tlog| tlog.public_key.as_ref())
-            .filter(|key| is_timerange_valid(key.valid_for.as_ref(), false))
-            .filter_map(|key| key.raw_bytes.as_ref())
-            .map(|key_bytes| key_bytes.as_slice())
-    }
-
-    #[inline]
-    fn ca_keys(
-        cas: &[CertificateAuthority],
-        allow_expired: bool,
-    ) -> impl Iterator<Item = &'_ [u8]> {
-        cas.iter()
-            .filter(move |ca| is_timerange_valid(ca.valid_for.as_ref(), allow_expired))
-            .flat_map(|ca| ca.cert_chain.as_ref())
-            .flat_map(|chain| chain.certificates.iter())
-            .map(|cert| cert.raw_bytes.as_slice())
-    }
-}
-
-impl crate::trust::TrustRoot for SigstoreTrustRoot {
-    /// Fetch Fulcio certificates from the given TUF repository or reuse
-    /// the local cache if its contents are not outdated.
-    ///
-    /// The contents of the local cache are updated when they are outdated.
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
-        // Allow expired certificates: they may have been active when the
-        // certificate was used to sign.
-        let certs = Self::ca_keys(&self.trusted_root.certificate_authorities, true);
-        let certs: Vec<_> = certs
-            .map(|c| CertificateDer::from(c).into_owned())
-            .collect();
-
-        if certs.is_empty() {
-            Err(SigstoreError::TufMetadataError(
-                "Fulcio certificates not found".into(),
-            ))
-        } else {
-            Ok(certs)
-        }
-    }
-
-    /// Fetch Rekor public keys from the given TUF repository or reuse
-    /// the local cache if it's not outdated.
-    ///
-    /// The contents of the local cache are updated when they are outdated.
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
-
-        if keys.len() != 1 {
-            Err(SigstoreError::TufMetadataError(
-                "Did not find exactly 1 active Rekor key".into(),
-            ))
-        } else {
-            Ok(keys)
-        }
-    }
-
-    /// Fetch CTFE public keys from the given TUF repository or reuse
-    /// the local cache if it's not outdated.
-    ///
-    /// The contents of the local cache are updated when they are outdated.
-    fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
-
-        if keys.is_empty() {
-            Err(SigstoreError::TufMetadataError(
-                "CTFE keys not found".into(),
-            ))
-        } else {
-            Ok(keys)
-        }
-    }
-}
-
-/// Given a `range`, checks that the the current time is not before `start`. If
-/// `allow_expired` is `false`, also checks that the current time is not after
-/// `end`.
-fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
-    let now = chrono::Utc::now().timestamp();
-
-    let start = range.and_then(|r| r.start.as_ref()).map(|t| t.seconds);
-    let end = range.and_then(|r| r.end.as_ref()).map(|t| t.seconds);
-
-    match (start, end) {
-        // If there was no validity period specified, the key is always valid.
-        (None, _) => true,
-        // Active: if the current time is before the starting period, we are not yet valid.
-        (Some(start), _) if now < start => false,
-        // If we want Expired keys, then we don't need to check the end.
-        _ if allow_expired => true,
-        // If there is no expiry date, the key is valid.
-        (_, None) => true,
-        // If we have an expiry date, check it.
-        (_, Some(end)) => now <= end,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::trust::TrustRoot;
+
     use super::*;
     use rstest::{fixture, rstest};
     use std::fs;
     use std::path::Path;
-    use std::time::SystemTime;
     use tempfile::TempDir;
 
-    fn verify(root: &SigstoreTrustRoot, cache_dir: Option<&Path>) {
+    fn verify(root: &BundledTrustRoot, cache_dir: Option<&Path>) {
         if let Some(cache_dir) = cache_dir {
             assert!(
                 cache_dir.join("trusted_root.json").exists(),
@@ -252,18 +245,9 @@ mod tests {
             );
         }
 
-        assert!(
-            root.fulcio_certs().is_ok_and(|v| !v.is_empty()),
-            "no Fulcio certs established"
-        );
-        assert!(
-            root.rekor_keys().is_ok_and(|v| !v.is_empty()),
-            "no Rekor keys established"
-        );
-        assert!(
-            root.ctfe_keys().is_ok_and(|v| !v.is_empty()),
-            "no CTFE keys established"
-        );
+        assert!(root.ca_certs().is_ok(), "no Fulcio certs established");
+        assert!(root.tlog_keys().is_ok(), "no Rekor keys established");
+        assert!(root.ctfe_keys().is_ok(), "no CTFE keys established");
     }
 
     #[fixture]
@@ -271,10 +255,15 @@ mod tests {
         TempDir::new().expect("cannot create temp cache dir")
     }
 
-    async fn trust_root(cache: Option<&Path>) -> SigstoreTrustRoot {
-        SigstoreTrustRoot::new(cache)
+    async fn trust_root(cache: Option<&Path>) -> BundledTrustRoot {
+        let trust_config = Instance::Prod
+            .trust_config(TrustRootOptions {
+                cache_dir: cache.map(|p| p.to_owned()),
+            })
             .await
-            .expect("failed to construct SigstoreTrustRoot")
+            .expect("failed to construct prod trust config");
+
+        trust_config.trust_root
     }
 
     #[rstest]
@@ -300,36 +289,5 @@ mod tests {
 
         let data = fs::read(&trusted_root_path).expect("failed to read from trusted root cache");
         assert_ne!(data, outdated_data, "TUF cache was not properly updated");
-    }
-
-    #[test]
-    fn test_is_timerange_valid() {
-        fn range_from(start: i64, end: i64) -> TimeRange {
-            let base = chrono::Utc::now();
-            let start: SystemTime = (base + chrono::TimeDelta::seconds(start)).into();
-            let end: SystemTime = (base + chrono::TimeDelta::seconds(end)).into();
-
-            TimeRange {
-                start: Some(start.into()),
-                end: Some(end.into()),
-            }
-        }
-
-        assert!(is_timerange_valid(None, true));
-        assert!(is_timerange_valid(None, false));
-
-        // Test lower bound conditions
-
-        // Valid: 1 ago, 1 from now
-        assert!(is_timerange_valid(Some(&range_from(-1, 1)), false));
-        // Invalid: 1 from now, 1 from now
-        assert!(!is_timerange_valid(Some(&range_from(1, 1)), false));
-
-        // Test upper bound conditions
-
-        // Invalid: 1 ago, 1 ago
-        assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
-        // Valid: 1 ago, 1 ago
-        assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
     }
 }

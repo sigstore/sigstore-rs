@@ -1,0 +1,8 @@
+{
+  "ca_url": "https://fulcio.sigstage.dev",
+  "oidc_url": "oauth2.sigstage.dev/auth",
+  "tlog_urls": [
+    "https://rekor.sigstage.dev"
+  ],
+  "tsa_urls": []
+}

@@ -22,13 +22,30 @@ use crate::errors::SigstoreError;
 
 #[derive(Deserialize)]
 pub struct Claims {
-    pub aud: String,
+    aud: String,
+    iss: String,
     #[serde(with = "chrono::serde::ts_seconds")]
-    pub exp: DateTime<Utc>,
+    exp: DateTime<Utc>,
     #[serde(with = "chrono::serde::ts_seconds_option")]
     #[serde(default)]
-    pub nbf: Option<DateTime<Utc>>,
-    pub email: String,
+    nbf: Option<DateTime<Utc>>,
+    email: Option<String>,
+    sub: Option<String>,
+}
+
+impl Claims {
+    /// Returns the subject of the token.
+    ///
+    /// <https://github.com/sigstore/fulcio/blob/b2186c0/pkg/config/config.go#L182-L201>
+    pub fn subject(&self) -> Option<&str> {
+        match self.iss.as_str() {
+            "https://accounts.google.com"
+            | "https://oauth2.sigstore.dev/auth"
+            | "https://oauth2.sigstage.dev/auth" => self.email.as_deref(),
+            "https://token.actions.githubusercontent.com" => self.sub.as_deref(),
+            _ => self.sub.as_deref(),
+        }
+    }
 }
 
 pub type UnverifiedClaims = Claims;

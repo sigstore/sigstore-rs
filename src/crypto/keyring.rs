@@ -86,13 +86,18 @@ pub struct Keyring(HashMap<[u8; 32], Key>);
 
 impl Keyring {
     /// Creates a `Keyring` from DER encoded SPKI-format public keys.
-    pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
-        Ok(Self(
-            keys.into_iter()
-                .flat_map(Key::new)
-                .map(|k| Ok((k.fingerprint, k)))
-                .collect::<Result<_>>()?,
-        ))
+    pub fn new<'a, I>(keys: I) -> Result<Self>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+    {
+        keys.into_iter()
+            .map(|b| {
+                let k = Key::new(b.as_ref())?;
+                Ok((k.fingerprint, k))
+            })
+            .collect::<Result<_>>()
+            .map(Self)
     }
 
     /// Verifies `data` against a `signature` with a public key identified by `key_id`.

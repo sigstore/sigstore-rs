@@ -170,6 +170,9 @@ pub enum SigstoreError {
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,
 
+    #[error(transparent)]
+    TrustRootError(#[from] crate::trust::TrustRootError),
+
     #[cfg(feature = "sigstore-trust-root")]
     #[error(transparent)]
     TufError(#[from] Box<tough::error::Error>),
