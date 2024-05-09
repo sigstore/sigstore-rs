@@ -237,15 +237,6 @@ impl VerificationPolicy for AllOf<'_> {
     }
 }
 
-pub(crate) struct UnsafeNoOp;
-
-impl VerificationPolicy for UnsafeNoOp {
-    fn verify(&self, _cert: &x509_cert::Certificate) -> PolicyResult {
-        warn!("unsafe (no-op) verification policy used! no verification performed!");
-        Ok(())
-    }
-}
-
 /// Verifies the certificate's "identity", corresponding to the X.509v3 SAN.
 /// Identities are verified modulo an OIDC issuer, so the issuer's URI
 /// is also required.
