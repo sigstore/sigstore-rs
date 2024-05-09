@@ -297,7 +297,7 @@ mod tests {
     use crate::crypto::SigningScheme;
 
     #[cfg(feature = "test-registry")]
-    use testcontainers::{clients, core::WaitFor};
+    use testcontainers::{core::WaitFor, runners::AsyncRunner};
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -566,10 +566,8 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[tokio::test]
     #[serial_test::serial]
     async fn sign_verify_image(#[case] signing_scheme: SigningScheme) {
-        let docker = clients::Cli::default();
-        let image = registry_image();
-        let test_container = docker.run(image);
-        let port = test_container.get_host_port_ipv4(5000);
+        let test_container = registry_image().start().await;
+        let port = test_container.get_host_port_ipv4(5000).await;
 
         let mut client = ClientBuilder::default()
             .enable_registry_caching()

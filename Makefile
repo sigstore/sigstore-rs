@@ -16,7 +16,7 @@ doc:
 
 .PHONY: test
 test: fmt lint doc
-	cargo test --workspace
+	cargo test --workspace --features full-native-tls,test-registry
 
 .PHONY: clean
 clean:
