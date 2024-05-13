@@ -24,14 +24,13 @@ use x509_cert::der::Encode;
 
 use crate::{
     bundle::Bundle,
-    crypto::{CertificatePool, CosignVerificationKey, Signature},
-    errors::Result as SigstoreResult,
+    crypto::{
+        transparency::{verify_sct, CertificateEmbeddedSCT},
+        CertificatePool, CosignVerificationKey, Signature,
+    },
     rekor::apis::configuration::Configuration as RekorConfiguration,
-    trust::TrustRoot,
+    trust::{CTFEKeyring, TrustConfig, TrustRoot, TrustRootError},
 };
-
-#[cfg(feature = "sigstore-trust-root")]
-use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{
     models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
@@ -46,22 +45,37 @@ pub struct Verifier {
     #[allow(dead_code)]
     rekor_config: RekorConfiguration,
     cert_pool: CertificatePool,
+    ctfe_keyring: CTFEKeyring,
 }
 
 impl Verifier {
-    /// Constructs a [`Verifier`].
-    ///
-    /// For verifications against the public-good trust root, use [`Verifier::production()`].
-    pub fn new<R: TrustRoot>(
+    fn new_with_rekor_config<R: TrustRoot>(
         rekor_config: RekorConfiguration,
         trust_repo: R,
-    ) -> SigstoreResult<Self> {
-        let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
+    ) -> Result<Self, TrustRootError> {
+        let cert_pool = trust_repo.ca_certs()?;
+        let ctfe_keyring = trust_repo.ctfe_keys()?;
 
         Ok(Self {
             rekor_config,
             cert_pool,
+            ctfe_keyring,
         })
+    }
+
+    /// Constructs a [`Verifier`].
+    ///
+    pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, TrustRootError>
+    where
+        R: TrustRoot,
+    {
+        let mut rekor_config: RekorConfiguration = Default::default();
+
+        // XX: At the time of writing, the ecosystem only uses one log. In the future, we
+        // may want to check multiple logs to mitigate split-view attacks.
+        rekor_config.base_path = trust.signing_config.tlog_urls[0].clone();
+
+        Self::new_with_rekor_config(rekor_config, trust.trust_root)
     }
 
     /// Verifies an input digest against the given Sigstore Bundle, ensuring conformance to the
@@ -110,14 +124,18 @@ impl Verifier {
             .try_into()
             .map_err(CertificateErrorKind::Malformed)?;
 
-        let _trusted_chain = self
+        let trusted_chain = self
             .cert_pool
             .verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
             .map_err(CertificateErrorKind::VerificationFailed)?;
 
         debug!("signing certificate chains back to trusted root");
 
-        // TODO(tnytown): verify SCT here, sigstore-rs#326
+        let sct_context =
+            CertificateEmbeddedSCT::new_with_verified_path(&materials.certificate, &trusted_chain)
+                .map_err(CertificateErrorKind::Sct)?;
+        verify_sct(&sct_context, &self.ctfe_keyring).map_err(CertificateErrorKind::Sct)?;
+        debug!("signing certificate's SCT is valid");
 
         // 2) Verify that the signing certificate belongs to the signer.
         policy.verify(&materials.certificate)?;
@@ -203,17 +221,9 @@ impl Verifier {
     }
 }
 
-impl Verifier {
-    /// Constructs an [`Verifier`] against the public-good trust root.
-    #[cfg(feature = "sigstore-trust-root")]
-    pub async fn production() -> SigstoreResult<Verifier> {
-        let updater = SigstoreTrustRoot::new(None).await?;
-
-        Verifier::new(Default::default(), updater)
-    }
-}
-
 pub mod blocking {
+    use std::error::Error;
+
     use super::{Verifier as AsyncVerifier, *};
 
     /// A synchronous Sigstore verifier.
@@ -224,16 +234,14 @@ pub mod blocking {
 
     impl Verifier {
         /// Constructs a synchronous Sigstore verifier.
-        ///
-        /// For verifications against the public-good trust root, use [`Verifier::production()`].
-        pub fn new<R: TrustRoot>(
-            rekor_config: RekorConfiguration,
-            trust_repo: R,
-        ) -> SigstoreResult<Self> {
+        pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, Box<dyn Error>>
+        where
+            R: TrustRoot,
+        {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?;
-            let inner = AsyncVerifier::new(rekor_config, trust_repo)?;
+            let inner = AsyncVerifier::new(trust)?;
 
             Ok(Self { rt, inner })
         }
@@ -273,19 +281,6 @@ pub mod blocking {
             io::copy(&mut input, &mut hasher).map_err(VerificationError::Input)?;
 
             self.verify_digest(hasher, bundle, policy, offline)
-        }
-    }
-
-    impl Verifier {
-        /// Constructs a synchronous [`Verifier`] against the public-good trust root.
-        #[cfg(feature = "sigstore-trust-root")]
-        pub fn production() -> SigstoreResult<Verifier> {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            let inner = rt.block_on(AsyncVerifier::production())?;
-
-            Ok(Verifier { inner, rt })
         }
     }
 }

@@ -133,6 +133,14 @@ pub enum SigstoreError {
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 
+    #[cfg(feature = "cert")]
+    #[error(transparent)]
+    KeyringError(#[from] crate::crypto::keyring::KeyringError),
+
+    #[cfg(any(feature = "sign", feature = "verify"))]
+    #[error(transparent)]
+    SCTError(#[from] crate::crypto::transparency::SCTError),
+
     // HACK(tnytown): Remove when we rework the Fulcio V2 endpoint.
     #[cfg(feature = "fulcio")]
     #[error(transparent)]
@@ -161,6 +169,9 @@ pub enum SigstoreError {
 
     #[error("No Signature Layer passed verification")]
     SigstoreNoVerifiedLayer,
+
+    #[error(transparent)]
+    TrustRootError(#[from] crate::trust::TrustRootError),
 
     #[cfg(feature = "sigstore-trust-root")]
     #[error(transparent)]

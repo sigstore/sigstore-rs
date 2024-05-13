@@ -1,4 +1,4 @@
-mod models;
+pub(crate) mod models;
 
 pub mod oauth;
 
@@ -237,7 +237,7 @@ impl FulcioClient {
             })
             .send()
             .await?;
-        let response = response.json().await?;
+        let response = response.error_for_status()?.json().await?;
 
         let (certs, detached_sct) = match response {
             SigningCertificate::SignedCertificateDetachedSct(ref sc) => {

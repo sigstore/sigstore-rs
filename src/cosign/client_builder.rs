@@ -14,14 +14,13 @@
 // limitations under the License.
 
 use tracing::info;
-use webpki::types::CertificateDer;
 
 use super::client::Client;
 use crate::crypto::SigningScheme;
 use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
-use crate::trust::TrustRoot;
+use crate::trust::{RawTrustRoot, TrustRoot};
 
 /// A builder that generates Client objects.
 ///
@@ -52,15 +51,15 @@ use crate::trust::TrustRoot;
 ///
 /// Each cached entry will automatically expire after 60 seconds.
 #[derive(Default)]
-pub struct ClientBuilder<'a> {
+pub struct ClientBuilder {
     oci_client_config: ClientConfig,
-    rekor_pub_key: Option<&'a [u8]>,
-    fulcio_certs: Vec<CertificateDer<'a>>,
+    rekor_pub_key: Option<CosignVerificationKey>,
+    fulcio_cert_pool: CertificatePool,
     #[cfg(feature = "cached-client")]
     enable_registry_caching: bool,
 }
 
-impl<'a> ClientBuilder<'a> {
+impl ClientBuilder {
     /// Enable caching of data returned from remote OCI registries
     #[cfg(feature = "cached-client")]
     pub fn enable_registry_caching(mut self) -> Self {
@@ -71,13 +70,16 @@ impl<'a> ClientBuilder<'a> {
     /// Optional - Configures the roots of trust.
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
-    /// See [crate::sigstore::TrustRoot] for more details on trust repositories.
-    pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
-        let rekor_keys = repo.rekor_keys()?;
-        if !rekor_keys.is_empty() {
-            self.rekor_pub_key = Some(rekor_keys[0]);
-        }
-        self.fulcio_certs = repo.fulcio_certs()?;
+    /// See [`TrustRoot`] for more details on trust repositories.
+    pub fn with_trust_repository<R: TrustRoot + RawTrustRoot + ?Sized>(
+        mut self,
+        repo: &R,
+    ) -> Result<Self> {
+        self.rekor_pub_key = Some(CosignVerificationKey::from_der(
+            &repo.raw_tlog_keys()[0],
+            &SigningScheme::default(),
+        )?);
+        self.fulcio_cert_pool = repo.ca_certs()?;
 
         Ok(self)
     }
@@ -92,24 +94,9 @@ impl<'a> ClientBuilder<'a> {
     }
 
     pub fn build(self) -> Result<Client> {
-        let rekor_pub_key = match self.rekor_pub_key {
-            None => {
-                info!("Rekor public key not provided. Rekor integration disabled");
-                None
-            }
-            Some(data) => Some(CosignVerificationKey::from_der(
-                data,
-                &SigningScheme::default(),
-            )?),
-        };
-
-        let fulcio_cert_pool = if self.fulcio_certs.is_empty() {
-            info!("No Fulcio cert has been provided. Fulcio integration disabled");
-            None
-        } else {
-            let cert_pool = CertificatePool::from_certificates(self.fulcio_certs, [])?;
-            Some(cert_pool)
-        };
+        if self.rekor_pub_key.is_none() {
+            info!("Rekor public key not provided. Rekor integration disabled");
+        }
 
         let oci_client =
             oci_distribution::client::Client::new(self.oci_client_config.clone().into());
@@ -136,8 +123,8 @@ impl<'a> ClientBuilder<'a> {
 
         Ok(Client {
             registry_client,
-            rekor_pub_key,
-            fulcio_cert_pool,
+            rekor_pub_key: self.rekor_pub_key,
+            fulcio_cert_pool: Some(self.fulcio_cert_pool),
         })
     }
 }

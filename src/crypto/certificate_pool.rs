@@ -23,7 +23,7 @@ use crate::errors::{Result as SigstoreResult, SigstoreError};
 
 /// A collection of trusted root certificates.
 #[derive(Default, Debug)]
-pub(crate) struct CertificatePool {
+pub struct CertificatePool {
     trusted_roots: Vec<TrustAnchor<'static>>,
     intermediates: Vec<CertificateDer<'static>>,
 }
@@ -33,7 +33,7 @@ impl CertificatePool {
     pub(crate) fn from_certificates<'r, 'i, R, I>(
         trusted_roots: R,
         untrusted_intermediates: I,
-    ) -> SigstoreResult<CertificatePool>
+    ) -> Result<CertificatePool, webpki::Error>
     where
         R: IntoIterator<Item = CertificateDer<'r>>,
         I: IntoIterator<Item = CertificateDer<'i>>,
