@@ -15,6 +15,7 @@
 
 use webpki::types::CertificateDer;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
 #[cfg(feature = "sigstore-trust-root")]
 pub mod sigstore;
 

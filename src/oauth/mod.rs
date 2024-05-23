@@ -15,5 +15,5 @@
 
 pub mod openidflow;
 
-mod token;
+pub mod token;
 pub use token::IdentityToken;
