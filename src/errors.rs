@@ -23,6 +23,7 @@ use crate::cosign::{
 };
 
 #[cfg(feature = "cosign")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cosign")))]
 #[derive(Error, Debug)]
 #[error("Several Signature Layers failed verification")]
 pub struct SigstoreVerifyConstraintsError<'a> {
@@ -30,6 +31,7 @@ pub struct SigstoreVerifyConstraintsError<'a> {
 }
 
 #[cfg(feature = "cosign")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cosign")))]
 #[derive(Error, Debug)]
 #[error("Several Constraints failed to apply on the SignatureLayer")]
 pub struct SigstoreApplicationConstraintsError<'a> {
@@ -135,6 +137,7 @@ pub enum SigstoreError {
 
     // HACK(tnytown): Remove when we rework the Fulcio V2 endpoint.
     #[cfg(feature = "fulcio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "fulcio")))]
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
 
@@ -163,6 +166,7 @@ pub enum SigstoreError {
     SigstoreNoVerifiedLayer,
 
     #[cfg(feature = "sigstore-trust-root")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[error(transparent)]
     TufError(#[from] Box<tough::error::Error>),
 

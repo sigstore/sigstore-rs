@@ -258,29 +258,37 @@
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod crypto;
 pub mod trust;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "mock-client")))]
 #[cfg(feature = "mock-client")]
 mod mock_client;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "cosign")))]
 #[cfg(feature = "cosign")]
 pub mod cosign;
 
 pub mod errors;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "fulcio")))]
 #[cfg(feature = "fulcio")]
 pub mod fulcio;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "oauth")))]
 #[cfg(feature = "oauth")]
 pub mod oauth;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
 #[cfg(feature = "registry")]
 pub mod registry;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "rekor")))]
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
+#[cfg_attr(docsrs, doc(cfg(any(feature = "sign", feature = "verify"))))]
 #[cfg(any(feature = "sign", feature = "verify"))]
 pub mod bundle;

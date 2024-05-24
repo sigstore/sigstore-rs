@@ -8,6 +8,9 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = ["full-native-tls", "cached-client", "sigstore-trust-root", "bundle"]
 wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js", "chrono/wasmbind"]
@@ -44,7 +47,13 @@ sign = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
 verify = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
 bundle = ["sign", "verify"]
 
-sigstore-trust-root = ["sigstore_protobuf_specs", "futures-util", "tough", "regex", "tokio/sync"]
+sigstore-trust-root = [
+  "sigstore_protobuf_specs",
+  "futures-util",
+  "tough",
+  "regex",
+  "tokio/sync",
+]
 
 cosign-native-tls = [
   "oci-distribution/native-tls",
@@ -76,7 +85,10 @@ async-trait = "0.1.52"
 base64 = "0.22.0"
 cached = { version = "0.51.3", optional = true, features = ["async"] }
 cfg-if = "1.0.0"
-chrono = { version = "0.4.27", default-features = false, features = ["now", "serde"] }
+chrono = { version = "0.4.27", default-features = false, features = [
+  "now",
+  "serde",
+] }
 const-oid = { version = "0.9.6", features = ["db"] }
 digest = { version = "0.10.3", default-features = false }
 ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
@@ -113,7 +125,10 @@ rsa = "0.9.2"
 scrypt = "0.11.0"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
-serde_with = { version = "3.4.0", features = ["base64", "json"], optional = true }
+serde_with = { version = "3.4.0", features = [
+  "base64",
+  "json",
+], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = { version = "2.0" }
 sigstore_protobuf_specs = { version = "0.3.2", optional = true }

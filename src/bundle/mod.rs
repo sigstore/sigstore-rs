@@ -18,8 +18,10 @@ pub use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle;
 
 mod models;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "sign")))]
 #[cfg(feature = "sign")]
 pub mod sign;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
 #[cfg(feature = "verify")]
 pub mod verify;

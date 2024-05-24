@@ -206,6 +206,7 @@ impl Verifier {
 impl Verifier {
     /// Constructs an [`Verifier`] against the public-good trust root.
     #[cfg(feature = "sigstore-trust-root")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     pub async fn production() -> SigstoreResult<Verifier> {
         let updater = SigstoreTrustRoot::new(None).await?;
 
@@ -279,6 +280,7 @@ pub mod blocking {
     impl Verifier {
         /// Constructs a synchronous [`Verifier`] against the public-good trust root.
         #[cfg(feature = "sigstore-trust-root")]
+        #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
         pub fn production() -> SigstoreResult<Verifier> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
