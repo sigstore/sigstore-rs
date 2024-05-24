@@ -30,24 +30,18 @@ pub trait TrustRoot {
 /// As it does not establish a trust root with TUF, users must initialize its materials themselves.
 #[derive(Debug, Default)]
 pub struct ManualTrustRoot<'a> {
-    pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
-    pub rekor_key: Option<Vec<u8>>,
+    pub fulcio_certs: Vec<CertificateDer<'a>>,
+    pub rekor_keys: Vec<Vec<u8>>,
     pub ctfe_keys: Vec<Vec<u8>>,
 }
 
 impl TrustRoot for ManualTrustRoot<'_> {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>> {
-        Ok(match &self.fulcio_certs {
-            Some(certs) => certs.clone(),
-            None => Vec::new(),
-        })
+        Ok(self.fulcio_certs.clone())
     }
 
     fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
-        Ok(match &self.rekor_key {
-            Some(key) => vec![&key[..]],
-            None => Vec::new(),
-        })
+        Ok(self.rekor_keys.iter().map(|key| &key[..]).collect())
     }
 
     fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {

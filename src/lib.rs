@@ -93,8 +93,8 @@
 //!   };
 //!
 //!   let mut repo = sigstore::trust::ManualTrustRoot {
-//!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
-//!     rekor_key: Some(rekor_pub_key),
+//!     fulcio_certs: vec![fulcio_cert.try_into().unwrap()],
+//!     rekor_keys: vec![rekor_pub_key],
 //!     ..Default::default()
 //!   };
 //!
