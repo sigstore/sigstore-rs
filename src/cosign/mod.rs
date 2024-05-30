@@ -566,8 +566,14 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[tokio::test]
     #[serial_test::serial]
     async fn sign_verify_image(#[case] signing_scheme: SigningScheme) {
-        let test_container = registry_image().start().await;
-        let port = test_container.get_host_port_ipv4(5000).await;
+        let test_container = registry_image()
+            .start()
+            .await
+            .expect("failed to start registry");
+        let port = test_container
+            .get_host_port_ipv4(5000)
+            .await
+            .expect("failed to get port");
 
         let mut client = ClientBuilder::default()
             .enable_registry_caching()
