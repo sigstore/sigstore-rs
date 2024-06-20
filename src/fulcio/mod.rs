@@ -1,4 +1,4 @@
-mod models;
+pub(crate) mod models;
 
 pub mod oauth;
 
