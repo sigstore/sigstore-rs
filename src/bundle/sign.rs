@@ -277,6 +277,7 @@ impl SigningContext {
 
     /// Returns a [`SigningContext`] configured against the public-good production Sigstore
     /// infrastructure.
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub async fn async_production() -> SigstoreResult<Self> {
         let trust_root = SigstoreTrustRoot::new(None).await?;
@@ -294,6 +295,7 @@ impl SigningContext {
     /// infrastructure.
     ///
     /// Async callers should use [`SigningContext::async_production`].
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn production() -> SigstoreResult<Self> {
         let rt = tokio::runtime::Builder::new_current_thread()
