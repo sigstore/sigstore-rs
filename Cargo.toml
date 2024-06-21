@@ -8,6 +8,10 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
 
+[workspace]
+members = ["tests/conformance"]
+resolver = "2"
+
 [features]
 default = ["full-native-tls", "cached-client", "sigstore-trust-root", "bundle"]
 wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js", "chrono/wasmbind"]
