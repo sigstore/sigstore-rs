@@ -14,7 +14,7 @@
 
 //! Types for Certificate Transparency validation.
 
-use const_oid::ObjectIdentifier;
+use const_oid::db::rfc6962::{CT_PRECERT_SCTS, CT_PRECERT_SIGNING_CERT};
 use digest::Digest;
 use thiserror::Error;
 use tls_codec::{SerializeBytes, TlsByteVecU16, TlsByteVecU24, TlsSerializeBytes, TlsSize};
@@ -34,18 +34,13 @@ use super::{
 };
 use crate::fulcio::SigningCertificateDetachedSCT;
 
-// TODO(tnytown): Migrate to const-oid's CT_PRECERT_SCTS when a new release is cut.
-const CT_PRECERT_SCTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11129.2.4.2");
-const PRECERTIFICATE_SIGNING_CERTIFICATE: ObjectIdentifier =
-    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11129.2.4.4");
-
 fn cert_is_preissuer(cert: &Certificate) -> bool {
     let eku: ExtendedKeyUsage = match cert.tbs_certificate.get() {
         Ok(Some((_, ext))) => ext,
         _ => return false,
     };
 
-    eku.0.contains(&PRECERTIFICATE_SIGNING_CERTIFICATE)
+    eku.0.contains(&CT_PRECERT_SIGNING_CERT)
 }
 
 // <https://github.com/sigstore/sigstore-python/blob/main/sigstore/_internal/sct.py>
