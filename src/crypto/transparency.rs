@@ -372,10 +372,10 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiPSlFi0CmFTfEjCUqF9HuCEcYXNK
 AaYalIJmBZ8yyezPjTqhxrKBpMnaocVtLJBI1eM3uXnQzQGAJdJ4gs9Fyw==
 -----END PUBLIC KEY-----"#;
 
-        let cert = Certificate::from_pem(&cert_pem).unwrap();
-        let chain = chain_pem.map(|c| Certificate::from_pem(&c).unwrap());
+        let cert = Certificate::from_pem(cert_pem).unwrap();
+        let chain = chain_pem.map(|c| Certificate::from_pem(c).unwrap());
         let sct = CertificateEmbeddedSCT::new(&cert, &chain).unwrap();
-        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
+        let ctfe_key: VerifyingKey = VerifyingKey::from_str(ctfe_pem).unwrap();
         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
 
         assert!(verify_sct(&sct, &keyring).is_ok());
@@ -391,7 +391,7 @@ mnuk5d670MTXR3p+LIAcxd5MhqIHpLmyYJ5mDKLEoZ/pC0nPuje3JueBcA==
 -----END PUBLIC KEY-----"#;
 
         let sct: SigningCertificateDetachedSCT = serde_json::from_str(sct_json).unwrap();
-        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
+        let ctfe_key: VerifyingKey = VerifyingKey::from_str(ctfe_pem).unwrap();
         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
 
         assert!(verify_sct(&sct, &keyring).is_ok());

@@ -26,6 +26,7 @@
 //! The [`ECDSAKeys`] has two enums due to their underlying elliptic curves, s.t.
 //! * `P256`
 //! * `P384`
+//!
 //! To have an uniform interface for all kinds of asymmetric keys, [`ECDSAKeys`]
 //! is also wrapped in [`super::super::SigStoreKeyPair`] enum.
 //!
@@ -483,7 +484,7 @@ mod tests {
     /// This test will do the following things:
     /// * Generate a ecdsa-P256 keypair.
     /// * Sign the MESSAGE with the private key and digest algorithm SHA256,
-    /// then generate a signature.
+    ///   then generate a signature.
     /// * Verify the signature using the public key.
     #[test]
     fn ecdsa_sign_and_verify() {

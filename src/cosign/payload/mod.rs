@@ -15,8 +15,7 @@
 
 //! This module defines different kinds of payload to be signed
 //! in cosign. Now it supports:
-//! * `SimpleSigning`: Refer to
-//! <https://github.com/containers/image/blob/a5061e5a5f00333ea3a92e7103effd11c6e2f51d/docs/containers-signature.5.md#json-data-format>
+//! * `SimpleSigning`: Refer to <https://github.com/containers/image/blob/a5061e5a5f00333ea3a92e7103effd11c6e2f51d/docs/containers-signature.5.md#json-data-format>
 
 pub mod simple_signing;
 pub use simple_signing::SimpleSigning;
