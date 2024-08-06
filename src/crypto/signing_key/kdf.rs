@@ -33,7 +33,9 @@ pub const SALT_SIZE: u32 = 32;
 pub const NAME_SCRYPT: &str = "scrypt";
 
 /// Scrypt algorithm parameter log2(n)
-pub const SCRYPT_N: u32 = 32768;
+pub const SCRYPT_N_LOW: u32 = 32768;
+
+pub const SCRYPT_N_HIGH: u32 = 65536;
 
 /// Scrypt algorithm parameter r
 pub const SCRYPT_R: u32 = 8;
@@ -95,7 +97,7 @@ impl Default for ScryptKDF {
         Self {
             name: NAME_SCRYPT.into(),
             params: ScryptParams {
-                n: SCRYPT_N,
+                n: SCRYPT_N_LOW,
                 r: SCRYPT_R,
                 p: SCRYPT_P,
             },
@@ -122,7 +124,10 @@ impl ScryptKDF {
     /// Check whether the given params is as the default,
     /// to avoid a DoS attack.
     fn check_params(&self) -> Result<()> {
-        match self.params.n == SCRYPT_N && self.params.r == SCRYPT_R && self.params.p == SCRYPT_P {
+        match (self.params.n == SCRYPT_N_LOW || self.params.n == SCRYPT_N_HIGH)
+            && self.params.r == SCRYPT_R
+            && self.params.p == SCRYPT_P
+        {
             true => Ok(()),
             false => Err(SigstoreError::PrivateKeyDecryptError(
                 "Unexpected kdf parameters".into(),

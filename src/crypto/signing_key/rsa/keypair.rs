@@ -231,13 +231,10 @@ impl KeyPair for RSAKeys {
     /// Return the encrypted asn.1 pkcs8 private key.
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<zeroize::Zeroizing<String>> {
         let der = self.private_key_to_der()?;
-        let pem = match password.len() {
-            0 => pem::Pem::new(PRIVATE_KEY_PEM_LABEL, der.to_vec()),
-            _ => pem::Pem::new(
-                SIGSTORE_PRIVATE_KEY_PEM_LABEL,
-                kdf::encrypt(&der, password)?,
-            ),
-        };
+        let pem = pem::Pem::new(
+            SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+            kdf::encrypt(&der, password)?,
+        );
         let pem = pem::encode(&pem);
         Ok(zeroize::Zeroizing::new(pem))
     }
@@ -283,6 +280,7 @@ mod tests {
     use super::RSAKeys;
 
     const PASSWORD: &[u8] = b"123";
+    const EMPTY_PASSWORD: &[u8] = b"";
     const KEY_SIZE: usize = 2048;
 
     /// This test will try to read an unencrypted rsa
@@ -324,6 +322,19 @@ mod tests {
         );
     }
 
+    /// This test will try to encrypt a rsa keypair and
+    /// return the pem-encoded contents. The bit size
+    /// of the rsa key is [`KEY_SIZE`].
+    #[test]
+    fn rsa_to_encrypted_pem_empty_password() {
+        let key = RSAKeys::new(KEY_SIZE).expect("create rsa keys failed.");
+        let key = key.private_key_to_encrypted_pem(EMPTY_PASSWORD);
+        assert!(
+            key.is_ok(),
+            "can not export private key in encrypted PEM format."
+        );
+    }
+
     /// This test will generate a RSAKeys, encode the private key
     /// it into pem, and decode a new key from the generated pem-encoded
     /// private key.
@@ -334,6 +345,32 @@ mod tests {
             .private_key_to_pem()
             .expect("export private key to PEM format failed.");
         let key = RSAKeys::from_pem(key.as_bytes());
+        assert!(key.is_ok(), "can not create RSAKeys from PEM string.");
+    }
+
+    /// This test will generate a RSAKeys, encode the private key
+    /// it into pem, and decode a new key from the generated pem-encoded
+    /// private key.
+    #[test]
+    fn rsa_to_and_from_encrypted_pem() {
+        let key = RSAKeys::new(KEY_SIZE).expect("create rsa keys failed.");
+        let key = key
+            .private_key_to_encrypted_pem(PASSWORD)
+            .expect("export private key to PEM format failed.");
+        let key = RSAKeys::from_encrypted_pem(key.as_bytes(), PASSWORD);
+        assert!(key.is_ok(), "can not create RSAKeys from PEM string.");
+    }
+
+    /// This test will generate a RSAKeys, encode the private key
+    /// it into pem, and decode a new key from the generated pem-encoded
+    /// private key.
+    #[test]
+    fn rsa_to_and_from_encrypted_pem_empty_password() {
+        let key = RSAKeys::new(KEY_SIZE).expect("create rsa keys failed.");
+        let key = key
+            .private_key_to_encrypted_pem(EMPTY_PASSWORD)
+            .expect("export private key to PEM format failed.");
+        let key = RSAKeys::from_encrypted_pem(key.as_bytes(), EMPTY_PASSWORD);
         assert!(key.is_ok(), "can not create RSAKeys from PEM string.");
     }
 
