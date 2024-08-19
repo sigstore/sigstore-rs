@@ -11,8 +11,8 @@ pub enum MerkleProofError {
     IndexGtTreeSize,
     UnexpectedNonEmptyProof,
     UnexpectedEmptyProof,
-    NewTreeSmaller { new: usize, old: usize },
-    WrongProofSize { got: usize, want: usize },
+    NewTreeSmaller { new: u64, old: u64 },
+    WrongProofSize { got: u64, want: u64 },
     WrongEmptyTreeHash,
 }
 
@@ -29,9 +29,9 @@ where
     /// with the specified `leaf_hash` and `index`, relatively to the tree of the given `tree_size`
     /// and `root_hash`. Requires `0 <= index < tree_size`.
     fn verify_inclusion(
-        index: usize,
+        index: u64,
         leaf_hash: &O,
-        tree_size: usize,
+        tree_size: u64,
         proof_hashes: &[O],
         root_hash: &O,
     ) -> Result<(), MerkleProofError> {
@@ -52,26 +52,26 @@ where
     /// given size, provided a leaf index and hash with the corresponding inclusion
     /// proof. Requires `0 <= index < tree_size`.
     fn root_from_inclusion_proof(
-        index: usize,
+        index: u64,
         leaf_hash: &O,
-        tree_size: usize,
+        tree_size: u64,
         proof_hashes: &[O],
     ) -> Result<Box<O>, MerkleProofError> {
         if index >= tree_size {
             return Err(IndexGtTreeSize);
         }
         let (inner, border) = Self::decomp_inclusion_proof(index, tree_size);
-        match (proof_hashes.len(), inner + border) {
+        match (proof_hashes.len() as u64, inner + border) {
             (got, want) if got != want => {
                 return Err(WrongProofSize {
-                    got: proof_hashes.len(),
+                    got: proof_hashes.len() as u64,
                     want: inner + border,
                 });
             }
             _ => {}
         }
-        let res_left = Self::chain_inner(leaf_hash, &proof_hashes[..inner], index);
-        let res = Self::chain_border_right(&res_left, &proof_hashes[inner..]);
+        let res_left = Self::chain_inner(leaf_hash, &proof_hashes[..inner as usize], index);
+        let res = Self::chain_border_right(&res_left, &proof_hashes[inner as usize..]);
         Ok(Box::new(res))
     }
 
@@ -79,8 +79,8 @@ where
     // between the passed in tree sizes, with respect to the corresponding root
     // hashes. Requires `0 <= old_size <= new_size`..
     fn verify_consistency(
-        old_size: usize,
-        new_size: usize,
+        old_size: u64,
+        new_size: u64,
         proof_hashes: &[O],
         old_root: &O,
         new_root: &O,
@@ -117,7 +117,7 @@ where
             (Ordering::Less, false, false) => {}
         }
 
-        let shift = old_size.trailing_zeros() as usize;
+        let shift = old_size.trailing_zeros() as u64;
         let (inner, border) = Self::decomp_inclusion_proof(old_size - 1, new_size);
         let inner = inner - shift;
 
@@ -129,24 +129,24 @@ where
             (&proof_hashes[0], 1)
         };
 
-        match (proof_hashes.len(), start + inner + border) {
+        match (proof_hashes.len() as u64, start + inner + border) {
             (got, want) if got != want => return Err(WrongProofSize { got, want }),
             _ => {}
         }
 
-        let proof = &proof_hashes[start..];
+        let proof = &proof_hashes[start as usize..];
         let mask = (old_size - 1) >> shift;
 
         // verify the old hash is correct
-        let hash1 = Self::chain_inner_right(seed, &proof[..inner], mask);
-        let hash1 = Self::chain_border_right(&hash1, &proof[inner..]);
+        let hash1 = Self::chain_inner_right(seed, &proof[..inner as usize], mask);
+        let hash1 = Self::chain_border_right(&hash1, &proof[inner as usize..]);
         Self::verify_match(&hash1, old_root).map_err(|_| MismatchedRoot {
             got: old_root.encode_hex(),
             expected: hash1.encode_hex(),
         })?;
         // verify the new hash is correct
-        let hash2 = Self::chain_inner(seed, &proof[..inner], mask);
-        let hash2 = Self::chain_border_right(&hash2, &proof[inner..]);
+        let hash2 = Self::chain_inner(seed, &proof[..inner as usize], mask);
+        let hash2 = Self::chain_border_right(&hash2, &proof[inner as usize..]);
         Self::verify_match(&hash2, new_root).map_err(|_| MismatchedRoot {
             got: new_root.encode_hex(),
             expected: hash2.encode_hex(),
@@ -158,7 +158,7 @@ where
     /// border. Assumes `proof_hashes` are ordered from lower levels to upper, and
     /// `seed` is the initial subtree/leaf hash on the path located at the specified
     /// `index` on its level.
-    fn chain_inner(seed: &O, proof_hashes: &[O], index: usize) -> O {
+    fn chain_inner(seed: &O, proof_hashes: &[O], index: u64) -> O {
         proof_hashes
             .iter()
             .enumerate()
@@ -175,7 +175,7 @@ where
     /// `chain_inner_right` computes a subtree hash like `chain_inner`, but only takes
     /// hashes to the left from the path into consideration, which effectively means
     /// the result is a hash of the corresponding earlier version of this subtree.
-    fn chain_inner_right(seed: &O, proof_hashes: &[O], index: usize) -> O {
+    fn chain_inner_right(seed: &O, proof_hashes: &[O], index: u64) -> O {
         proof_hashes
             .iter()
             .enumerate()
@@ -201,14 +201,14 @@ where
     /// point between them is where paths to leaves `index` and `tree_size-1` diverge.
     /// Returns lengths of the bottom and upper proof parts correspondingly. The sum
     /// of the two determines the correct length of the inclusion proof.
-    fn decomp_inclusion_proof(index: usize, tree_size: usize) -> (usize, usize) {
-        let inner: usize = Self::inner_proof_size(index, tree_size);
-        let border = (index >> inner).count_ones() as usize;
+    fn decomp_inclusion_proof(index: u64, tree_size: u64) -> (u64, u64) {
+        let inner: u64 = Self::inner_proof_size(index, tree_size);
+        let border = (index >> inner).count_ones() as u64;
         (inner, border)
     }
 
-    fn inner_proof_size(index: usize, tree_size: usize) -> usize {
-        u64::BITS as usize - ((index ^ (tree_size - 1)).leading_zeros() as usize)
+    fn inner_proof_size(index: u64, tree_size: u64) -> u64 {
+        u64::BITS as u64 - ((index ^ (tree_size - 1)).leading_zeros() as u64)
     }
 }
 
@@ -222,23 +222,23 @@ mod test_verify {
 
     #[derive(Debug)]
     struct InclusionProofTestVector<'a> {
-        leaf: usize,
-        size: usize,
+        leaf: u64,
+        size: u64,
         proof: &'a [[u8; 32]],
     }
 
     #[derive(Debug)]
     struct ConsistencyTestVector<'a> {
-        size1: usize,
-        size2: usize,
+        size1: u64,
+        size2: u64,
         proof: &'a [[u8; 32]],
     }
 
     // InclusionProbe is a parameter set for inclusion proof verification.
     #[derive(Debug)]
     struct InclusionProbe {
-        leaf_index: usize,
-        tree_size: usize,
+        leaf_index: u64,
+        tree_size: u64,
         root: [u8; 32],
         leaf_hash: [u8; 32],
         proof: Vec<[u8; 32]>,
@@ -248,8 +248,8 @@ mod test_verify {
     // ConsistencyProbe is a parameter set for consistency proof verification.
     #[derive(Debug)]
     struct ConsistencyProbe<'a> {
-        size1: usize,
-        size2: usize,
+        size1: u64,
+        size2: u64,
         root1: &'a [u8; 32],
         root2: &'a [u8; 32],
         proof: Vec<[u8; 32]>,
@@ -377,8 +377,8 @@ mod test_verify {
     ];
 
     fn corrupt_inclusion_proof(
-        leaf_index: usize,
-        tree_size: usize,
+        leaf_index: u64,
+        tree_size: u64,
         proof: &[[u8; 32]],
         root: &[u8; 32],
         leaf_hash: &[u8; 32],
@@ -487,8 +487,8 @@ mod test_verify {
     }
 
     fn verifier_check(
-        leaf_index: usize,
-        tree_size: usize,
+        leaf_index: u64,
+        tree_size: u64,
         proof_hashes: &[[u8; 32]],
         root: &[u8; 32],
         leaf_hash: &[u8; 32],
@@ -535,8 +535,8 @@ mod test_verify {
     }
 
     fn verifier_consistency_check(
-        size1: usize,
-        size2: usize,
+        size1: u64,
+        size2: u64,
         proof: &[[u8; 32]],
         root1: &[u8; 32],
         root2: &[u8; 32],
@@ -568,8 +568,8 @@ mod test_verify {
     }
 
     fn corrupt_consistency_proof<'a>(
-        size1: usize,
-        size2: usize,
+        size1: u64,
+        size2: u64,
         root1: &'a [u8; 32],
         root2: &'a [u8; 32],
         proof: &[[u8; 32]],
@@ -800,8 +800,13 @@ mod test_verify {
         for i in 1..6 {
             let p = &INCLUSION_PROOFS[i];
             let leaf_hash = &Rfc6269Default::hash_leaf(LEAVES[i]).into();
-            let result =
-                verifier_check(p.leaf - 1, p.size, &p.proof, &ROOTS[p.size - 1], leaf_hash);
+            let result = verifier_check(
+                p.leaf - 1,
+                p.size,
+                &p.proof,
+                &ROOTS[p.size as usize - 1],
+                leaf_hash,
+            );
             assert!(result.is_err(), "{result:?}")
         }
     }
@@ -848,8 +853,8 @@ mod test_verify {
                 p.size1,
                 p.size2,
                 p.proof,
-                &ROOTS[p.size1 - 1],
-                &ROOTS[p.size2 - 1],
+                &ROOTS[p.size1 as usize - 1],
+                &ROOTS[p.size2 as usize - 1],
             );
             assert!(result.is_ok(), "failed with error: {result:?}");
         }

@@ -83,9 +83,9 @@ impl InclusionProof {
         checkpoint.is_valid_for_proof(&root_hash, self.tree_size as u64)?;
 
         Rfc6269Default::verify_inclusion(
-            self.log_index as usize,
+            self.log_index as u64,
             &entry_hash,
-            self.tree_size as usize,
+            self.tree_size as u64,
             &proof_hashes,
             &root_hash,
         )

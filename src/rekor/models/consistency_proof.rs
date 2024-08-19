@@ -46,7 +46,13 @@ impl ConsistencyProof {
         let old_root = hex_to_hash_output(old_root)?;
         let new_root = hex_to_hash_output(&self.root_hash)?;
 
-        Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
-            .map_err(ConsistencyProofError)
+        Rfc6269Default::verify_consistency(
+            old_size as u64,
+            new_size as u64,
+            &proof_hashes,
+            &old_root,
+            &new_root,
+        )
+        .map_err(ConsistencyProofError)
     }
 }

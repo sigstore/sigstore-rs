@@ -165,8 +165,8 @@ impl Checkpoint {
     ) -> Result<(), SigstoreError> {
         // Delegate implementation as trivial consistency proof.
         Rfc6269Default::verify_consistency(
-            self.note.size as usize,
-            proof_tree_size as usize,
+            self.note.size,
+            proof_tree_size,
             &[],
             &self.note.hash.into(),
             proof_root_hash,
