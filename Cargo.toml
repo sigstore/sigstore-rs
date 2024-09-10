@@ -92,23 +92,23 @@ mock-client = []
 cached-client = ["cached"]
 
 [dependencies]
-async-trait = "0.1.52"
-base64 = "0.22.0"
-cached = { version = "0.53.1", optional = true, features = ["async"] }
+async-trait = "0.1"
+base64 = "0.22"
+cached = { version = "0.53", optional = true, features = ["async"] }
 cfg-if = "1.0.0"
-chrono = { version = "0.4.27", default-features = false, features = [
+chrono = { version = "0.4", default-features = false, features = [
   "now",
   "serde",
 ] }
-const-oid = { version = "0.9.6", features = ["db"] }
-digest = { version = "0.10.3", default-features = false }
-ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
-ed25519 = { version = "2.2.1", features = ["alloc"] }
+const-oid = { version = "0.9", features = ["db"] }
+digest = { version = "0.10", default-features = false }
+ecdsa = { version = "0.16", features = ["pkcs8", "digest", "der", "signing"] }
+ed25519 = { version = "2.2", features = ["alloc"] }
 ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
-elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
+elliptic-curve = { version = "0.13", features = ["arithmetic", "pem"] }
 futures = "0.3"
-futures-util = { version = "0.3.30", optional = true }
-lazy_static = "1.4.0"
+futures-util = { version = "0.3", optional = true }
+lazy_static = "1.4"
 oci-distribution = { version = "0.11", default-features = false, optional = true }
 olpc-cjson = { version = "0.1", optional = true }
 openidconnect = { version = "3.0", default-features = false, features = [
@@ -116,17 +116,12 @@ openidconnect = { version = "3.0", default-features = false, features = [
 ], optional = true }
 p256 = "0.13"
 p384 = "0.13"
-webbrowser = "1.0.1"
+webbrowser = "1.0"
 pem = { version = "3.0", features = ["serde"] }
-pkcs1 = { version = "0.7.5", features = ["std"] }
-pkcs8 = { version = "0.10.2", features = [
-  "pem",
-  "alloc",
-  "pkcs5",
-  "encryption",
-] }
-rand = { version = "0.8.5", features = ["getrandom", "std"] }
-getrandom = "0.2.8"
+pkcs1 = { version = "0.7", features = ["std"] }
+pkcs8 = { version = "0.10", features = ["pem", "alloc", "pkcs5", "encryption"] }
+rand = { version = "0.8", features = ["getrandom", "std"] }
+getrandom = "0.2"
 regex = { version = "1.5.5", optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
@@ -137,46 +132,43 @@ reqwest = { version = "0.12", default-features = false, features = [
 # TUF sigstore repository will fail at runtime because the old version of reqwest
 # will be compiled withtout TLS support.
 reqwest_0_11 = { package = "reqwest", version = "0.11", default-features = false, optional = true }
-rsa = "0.9.2"
-scrypt = "0.11.0"
-serde = { version = "1.0.136", features = ["derive"] }
-serde_json = "1.0.79"
-serde_with = { version = "3.4.0", features = [
-  "base64",
-  "json",
-], optional = true }
-sha2 = { version = "0.10.6", features = ["oid"] }
+rsa = "0.9"
+scrypt = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_with = { version = "3.4", features = ["base64", "json"], optional = true }
+sha2 = { version = "0.10", features = ["oid"] }
 signature = { version = "2.0" }
-sigstore_protobuf_specs = { version = "0.3.2", optional = true }
-thiserror = "1.0.30"
-tokio = { version = "1.17.0", features = ["rt"] }
-tokio-util = { version = "0.7.10", features = ["io-util"] }
-tough = { version = "0.18.0", features = ["http"], optional = true }
-tracing = "0.1.31"
-url = "2.2.2"
-x509-cert = { version = "0.2.5", features = ["builder", "pem", "std", "sct"] }
-crypto_secretbox = "0.1.1"
-zeroize = "1.5.7"
-rustls-webpki = { version = "0.102.1", features = ["alloc"] }
-serde_repr = "0.1.16"
-hex = "0.4.3"
-json-syntax = { version = "0.12.2", features = ["canonicalize", "serde"] }
-tls_codec = { version = "0.4.1", features = ["derive"] }
-ring = "0.17.6"
+sigstore_protobuf_specs = { version = "0.3", optional = true }
+thiserror = "1.0"
+tokio = { version = "1", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["io-util"] }
+tough = { version = "0.18", features = ["http"], optional = true }
+tracing = "0.1"
+url = "2.2"
+x509-cert = { version = "0.2", features = ["builder", "pem", "std", "sct"] }
+crypto_secretbox = "0.1"
+zeroize = "1.5"
+rustls-webpki = { version = "0.102", features = ["alloc"] }
+serde_repr = "0.1"
+hex = "0.4"
+json-syntax = { version = "0.12", features = ["canonicalize", "serde"] }
+tls_codec = { version = "0.4", features = ["derive"] }
+ring = "0.17"
 
 [dev-dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
-assert-json-diff = "2.0.2"
-chrono = "0.4.31"
-clap = { version = "4.0.8", features = ["derive"] }
-docker_credential = "1.1.0"
-openssl = "0.10.38"
-rstest = "0.22.0"
-serial_test = "3.0.0"
-tempfile = "3.3.0"
+assert-json-diff = "2.0"
+chrono = "0.4"
+clap = { version = "4.0", features = ["derive"] }
+docker_credential = "1.1"
+openssl = "0.10"
+rstest = "0.22"
+serial_test = "3.0"
+tempfile = "3.3"
 testcontainers = "0.22"
-tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread"] }
-tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # cosign example mappings
 
