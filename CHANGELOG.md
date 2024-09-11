@@ -1,3 +1,73 @@
+# v0.10.0
+
+## What's Changed
+
+- chore(deps): Update oci-distribution requirement from 0.10 to 0.11 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/343
+- verify: init by @jleightcap in https://github.com/sigstore/sigstore-rs/pull/311
+- chore(deps): Update rstest requirement from 0.18.1 to 0.19.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/351
+- chore(deps): Bump actions/checkout from 4.1.2 to 4.1.5 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/360
+- fix linter warning by @flavio in https://github.com/sigstore/sigstore-rs/pull/361
+- chore(deps): Update cached requirement from 0.49.2 to 0.51.3 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/362
+- chore(deps): Update webbrowser requirement from 0.8.12 to 1.0.1 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/359
+- chore(deps): Bump actions/checkout from 4.1.5 to 4.1.6 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/363
+- chore(deps): Update testcontainers requirement from 0.15 to 0.16 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/355
+- chore(deps): change provider of cargo-audit GH action by @flavio in https://github.com/sigstore/sigstore-rs/pull/364
+- fix docs by @flavio in https://github.com/sigstore/sigstore-rs/pull/366
+- fix: allow ManualTrustRoot to have multiple rekor keys by @flavio in https://github.com/sigstore/sigstore-rs/pull/365
+- build(deps): update testcontainers requirement from 0.16 to 0.17 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/368
+- build(deps): update rstest requirement from 0.19.0 to 0.21.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/370
+- build(deps): bump actions/checkout from 4.1.6 to 4.1.7 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/372
+- build(deps): update testcontainers requirement from 0.17 to 0.18 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/371
+- Signed Certificate Timestamp verification by @tnytown in https://github.com/sigstore/sigstore-rs/pull/326
+- transparency: pull OID constants from `const-oid` by @tnytown in https://github.com/sigstore/sigstore-rs/pull/374
+- build(deps): update testcontainers requirement from 0.18 to 0.19 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/375
+- build(deps): update cached requirement from 0.51.3 to 0.52.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/377
+- build(deps): update testcontainers requirement from 0.19 to 0.20 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/376
+- build(deps): update cached requirement from 0.52.0 to 0.53.1 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/379
+- build(deps): update rstest requirement from 0.21.0 to 0.22.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/383
+- build(deps): update testcontainers requirement from 0.20 to 0.21 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/382
+- build(deps): update testcontainers requirement from 0.21 to 0.22 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/386
+- fix: Allow empty passwords for encrypted pem files by @gmpinder in https://github.com/sigstore/sigstore-rs/pull/381
+- build(deps): update tough requirement from 0.17.1 to 0.18.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/389
+- dependency cleanup by @flavio in https://github.com/sigstore/sigstore-rs/pull/390
+- chore: update cargo audit ignore list by @flavio in https://github.com/sigstore/sigstore-rs/pull/387
+
+## New Contributors
+
+- @tnytown made their first contribution in https://github.com/sigstore/sigstore-rs/pull/326
+- @gmpinder made their first contribution in https://github.com/sigstore/sigstore-rs/pull/381
+
+**Full Changelog**: https://github.com/sigstore/sigstore-rs/compare/v0.9.0...v0.10.0
+
+# v0.9.0
+
+## What's Changed
+
+- sign: init by @jleightcap in https://github.com/sigstore/sigstore-rs/pull/310
+- cargo audit: ignore RUSTSEC-2023-0071 by @jleightcap in https://github.com/sigstore/sigstore-rs/pull/321
+- chore(deps): Update json-syntax requirement from 0.9.6 to 0.10.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/319
+- chore(deps): Update cached requirement from 0.46.0 to 0.47.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/323
+- chore(deps): Update serial_test requirement from 2.0.0 to 3.0.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/322
+- dep: update rustls-webpki, fold in pki_types by @jleightcap in https://github.com/sigstore/sigstore-rs/pull/324
+- chore(deps): Update cached requirement from 0.47.0 to 0.48.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/325
+- chore(deps): Update json-syntax requirement from 0.10.0 to 0.11.1 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/327
+- chore(deps): Update cached requirement from 0.48.0 to 0.49.2 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/329
+- chore(deps): Update json-syntax requirement from 0.11.1 to 0.12.2 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/330
+- lint: fix lint error of chrono and tokio by @Xynnn007 in https://github.com/sigstore/sigstore-rs/pull/334
+- chore(deps): Update base64 requirement from 0.21.0 to 0.22.0 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/332
+- The `Repository` trait and `ManualRepository` struct no longer require a feature flag by @tannaurus in https://github.com/sigstore/sigstore-rs/pull/331
+- chore(deps): Bump actions/checkout from 4.1.1 to 4.1.2 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/336
+- chore(deps): Update reqwest requirement from 0.11 to 0.12 by @dependabot in https://github.com/sigstore/sigstore-rs/pull/341
+- update tough dep by @astoycos in https://github.com/sigstore/sigstore-rs/pull/340
+- Tag the 0.9.0 release by @flavio in https://github.com/sigstore/sigstore-rs/pull/342
+
+## New Contributors
+
+- @tannaurus made their first contribution in https://github.com/sigstore/sigstore-rs/pull/331
+- @astoycos made their first contribution in https://github.com/sigstore/sigstore-rs/pull/340
+
+**Full Changelog**: https://github.com/sigstore/sigstore-rs/compare/v0.8.0...v0.9.0
+
 # v0.8.0
 
 ## What's Changed
