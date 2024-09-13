@@ -9,7 +9,6 @@ use digest::Output;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Write;
 use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 
 /// A checkpoint (also known as a signed tree head) that served by the log.
 /// It represents the log state at a point in time.
@@ -68,10 +67,8 @@ pub enum ParseCheckpointError {
     DecodeError(String),
 }
 
-impl FromStr for Checkpoint {
-    type Err = ParseCheckpointError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl Checkpoint {
+    pub(crate) fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
         // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
 
         let checkpoint = s.trim_start_matches('"').trim_end_matches('"');
@@ -80,10 +77,42 @@ impl FromStr for Checkpoint {
             return Err(DecodeError("unexpected checkpoint format".to_string()));
         };
 
-        let signature = signature.parse()?;
+        let signature = CheckpointSignature::decode(signature)?;
         let note = CheckpointNote::unmarshal(note)?;
 
         Ok(Checkpoint { note, signature })
+    }
+
+    pub(crate) fn encode(&self) -> String {
+        let note = self.note.marshal();
+        let signature = self.signature.encode();
+        format!("{note}\n{signature}")
+    }
+
+    /// This method can be used to verify that the checkpoint was issued by the log with the
+    /// public key `rekor_key`.
+    pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+        rekor_key.verify_signature(
+            Signature::Raw(&self.signature.raw),
+            self.note.marshal().as_bytes(),
+        )
+    }
+
+    /// Checks if the checkpoint and inclusion proof are valid together.
+    pub(crate) fn is_valid_for_proof(
+        &self,
+        proof_root_hash: &Output<Rfc6269Default>,
+        proof_tree_size: u64,
+    ) -> Result<(), SigstoreError> {
+        // Delegate implementation as trivial consistency proof.
+        Rfc6269Default::verify_consistency(
+            self.note.size,
+            proof_tree_size,
+            &[],
+            &self.note.hash.into(),
+            proof_root_hash,
+        )
+        .map_err(ConsistencyProofError)
     }
 }
 
@@ -139,48 +168,12 @@ impl CheckpointNote {
     }
 }
 
-impl ToString for Checkpoint {
-    fn to_string(&self) -> String {
-        let note = self.note.marshal();
-        let signature = self.signature.to_string();
-        format!("{note}\n{signature}")
-    }
-}
-
-impl Checkpoint {
-    /// This method can be used to verify that the checkpoint was issued by the log with the
-    /// public key `rekor_key`.
-    pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
-        rekor_key.verify_signature(
-            Signature::Raw(&self.signature.raw),
-            self.note.marshal().as_bytes(),
-        )
-    }
-
-    /// Checks if the checkpoint and inclusion proof are valid together.
-    pub(crate) fn is_valid_for_proof(
-        &self,
-        proof_root_hash: &Output<Rfc6269Default>,
-        proof_tree_size: u64,
-    ) -> Result<(), SigstoreError> {
-        // Delegate implementation as trivial consistency proof.
-        Rfc6269Default::verify_consistency(
-            self.note.size,
-            proof_tree_size,
-            &[],
-            &self.note.hash.into(),
-            proof_root_hash,
-        )
-        .map_err(ConsistencyProofError)
-    }
-}
-
 impl Serialize for Checkpoint {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.to_string().serialize(serializer)
+        self.encode().serialize(serializer)
     }
 }
 
@@ -190,22 +183,18 @@ impl<'de> Deserialize<'de> for Checkpoint {
         D: Deserializer<'de>,
     {
         <String>::deserialize(deserializer).and_then(|s| {
-            Checkpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
+            Checkpoint::decode(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
         })
     }
 }
 
-impl ToString for CheckpointSignature {
-    fn to_string(&self) -> String {
+impl CheckpointSignature {
+    fn encode(&self) -> String {
         let sig_b64 =
             BASE64_STANDARD.encode([self.key_fingerprint.as_slice(), self.raw.as_slice()].concat());
         format!("— {} {sig_b64}\n", self.name)
     }
-}
-
-impl FromStr for CheckpointSignature {
-    type Err = ParseCheckpointError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
         let s = s.trim_start_matches('\n').trim_end_matches('\n');
         let [_, name, sig_b64] = s.split(' ').collect::<Vec<_>>()[..] else {
             return Err(DecodeError(format!("unexpected signature format {s:?}")));
@@ -370,7 +359,6 @@ mod test {
     #[cfg(test)]
     mod test_checkpoint_signature {
         use crate::rekor::models::checkpoint::CheckpointSignature;
-        use std::str::FromStr;
 
         #[test]
         fn test_to_string_valid_with_url_name() {
@@ -379,7 +367,7 @@ mod test {
                 key_fingerprint: [0; 4],
                 raw: vec![1; 32],
             }
-            .to_string();
+            .encode();
             let expected = "— log.example.org AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
             assert_eq!(got, expected)
         }
@@ -391,7 +379,7 @@ mod test {
                 key_fingerprint: [0; 4],
                 raw: vec![1; 32],
             }
-            .to_string();
+            .encode();
             let expected = "— 815f6c60aab9 AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
             assert_eq!(got, expected)
         }
@@ -404,7 +392,7 @@ mod test {
                 key_fingerprint: [0; 4],
                 raw: vec![1; 32],
             };
-            let got = CheckpointSignature::from_str(input);
+            let got = CheckpointSignature::decode(input);
             assert_eq!(got, Ok(expected))
         }
 
@@ -416,7 +404,7 @@ mod test {
                 key_fingerprint: [0; 4],
                 raw: vec![1; 32],
             };
-            let got = CheckpointSignature::from_str(input);
+            let got = CheckpointSignature::decode(input);
             assert_eq!(got, Ok(expected))
         }
 
@@ -428,14 +416,14 @@ mod test {
                 key_fingerprint: [0; 4],
                 raw: vec![1; 32],
             };
-            let got = CheckpointSignature::from_str(input);
+            let got = CheckpointSignature::decode(input);
             assert_eq!(got, Ok(expected))
         }
 
         #[test]
         fn test_from_str_invalid_with_spaces_in_name() {
             let input = "— Foo Bar AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
-            let got = CheckpointSignature::from_str(input);
+            let got = CheckpointSignature::decode(input);
             assert!(got.is_err())
         }
     }

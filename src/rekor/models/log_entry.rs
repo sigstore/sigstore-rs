@@ -146,7 +146,7 @@ impl LogEntry {
             .as_ref()
             .ok_or(UnexpectedError("missing inclusion proof".to_string()))
             .and_then(|proof| {
-                Checkpoint::from_str(&proof.checkpoint)
+                Checkpoint::decode(&proof.checkpoint)
                     .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
                     .map(|checkpoint| {
                         InclusionProof2::new(
