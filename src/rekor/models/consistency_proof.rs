@@ -29,11 +29,13 @@ impl ConsistencyProof {
     }
 
     /// Verify this consistency proof against the given parameters.
+    /// If `new_root` is `Some` then this root will be used in the verification. If it is `None` then the root in `self.root_hash` is used.
     pub fn verify(
         &self,
         old_size: u64,
         old_root: &str,
         new_size: u64,
+        new_root: Option<&str>,
     ) -> Result<(), SigstoreError> {
         // decode hashes from hex and convert them to the required data structure
         // immediately return an error when conversion fails
@@ -44,7 +46,7 @@ impl ConsistencyProof {
             .collect::<Result<Vec<_>, _>>()?;
 
         let old_root = hex_to_hash_output(old_root)?;
-        let new_root = hex_to_hash_output(&self.root_hash)?;
+        let new_root = hex_to_hash_output(new_root.unwrap_or(self.root_hash.as_str()))?;
 
         Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
             .map_err(ConsistencyProofError)

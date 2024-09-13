@@ -102,7 +102,12 @@ impl LogInfo {
 
         self.signed_tree_head
             .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size)?;
-        consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
+        consistency_proof.verify(
+            old_size,
+            old_root,
+            self.tree_size as _,
+            Some(&self.root_hash),
+        )?;
         Ok(())
     }
 }
@@ -115,32 +120,34 @@ mod tests {
     };
 
     use super::LogInfo;
-    const LOG_INFO_OLD: &str = r#"{
-        "inactiveShards": [
-          {
-            "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
-            "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiBeSutKae/1zsGfMgCstDexSktqVfYgAKYaFNsBqYQ3cAIhAOewsY+B/oXGOILSBv3wduhlyn4wNmV3v1eRg3LOwHDi\n",
-            "treeID": "8959784741570461564",
-            "treeSize": 461
-          },
-          {
-            "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
-            "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiBJlYY/wJQw6hW3LzziTAp7SXjc7MfghJ31tiydO1MvrAIhAPCX7LQ5jUNOssRDFJPXX3DdQjdan+8UGrKzGgfayV0c\n",
-            "treeID": "108574341321668964",
-            "treeSize": 14358
-          },
-          {
-            "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
-            "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBFAiEA6yozMl9lFn21m5mQHCJUyEiI3HOOuM5sIeVt/MU2MQMCIBDhFtWjwPKIjFSr/liQ8LY7K6LHQRvtzkoIrsWZ/c9a\n",
-            "treeID": "8050909264565447525",
-            "treeSize": 31667593
-          }
-        ],
-        "rootHash": "e222aa53db49893334fb5a878ead1bf8b9f8f3c02ccfc0ae687f28256bd74907",
-        "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352760\n4iKqU9tJiTM0+1qHjq0b+Ln488Asz8CuaH8oJWvXSQc=\n\n— rekor.sigstage.dev 0y8wozBFAiEAnIjdHAH9uhqBrRNBA4bMaKR30H6qdzW4TAsdB0/KP0ICIDjK9VeE+9dWXSAm/B0aPkhO7pJMLmKPjo9btFD9ZvEs\n",
-        "treeID": "8202293616175992157",
-        "treeSize": 1352760
-      }"#;
+    const LOG_INFO_OLD: &str = r#"
+        {
+            "inactiveShards": [
+            {
+                "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
+                "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiBeSutKae/1zsGfMgCstDexSktqVfYgAKYaFNsBqYQ3cAIhAOewsY+B/oXGOILSBv3wduhlyn4wNmV3v1eRg3LOwHDi\n",
+                "treeID": "8959784741570461564",
+                "treeSize": 461
+            },
+            {
+                "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
+                "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiBJlYY/wJQw6hW3LzziTAp7SXjc7MfghJ31tiydO1MvrAIhAPCX7LQ5jUNOssRDFJPXX3DdQjdan+8UGrKzGgfayV0c\n",
+                "treeID": "108574341321668964",
+                "treeSize": 14358
+            },
+            {
+                "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
+                "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBFAiEA6yozMl9lFn21m5mQHCJUyEiI3HOOuM5sIeVt/MU2MQMCIBDhFtWjwPKIjFSr/liQ8LY7K6LHQRvtzkoIrsWZ/c9a\n",
+                "treeID": "8050909264565447525",
+                "treeSize": 31667593
+            }
+            ],
+            "rootHash": "e222aa53db49893334fb5a878ead1bf8b9f8f3c02ccfc0ae687f28256bd74907",
+            "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352760\n4iKqU9tJiTM0+1qHjq0b+Ln488Asz8CuaH8oJWvXSQc=\n\n— rekor.sigstage.dev 0y8wozBFAiEAnIjdHAH9uhqBrRNBA4bMaKR30H6qdzW4TAsdB0/KP0ICIDjK9VeE+9dWXSAm/B0aPkhO7pJMLmKPjo9btFD9ZvEs\n",
+            "treeID": "8202293616175992157",
+            "treeSize": 1352760
+        }"#;
+
     const LOG_INFO_NEW: &str = r#"
         {
             "inactiveShards": [
@@ -168,32 +175,21 @@ mod tests {
             "treeID": "8202293616175992157",
             "treeSize": 1352764
         }"#;
+    /// Consistency proof requested via: https://rekor.sigstage.dev/api/v1/log/proof?lastSize=1352764&firstSize=1352760&treeId=8202293616175992157
     const LOG_PROOF: &str = r#"
         {
             "hashes": [
-                "5a0948dede3e930b8f4e54623e9dddc02d8d1f8e7207aa2ef654581696dbd02b",
-                "a231a8bf92e79b70d99762dc5e97b8aabd7d7e345af3ecd54806a67a856e28fd",
-                "1da069f21926d9a6c71f5f53e3802f9a319592aaec38a26cca7000756013a8b0",
-                "de67dba818dcb59afa1eaf82f404ea3d60b9284fefcd48091cc392eeb85139e0",
-                "722774afdc8d9f7600104ebf18c9eed3f293990b516b5cc582455580182e5228",
-                "3cffd1e781089b1863981adefbc568102b38020a978318d73d90e3baa25893f6",
-                "26104de6f96047f3832e4fa21aef89e86de2b26d53f7f88bf652cbcdfcaf8fb7",
-                "c0bb4187448a423c7bb2a4e16ccee560ca47911049be666e335f28c5cc28f604",
-                "f95530163ba56a3da36ccfb774bf971c8e5197ebfb55b0a2f76dfa20efdf6a60",
-                "b4ee4fbb14937fa10fb77eda8f17492af7167311952c54a3c948263a70fa4d16",
-                "14873f5f2d7ddbaa9c35cae8e38a75d86771103593ff587009503011d0fd4656",
-                "3e879a6680719f5f20080d96af7054eac1f7e6c73d08cf7242e1d2ed1d0baa75",
-                "3936c8b8d984010658bcd36b2e7bb812964fb04de546da6e4be5877d6d30b244",
-                "832595ab7e4069d2b4439048e1844ae610ad1b739271a80b8e2eaf90daf2db0e",
-                "404ec07c1283ca96add90addbdb4e61cc46e842878b48abab7d06cdf2cd41431",
-                "53766be84290a00a98d2f412fbdafdcf9b76c25b2558a6824c4ed0942d2608ee",
-                "af298842ed85c9133527e4806ecf131eba8cda15b557ae8aa7d0b23579226037",
-                "3be14d5554e638fc70239826191844aa65251487eb50704a91628aeb200b77ba",
-                "897eece5297ade68dbb8771d2fb8f0745f09510a5c10b751df2aea9c831f748d",
-                "e9d4090a317dc9e584a04d2268a1b808ac1cf092021fa29a7f879fdffa9bf271",
-                "42051abed257700e92e99263172d12ff2ff23c7fb6f6e5d0bb141723a15c346c"
+                "2713ba8ade1872a38adf7d108e5cedf5056fbde30c6d19fcc10f965e9fc1373e",
+                "2197a8f07628339739e65c2cc1d16fd36ccca1ef980d5966de82259a56821145",
+                "bc6015344bdfce14a2d24d4230ae734002220557f7a930c8fbc17e1e3e86b692",
+                "156bdcfc96e73a81f2255c4e05936ef0b50a0862213f4b863af228f4fa4f20ca",
+                "a6c2a8510ab7f123bc4cc7927e1f3156bf324bfceafee6ecae8597739cb4b436",
+                "299a7084ca00c8be9dfbf176291a266599308a014edc9c5ddacc07821d003837",
+                "153a44af92202f031e457d09930fd53c85e519bf3a4b79a11b1d946e65a28da8",
+                "3abe35db1c15b4710d9cf755a11f32d95f4e58907ac54fef389bfcf18c231f38",
+                "e0300bb7400e692bccbf20b17fe7ec177aba23e7bfd36dcb7484935ccd214336"
             ],
-            "rootHash": "df83e27afbe9fa6d04f417879882f9c29a6c4b2d677a01c53f5189dbd3290b31"
+            "rootHash": "437afb5d68e7f875cd91311f6549f4f12324418b39bdbf96cffe3884cb9e8f26"
         }"#;
 
     /// Pubkey for `rekor.sigstage.dev`.
@@ -216,6 +212,7 @@ mod tests {
             serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
         let consistency_proof: ConsistencyProof =
             serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
+
         log_info_new
             .verify_consistency(
                 log_info_old.tree_size,
