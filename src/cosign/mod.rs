@@ -48,7 +48,6 @@ use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::SigstoreError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use pkcs8::der::Decode;
-use std::convert::TryFrom;
 use x509_cert::Certificate;
 
 pub mod bundle;
@@ -102,12 +101,12 @@ pub trait CosignCapabilities {
     /// must be satisfied:
     ///
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Rekor integration enabled (see [`crate::sigstore::ManualTrustRoot`])
+    ///   have been created with Rekor integration enabled (see [`crate::trust::sigstore::ManualTrustRoot`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see [`crate::sigstore::ManualTrustRoot])
+    ///   have been created with Fulcio integration enabled (see [`crate::trust::sigstore::ManualTrustRoot])
     /// * The layer must include a bundle produced by Rekor
     ///
-    /// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
+    /// > Note well: the [`trust::sigstore`](crate::trust::sigstore) module provides helper structs and methods
     /// > to obtain this data from the official TUF repository of the Sigstore project.
     ///
     /// When the embedded certificate cannot be verified, [`SignatureLayer::certificate_signature`]
@@ -284,7 +283,6 @@ where
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use std::collections::HashMap;
     use webpki::types::CertificateDer;
 
     use super::constraint::{AnnotationMarker, PrivateKeySigner};
@@ -296,10 +294,10 @@ mod tests {
         AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
     };
     use crate::crypto::certificate_pool::CertificatePool;
-    use crate::crypto::{CosignVerificationKey, SigningScheme};
+    use crate::crypto::SigningScheme;
 
     #[cfg(feature = "test-registry")]
-    use testcontainers::{clients, core::WaitFor};
+    use testcontainers::{core::WaitFor, runners::AsyncRunner};
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -337,7 +335,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[cfg(feature = "test-registry")]
     const SIGNED_IMAGE: &str = "busybox:1.34";
 
-    pub(crate) fn get_fulcio_cert_pool() -> CertificatePool<'static> {
+    pub(crate) fn get_fulcio_cert_pool() -> CertificatePool {
         fn pem_to_der<'a>(input: &'a str) -> CertificateDer<'a> {
             let pem_cert = pem::parse(input).unwrap();
             assert_eq!(pem_cert.tag(), "CERTIFICATE");
@@ -568,10 +566,14 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[tokio::test]
     #[serial_test::serial]
     async fn sign_verify_image(#[case] signing_scheme: SigningScheme) {
-        let docker = clients::Cli::default();
-        let image = registry_image();
-        let test_container = docker.run(image);
-        let port = test_container.get_host_port_ipv4(5000);
+        let test_container = registry_image()
+            .start()
+            .await
+            .expect("failed to start registry");
+        let port = test_container
+            .get_host_port_ipv4(5000)
+            .await
+            .expect("failed to get port");
 
         let mut client = ClientBuilder::default()
             .enable_registry_caching()
@@ -644,7 +646,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     }
 
     #[cfg(feature = "test-registry")]
-    async fn prepare_image_to_be_signed(client: &mut Client<'_>, image_ref: &OciReference) {
+    async fn prepare_image_to_be_signed(client: &mut Client, image_ref: &OciReference) {
         let data = client
             .registry_client
             .pull(

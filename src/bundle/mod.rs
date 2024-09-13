@@ -12,24 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Useful types for Sigstore bundles.
+//! Sigstore bundle support.
 
-use std::fmt::Display;
+pub use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle;
 
-pub use sigstore_protobuf_specs::Bundle;
+mod models;
 
-// Known Sigstore bundle media types.
-#[derive(Clone, Copy, Debug)]
-pub enum Version {
-    _Bundle0_1,
-    Bundle0_2,
-}
+#[cfg_attr(docsrs, doc(cfg(feature = "sign")))]
+#[cfg(feature = "sign")]
+pub mod sign;
 
-impl Display for Version {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match &self {
-            Version::_Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
-            Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
-        })
-    }
-}
+#[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
+#[cfg(feature = "verify")]
+pub mod verify;

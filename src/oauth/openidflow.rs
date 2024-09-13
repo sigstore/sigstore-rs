@@ -25,16 +25,16 @@
 //! The `auth_url` function returns the following:
 //!
 //! - `authorize_url` is a URL that can be opened in a browser. The user will be
-//! prompted to login and authorize the application. The user will be redirected to
-//! the `redirect_uri` URL with a code parameter.
+//!   prompted to login and authorize the application. The user will be redirected to
+//!   the `redirect_uri` URL with a code parameter.
 //!
 //! - `client` is a client object that can be used to make requests to the OpenID
-//! Connect server.
+//!   Connect server.
 //!
 //! - `nonce` is a random value that is used to prevent replay attacks.
 //!
 //! - `pkce_verifier` is a PKCE verifier that can be used to generate the code_verifier
-//! value.
+//!   value.
 //!
 //! Once you have recieved the above tuple, you can use the [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener)
 //! function to get the ID Token and scope.

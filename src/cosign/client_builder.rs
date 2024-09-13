@@ -28,17 +28,17 @@ use crate::trust::TrustRoot;
 /// ## Rekor integration
 ///
 /// Rekor integration can be enabled by specifying Rekor's public key.
-/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
+/// This can be provided via a [`crate::trust::ManualTrustRoot`].
 ///
-/// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
+/// > Note well: the [`trust::sigstore`](crate::trust::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
 ///
 /// ## Fulcio integration
 ///
 /// Fulcio integration can be enabled by specifying Fulcio's certificate.
-/// This can be provided via a [`crate::sigstore::ManualTrustRoot`].
+/// This can be provided via a [`crate::trust::sigstore::ManualTrustRoot`].
 ///
-/// > Note well: the [`sigstore`](crate::sigstore) module provides helper structs and methods
+/// > Note well: the [`trust::sigstore`](crate::trust::sigstore) module provides helper structs and methods
 /// > to obtain this data from the official TUF repository of the Sigstore project.
 ///
 /// ## Registry caching
@@ -63,6 +63,7 @@ pub struct ClientBuilder<'a> {
 impl<'a> ClientBuilder<'a> {
     /// Enable caching of data returned from remote OCI registries
     #[cfg(feature = "cached-client")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cached-registry")))]
     pub fn enable_registry_caching(mut self) -> Self {
         self.enable_registry_caching = true;
         self
@@ -71,7 +72,7 @@ impl<'a> ClientBuilder<'a> {
     /// Optional - Configures the roots of trust.
     ///
     /// Enables Fulcio and Rekor integration with the given trust repository.
-    /// See [crate::sigstore::TrustRoot] for more details on trust repositories.
+    /// See [crate::trust::sigstore::TrustRoot] for more details on trust repositories.
     pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
         let rekor_keys = repo.rekor_keys()?;
         if !rekor_keys.is_empty() {
@@ -91,7 +92,7 @@ impl<'a> ClientBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Result<Client<'a>> {
+    pub fn build(self) -> Result<Client> {
         let rekor_pub_key = match self.rekor_pub_key {
             None => {
                 info!("Rekor public key not provided. Rekor integration disabled");

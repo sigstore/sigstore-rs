@@ -1,5 +1,5 @@
 //
-// Copyright 2022 The Sigstore Authors.
+// Copyright 2023 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module defines different kinds of payload to be signed
-//! in cosign. Now it supports:
-//! * `SimpleSigning`: Refer to <https://github.com/containers/image/blob/a5061e5a5f00333ea3a92e7103effd11c6e2f51d/docs/containers-signature.5.md#json-data-format>
+//! Types for verifying Sigstore bundles with policies.
 
-pub mod simple_signing;
-pub use simple_signing::SimpleSigning;
+mod models;
+
+pub use models::{VerificationError, VerificationResult};
+
+pub mod policy;
+pub use policy::{PolicyError, VerificationPolicy};
+
+mod verifier;
+pub use verifier::*;

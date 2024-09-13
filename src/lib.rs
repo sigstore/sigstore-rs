@@ -93,8 +93,8 @@
 //!   };
 //!
 //!   let mut repo = sigstore::trust::ManualTrustRoot {
-//!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
-//!     rekor_key: Some(rekor_pub_key),
+//!     fulcio_certs: vec![fulcio_cert.try_into().unwrap()],
+//!     rekor_keys: vec![rekor_pub_key],
 //!     ..Default::default()
 //!   };
 //!
@@ -238,18 +238,18 @@
 //!
 //! - `default`: Enables `full-native-tls`, `cached-client` and `test-registry` features.
 //! - `full-native-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
-//! tls uses `native-tls`. This feature will not enable `test-registry.`
+//!    tls uses `native-tls`. This feature will not enable `test-registry.`
 //! - `full-rustls-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
-//! tls uses `rustls-tls`. This feature will not enable `test-registry.`
+//!   tls uses `rustls-tls`. This feature will not enable `test-registry.`
 //!
 //! - `fulcio-native-tls` and `fulcio-rustls-tls`: Enables support for `fulcio`, but one uses
-//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
 //!
 //! - `rekor-native-tls` and `rekor-rustls-tls`: Enables support for `rekor`, but one uses
-//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
 //!
 //! - `cosign-native-tls` and `cosign-rustls-tls`: Enables support for `cosign`, but one uses
-//! `native-tls` as underlying tls and the other uses `rustls-tls`.
+//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
 //!
 //! - `cached-client`: Enables support for OCI registry client caching.
 //!
@@ -258,33 +258,37 @@
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod crypto;
 pub mod trust;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "mock-client")))]
 #[cfg(feature = "mock-client")]
 mod mock_client;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "cosign")))]
 #[cfg(feature = "cosign")]
 pub mod cosign;
 
 pub mod errors;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "fulcio")))]
 #[cfg(feature = "fulcio")]
 pub mod fulcio;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "oauth")))]
 #[cfg(feature = "oauth")]
 pub mod oauth;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
 #[cfg(feature = "registry")]
 pub mod registry;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "rekor")))]
 #[cfg(feature = "rekor")]
 pub mod rekor;
 
-// Don't export yet -- these types should only be useful internally.
-mod bundle;
-pub use bundle::Bundle;
-
-#[cfg(feature = "sign")]
-pub mod sign;
+#[cfg_attr(docsrs, doc(cfg(any(feature = "sign", feature = "verify"))))]
+#[cfg(any(feature = "sign", feature = "verify"))]
+pub mod bundle;

@@ -47,10 +47,10 @@ fn main() -> Result<(), anyhow::Error> {
 
     match result {
         Ok((token_response, id_token)) => {
-            println!("Email {:?}", token_response.email().unwrap().to_string());
+            println!("Email {:?}", token_response.email().unwrap());
             println!(
                 "Access Token:{:?}",
-                token_response.access_token_hash().unwrap().to_string()
+                token_response.access_token_hash().unwrap()
             );
             println!("id_token: {:?}", id_token.to_string());
         }

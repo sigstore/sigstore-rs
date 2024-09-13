@@ -74,7 +74,6 @@ mod tests {
         build_correct_signature_layer_with_certificate,
         build_correct_signature_layer_without_bundle,
     };
-    use crate::cosign::signature_layers::CertificateSubject;
     use crate::cosign::verification_constraint::CertSubjectEmailVerifier;
 
     #[test]

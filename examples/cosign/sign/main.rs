@@ -18,7 +18,6 @@ use sigstore::cosign::constraint::{AnnotationMarker, PrivateKeySigner};
 use sigstore::cosign::{Constraint, CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
 use sigstore::registry::{Auth, ClientConfig, ClientProtocol, OciReference};
-use std::convert::TryFrom;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
 

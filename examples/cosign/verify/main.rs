@@ -23,8 +23,6 @@ use sigstore::crypto::SigningScheme;
 use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
 use sigstore::trust::sigstore::SigstoreTrustRoot;
-use std::boxed::Box;
-use std::convert::TryFrom;
 use std::time::Instant;
 
 extern crate anyhow;
@@ -34,7 +32,6 @@ extern crate clap;
 use clap::Parser;
 
 use std::{collections::HashMap, fs};
-use tokio::task::spawn_blocking;
 
 extern crate tracing_subscriber;
 use tracing::{info, warn};
@@ -66,11 +63,11 @@ struct Cli {
 
     /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
     #[clap(long, required(false))]
-    rekor_pub_key: Option<String>,
+    rekor_pub_keys: Vec<String>,
 
     /// File containing Fulcio's certificate (e.g.: ~/.sigstore/root/targets/fulcio.crt.pem)
     #[clap(long, required(false))]
-    fulcio_cert: Option<String>,
+    fulcio_certs: Vec<String>,
 
     /// The issuer of the OIDC token used by the user to authenticate against Fulcio
     #[clap(long, required(false))]
@@ -230,25 +227,22 @@ async fn run_app(
 
 async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::trust::TrustRoot>> {
     if cli.use_sigstore_tuf_data {
-        let repo: sigstore::errors::Result<SigstoreTrustRoot> = spawn_blocking(|| {
-            info!("Downloading data from Sigstore TUF repository");
-            SigstoreTrustRoot::new(None)?.prefetch()
-        })
-        .await
-        .map_err(|e| anyhow!("Error spawning blocking task inside of tokio: {}", e))?;
+        info!("Downloading data from Sigstore TUF repository");
+
+        let repo: sigstore::errors::Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
 
         return Ok(Box::new(repo?));
     };
 
     let mut data = sigstore::trust::ManualTrustRoot::default();
-    if let Some(path) = cli.rekor_pub_key.as_ref() {
-        data.rekor_key = Some(
+    for path in cli.rekor_pub_keys.iter() {
+        data.rekor_keys.push(
             fs::read(path)
                 .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
         );
     }
 
-    if let Some(path) = cli.fulcio_cert.as_ref() {
+    for path in cli.fulcio_certs.iter() {
         let cert_data = fs::read(path)
             .map_err(|e| anyhow!("Error reading fulcio certificate from disk: {}", e))?;
 
@@ -256,9 +250,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
             encoding: sigstore::registry::CertificateEncoding::Pem,
             data: cert_data,
         };
-        data.fulcio_certs
-            .get_or_insert(Vec::new())
-            .push(certificate.try_into()?);
+        data.fulcio_certs.push(certificate.try_into()?);
     }
 
     Ok(Box::new(data))

@@ -34,11 +34,11 @@
 //! * [`SigStoreSigner::RSA_PKCS1_SHA384`]: RSA signatures using PKCS#1v1.5 padding and SHA-384.
 //! * [`SigStoreSigner::RSA_PKCS1_SHA512`]: RSA signatures using PKCS#1v1.5 padding and SHA-512.
 //! * [`SigStoreSigner::ECDSA_P256_SHA256_ASN1`]: ASN.1 DER-encoded ECDSA
-//! signatures using the P-256 curve and SHA-256.
+//!   signatures using the P-256 curve and SHA-256.
 //! * [`SigStoreSigner::ECDSA_P384_SHA384_ASN1`]: ASN.1 DER-encoded ECDSA
-//! signatures using the P-384 curve and SHA-384.
+//!   signatures using the P-384 curve and SHA-384.
 //! * [`SigStoreSigner::ED25519`]: ECDSA signature using SHA2-512
-//! as the digest function and curve edwards25519.
+//!   as the digest function and curve edwards25519.
 //!
 //! # Simple Usages
 //!
@@ -139,12 +139,12 @@ pub enum SigStoreKeyPair {
     RSA(RSAKeys),
 }
 
-impl ToString for SigStoreKeyPair {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for SigStoreKeyPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SigStoreKeyPair::ECDSA(_) => String::from("EC Key"),
-            SigStoreKeyPair::ED25519(_) => String::from("Ed25519 Key"),
-            SigStoreKeyPair::RSA(_) => String::from("RSA Key"),
+            SigStoreKeyPair::ECDSA(_) => write!(f, "EC Key"),
+            SigStoreKeyPair::ED25519(_) => write!(f, "Ed25519 Key"),
+            SigStoreKeyPair::RSA(_) => write!(f, "RSA Key"),
         }
     }
 }
