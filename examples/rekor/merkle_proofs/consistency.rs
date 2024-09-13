@@ -12,7 +12,7 @@ struct Args {
     #[arg(long, value_name = "HEX ENCODED HASH")]
     old_root: String,
     #[arg(long)]
-    old_size: usize,
+    old_size: u64,
     #[arg(long, value_name = "TREE ID")]
     tree_id: Option<String>,
 }
