@@ -67,13 +67,13 @@ sigstore-trust-root-rustls-tls = [
 ]
 
 cosign-native-tls = [
-  "oci-distribution/native-tls",
+  "oci-client/native-tls",
   "cert",
   "cosign",
   "registry-native-tls",
 ]
 cosign-rustls-tls = [
-  "oci-distribution/rustls-tls",
+  "oci-client/rustls-tls",
   "cert",
   "cosign",
   "registry-rustls-tls",
@@ -81,12 +81,12 @@ cosign-rustls-tls = [
 cosign = ["olpc-cjson"]
 cert = []
 
-registry-native-tls = ["oci-distribution/native-tls", "registry"]
-registry-rustls-tls = ["oci-distribution/rustls-tls", "registry"]
+registry-native-tls = ["oci-client/native-tls", "registry"]
+registry-rustls-tls = ["oci-client/rustls-tls", "registry"]
 registry = ["olpc-cjson"]
 
-mock-client-native-tls = ["oci-distribution/native-tls", "mock-client"]
-mock-client-rustls-tls = ["oci-distribution/rustls-tls", "mock-client"]
+mock-client-native-tls = ["oci-client/native-tls", "mock-client"]
+mock-client-rustls-tls = ["oci-client/rustls-tls", "mock-client"]
 mock-client = []
 
 cached-client = ["cached"]
@@ -109,7 +109,7 @@ elliptic-curve = { version = "0.13", features = ["arithmetic", "pem"] }
 futures = "0.3"
 futures-util = { version = "0.3", optional = true }
 lazy_static = "1.5"
-oci-distribution = { version = "0.11", default-features = false, optional = true }
+oci-client = { default-features = false, optional = true, version = "0.13" }
 olpc-cjson = { version = "0.1", optional = true }
 openidconnect = { version = "3.5", default-features = false, features = [
   "reqwest",

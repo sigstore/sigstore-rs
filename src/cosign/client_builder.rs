@@ -112,8 +112,7 @@ impl<'a> ClientBuilder<'a> {
             Some(cert_pool)
         };
 
-        let oci_client =
-            oci_distribution::client::Client::new(self.oci_client_config.clone().into());
+        let oci_client = oci_client::client::Client::new(self.oci_client_config.clone().into());
 
         let registry_client: Box<dyn crate::registry::ClientCapabilities> = {
             cfg_if::cfg_if! {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::VerificationConstraint;
 use crate::cosign::signature_layers::SignatureLayer;
@@ -16,7 +16,7 @@ use crate::errors::Result;
 /// These will be simply be ignored by the verifier.
 #[derive(Default, Debug)]
 pub struct AnnotationVerifier {
-    pub annotations: HashMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
 }
 
 impl VerificationConstraint for AnnotationVerifier {
