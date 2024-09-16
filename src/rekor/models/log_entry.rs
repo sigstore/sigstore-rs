@@ -273,7 +273,9 @@ mod tests {
         )
         .expect("failed to parse Rekor key");
 
-        // swap upper and lower halves of hash.
+        let mut test_cases = vec![];
+
+        // swap upper and lower halves of a hash.
         let mut entry_modified_hashes = entry.clone();
         entry_modified_hashes
             .verification
@@ -282,9 +284,7 @@ mod tests {
             .unwrap()
             .hashes[0] =
             "1f66ee0cfb09a6f79eb267ed9f55de2c810320ec3029914695826d60133c6702".to_string();
-        entry_modified_hashes
-            .verify_inclusion(&rekor_key)
-            .expect_err("accepted invalid inclusion proof: modified hashes");
+        test_cases.push((entry_modified_hashes, "modified hash"));
 
         // modify checkpoint.
         let mut entry_modified_checkpoint = entry.clone();
@@ -294,9 +294,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .checkpoint = "foo".to_string();
-        entry_modified_checkpoint
-            .verify_inclusion(&rekor_key)
-            .expect_err("accepted invalid inclusion proof: modified checkpoint");
+        test_cases.push((entry_modified_checkpoint, "modified checkpoint"));
 
         // modify log index.
         let mut entry_modified_log_index = entry.clone();
@@ -306,9 +304,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .log_index += 1;
-        entry_modified_log_index
-            .verify_inclusion(&rekor_key)
-            .expect_err("accepted invalid inclusion proof: modified log index");
+        test_cases.push((entry_modified_log_index, "modified log index"));
 
         // modify root hash.
         let mut entry_modified_root_hash = entry.clone();
@@ -319,9 +315,7 @@ mod tests {
             .unwrap()
             .root_hash =
             "3de533212f9470d63a56d1992e73465deffa4fa4575f72829016a64e58444120".to_string();
-        entry_modified_root_hash
-            .verify_inclusion(&rekor_key)
-            .expect_err("accepted invalid inclusion proof: modified root hash");
+        test_cases.push((entry_modified_root_hash, "modified root hash"));
 
         // modify tree size.
         let mut entry_modified_tree_size = entry.clone();
@@ -331,8 +325,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .tree_size += 1;
-        entry_modified_tree_size
-            .verify_inclusion(&rekor_key)
-            .expect_err("accepted invalid inclusion proof: modified tree size");
+        test_cases.push((entry_modified_tree_size, "modified tree size"));
+
+        for (case, desc) in test_cases {
+            let res = case.verify_inclusion(&rekor_key);
+            assert!(res.is_err(), "accepted invalid proof: {desc}");
+        }
     }
 }

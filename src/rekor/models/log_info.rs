@@ -199,8 +199,9 @@ mod tests {
     nYLr0lg6RXowI/QV/RE1azBn4Eg5/2uTOMbhB1/gfcHzijzFi9Tk+g1Prg==
     -----END PUBLIC KEY-----
 "#;
+
     #[test]
-    fn test_consistency() {
+    fn test_consistency_valid() {
         let rekor_key = CosignVerificationKey::from_pem(
             REKOR_STAGING_KEY_PEM.as_bytes(),
             &SigningScheme::ECDSA_P256_SHA256_ASN1,
@@ -221,5 +222,57 @@ mod tests {
                 &rekor_key,
             )
             .expect("failed to accept valid inclusion proof");
+    }
+
+    #[test]
+    fn test_consistency_invalid() {
+        let rekor_key = CosignVerificationKey::from_pem(
+            REKOR_STAGING_KEY_PEM.as_bytes(),
+            &SigningScheme::ECDSA_P256_SHA256_ASN1,
+        )
+        .expect("failed to parse Rekor key");
+        let log_info_old: LogInfo =
+            serde_json::from_str(LOG_INFO_OLD).expect("failed to deserialize log info test data");
+        let log_info_new: LogInfo =
+            serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
+
+        let consistency_proof: ConsistencyProof =
+            serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
+
+        let mut test_cases = vec![];
+
+        let mut consistency_proof_empty = consistency_proof.clone();
+        consistency_proof_empty.hashes = vec![];
+        test_cases.push((consistency_proof_empty, "empty proof"));
+
+        let mut consistency_proof_additional_hash = consistency_proof.clone();
+        consistency_proof_additional_hash
+            .hashes
+            .push("e0300bb7400e692bccbf20b17fe7ec177aba23e7bfd36dcb7484935ccd214336".to_string());
+        test_cases.push((consistency_proof_additional_hash, "too many hashes"));
+
+        let mut consistency_proof_removed_hash = consistency_proof.clone();
+        let _ = consistency_proof_removed_hash.hashes.pop().unwrap();
+        test_cases.push((consistency_proof_removed_hash, "too few hashes"));
+
+        // invert all the hashes in the proof
+        let mut consistency_proof_invalid_hash = consistency_proof.clone();
+        consistency_proof_invalid_hash.hashes = consistency_proof_invalid_hash
+            .hashes
+            .into_iter()
+            .map(|h| h.chars().rev().collect())
+            .collect();
+
+        test_cases.push((consistency_proof_invalid_hash, "invalid hashes"));
+
+        for (proof, desc) in test_cases {
+            let res = log_info_new.verify_consistency(
+                log_info_old.tree_size,
+                &log_info_old.root_hash,
+                &proof,
+                &rekor_key,
+            );
+            assert!(res.is_err(), "accepted invalid proof:  {desc}");
+        }
     }
 }
