@@ -14,6 +14,7 @@
 // limitations under the License.
 
 extern crate sigstore;
+use sigstore::cosign::verification_constraint::cert_subject_email_verifier::StringVerifier;
 use sigstore::cosign::verification_constraint::{
     AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, CertificateVerifier,
     PublicKeyVerifier, VerificationConstraintVec,
@@ -146,10 +147,13 @@ async fn run_app(
     // Build verification constraints
     let mut verification_constraints: VerificationConstraintVec = Vec::new();
     if let Some(cert_email) = cli.cert_email.as_ref() {
-        let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
+        let issuer = cli
+            .cert_issuer
+            .as_ref()
+            .map(|i| StringVerifier::ExactMatch(i.to_string()));
 
         verification_constraints.push(Box::new(CertSubjectEmailVerifier {
-            email: cert_email.to_string(),
+            email: StringVerifier::ExactMatch(cert_email.to_string()),
             issuer,
         }));
     }
