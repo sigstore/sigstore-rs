@@ -261,4 +261,7 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509BuilderError(#[from] x509_cert::builder::Error),
+
+    #[error("serialization error: {0}")]
+    SerializationError(String),
 }
