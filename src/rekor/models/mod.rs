@@ -52,5 +52,6 @@ pub mod tuf;
 pub use self::tuf::Tuf;
 pub mod tuf_all_of;
 pub use self::tuf_all_of::TufAllOf;
+pub mod checkpoint;
 pub mod log_entry;
 pub use self::log_entry::LogEntry;
