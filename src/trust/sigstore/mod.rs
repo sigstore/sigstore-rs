@@ -306,8 +306,8 @@ mod tests {
     fn test_is_timerange_valid() {
         fn range_from(start: i64, end: i64) -> TimeRange {
             let base = chrono::Utc::now();
-            let start: SystemTime = (base + chrono::TimeDelta::seconds(start)).into();
-            let end: SystemTime = (base + chrono::TimeDelta::seconds(end)).into();
+            let start: SystemTime = (base + chrono::TimeDelta::try_seconds(start).unwrap()).into();
+            let end: SystemTime = (base + chrono::TimeDelta::try_seconds(end).unwrap()).into();
 
             TimeRange {
                 start: Some(start.into()),

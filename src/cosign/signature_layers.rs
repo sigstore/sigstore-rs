@@ -17,7 +17,8 @@ use const_oid::ObjectIdentifier;
 use digest::Digest;
 use oci_distribution::client::ImageLayer;
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::collections::BTreeMap;
+use std::fmt;
 use tracing::{debug, info, warn};
 use x509_cert::der::DecodePem;
 use x509_cert::ext::pkix::name::GeneralName;
@@ -289,7 +290,7 @@ impl SignatureLayer {
         })
     }
 
-    fn get_signature_from_annotations(annotations: &HashMap<String, String>) -> Result<String> {
+    fn get_signature_from_annotations(annotations: &BTreeMap<String, String>) -> Result<String> {
         let signature: String = annotations
             .get(SIGSTORE_SIGNATURE_ANNOTATION)
             .cloned()
@@ -298,7 +299,7 @@ impl SignatureLayer {
     }
 
     fn get_bundle_from_annotations(
-        annotations: &HashMap<String, String>,
+        annotations: &BTreeMap<String, String>,
         rekor_pub_key: Option<&CosignVerificationKey>,
     ) -> Result<Option<Bundle>> {
         let bundle = match annotations.get(SIGSTORE_BUNDLE_ANNOTATION) {
@@ -315,7 +316,7 @@ impl SignatureLayer {
     }
 
     fn get_certificate_signature_from_annotations(
-        annotations: &HashMap<String, String>,
+        annotations: &BTreeMap<String, String>,
         fulcio_cert_pool: Option<&CertificatePool>,
         bundle: Option<&Bundle>,
     ) -> Option<CertificateSignature> {
@@ -767,7 +768,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_signature_from_annotations_success() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(SIGSTORE_SIGNATURE_ANNOTATION.into(), "foo".into());
 
         let actual = SignatureLayer::get_signature_from_annotations(&annotations);
@@ -776,7 +777,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_signature_from_annotations_failure() {
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
 
         let actual = SignatureLayer::get_signature_from_annotations(&annotations);
         assert!(actual.is_err());
@@ -790,7 +791,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         //
         // We care only about the only case not tested: to not
         // fail when no bundle is specified.
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
         let rekor_pub_key = get_rekor_public_key();
 
         let actual =
@@ -801,7 +802,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_certificate_signature_from_annotations_returns_none() {
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
         let actual = SignatureLayer::get_certificate_signature_from_annotations(
@@ -815,7 +816,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_certificate_signature_from_annotations_fails_when_no_bundle_is_given() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
 
         // add a fake cert, contents are not relevant
         annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());
@@ -832,7 +833,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_certificate_signature_from_annotations_fails_when_no_fulcio_pub_key_is_given() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
 
         // add a fake cert, contents are not relevant
         annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());

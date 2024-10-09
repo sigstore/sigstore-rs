@@ -157,6 +157,16 @@ pub struct ClientConfig {
     /// A list of extra root certificate to trust. This can be used to connect
     /// to servers using self-signed certificates
     pub extra_root_certificates: Vec<Certificate>,
+
+    /// Set the `HTTPS PROXY` used by the client.
+    ///
+    /// This defaults to `None`.
+    pub https_proxy: Option<String>,
+
+    /// Set the `NO PROXY` used by the client.
+    ///
+    /// This defaults to `None`.
+    pub no_proxy: Option<String>,
 }
 
 impl Default for ClientConfig {
@@ -167,6 +177,8 @@ impl Default for ClientConfig {
             accept_invalid_hostnames: false,
             accept_invalid_certificates: false,
             extra_root_certificates: Vec::new(),
+            https_proxy: None,
+            no_proxy: None,
         }
     }
 }
@@ -183,6 +195,8 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
                 .iter()
                 .map(|c| c.into())
                 .collect(),
+            https_proxy: config.https_proxy,
+            no_proxy: config.no_proxy,
             ..Default::default()
         }
     }

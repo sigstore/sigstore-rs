@@ -73,7 +73,7 @@
 //! use sigstore::errors::SigstoreVerifyConstraintsError;
 //!
 //! use std::boxed::Box;
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //! use std::fs;
 //!
 //! #[tokio::main]
@@ -118,7 +118,7 @@
 //!   ).await.expect("Could not obtain signature layers");
 //!
 //!   // Define verification constraints
-//!   let mut annotations: HashMap<String, String> = HashMap::new();
+//!   let mut annotations: BTreeMap<String, String> = BTreeMap::new();
 //!   annotations.insert("env".to_string(), "prod".to_string());
 //!   let annotation_verifier = AnnotationVerifier{
 //!     annotations,

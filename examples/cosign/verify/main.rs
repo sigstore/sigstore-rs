@@ -25,14 +25,13 @@ use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
 use sigstore::trust::sigstore::SigstoreTrustRoot;
 use std::time::Instant;
+use std::{collections::BTreeMap, fs};
 
 extern crate anyhow;
 use anyhow::{anyhow, Result};
 
 extern crate clap;
 use clap::Parser;
-
-use std::{collections::HashMap, fs};
 
 extern crate tracing_subscriber;
 use tracing::{info, warn};
@@ -203,7 +202,7 @@ async fn run_app(
     }
 
     if !cli.annotations.is_empty() {
-        let mut values: HashMap<String, String> = HashMap::new();
+        let mut values: BTreeMap<String, String> = BTreeMap::new();
         for annotation in &cli.annotations {
             let tmp: Vec<_> = annotation.splitn(2, '=').collect();
             if tmp.len() == 2 {

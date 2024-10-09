@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
 use tracing::warn;
@@ -50,7 +50,7 @@ impl Constraint for AnnotationMarker {
                 warn!(optional = ?opt, "already has an annotation field");
                 opt.extra.clone()
             }
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         for (k, v) in &self.annotations {

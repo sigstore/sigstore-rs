@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::ops::Add;
 
 use async_trait::async_trait;
@@ -96,7 +96,7 @@ impl CosignCapabilities for Client {
 
     async fn push_signature(
         &mut self,
-        annotations: Option<HashMap<String, String>>,
+        annotations: Option<BTreeMap<String, String>>,
         auth: &Auth,
         target_reference: &OciReference,
         signature_layers: Vec<SignatureLayer>,
@@ -108,7 +108,7 @@ impl CosignCapabilities for Client {
                     Ok(data) => {
                         let annotations = match &sl.signature {
                             Some(sig) => [(SIGSTORE_SIGNATURE_ANNOTATION.into(), sig.clone())].into(),
-                            None => HashMap::new(),
+                            None => BTreeMap::new(),
                         };
                         let image_layer = oci_distribution::client::ImageLayer::new(data, SIGSTORE_OCI_MEDIA_TYPE.into(), Some(annotations));
                         Some(image_layer)
