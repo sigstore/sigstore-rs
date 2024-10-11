@@ -8,7 +8,7 @@ fmt:
 
 .PHONY: lint
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 
 .PHONY: doc
 doc:
