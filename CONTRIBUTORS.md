@@ -3,6 +3,13 @@
 When contributing to this repository, please first discuss the change you wish
 to make via an [issue](https://github.com/sigstore/sigstore-rs/issues).
 
+## Building and testing
+
+The Makefile contains useful targets for editing source code (`make lint`, `make fmt`), building executables
+(`make build`) and testing (`make test`).
+
+Full test suite requires Docker daemon to be running (and the user must have permissions to start a container).
+
 ## Pull Request Process
 
 1. Create an [issue](https://github.com/sigstore/sigstore-rs/issues)
