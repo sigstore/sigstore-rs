@@ -46,7 +46,6 @@ use crate::registry::{Auth, PushResponse};
 
 use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::SigstoreError;
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use pkcs8::der::Decode;
 use x509_cert::Certificate;
 
@@ -155,13 +154,13 @@ pub trait CosignCapabilities {
     /// Verifies the signature produced by cosign when signing the given blob via the `cosign sign-blob` command
     ///
     /// The parameters:
-    /// * `cert`: a PEM encoded x509 certificate that contains the public key used to verify the signature
+    /// * `cert`: a PEM encoded x509 certificate that contains the public key used to verify the signature.
+    ///   Note that cert is not double-base64-encoded like the output of sigstore/cosign is.
     /// * `signature`: the base64 encoded signature of the blob that has to be verified
     /// * `blob`: the contents of the blob
     ///
     /// This function returns `Ok())` when the given signature has been verified, otherwise returns an `Err`.
     fn verify_blob(cert: &str, signature: &str, blob: &[u8]) -> Result<()> {
-        let cert = BASE64_STD_ENGINE.decode(cert)?;
         let pem = pem::parse(cert)?;
         let cert = Certificate::from_der(pem.contents()).map_err(|e| {
             SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}"))
