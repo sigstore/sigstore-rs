@@ -35,6 +35,8 @@ use crate::errors::Result;
 
 use async_trait::async_trait;
 
+use ::oci_client as oci_client_dep;
+
 /// Workaround to ensure the `Send + Sync` supertraits are
 /// required by ClientCapabilities only when the target
 /// architecture is NOT wasm32.
@@ -61,29 +63,29 @@ pub(crate) trait ClientCapabilitiesDeps {}
 pub(crate) trait ClientCapabilities: ClientCapabilitiesDeps {
     async fn fetch_manifest_digest(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client_dep::Reference,
+        auth: &oci_client_dep::secrets::RegistryAuth,
     ) -> Result<String>;
 
     async fn pull(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client_dep::Reference,
+        auth: &oci_client_dep::secrets::RegistryAuth,
         accepted_media_types: Vec<&str>,
-    ) -> Result<oci_distribution::client::ImageData>;
+    ) -> Result<oci_client_dep::client::ImageData>;
 
     async fn pull_manifest(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<(oci_distribution::manifest::OciManifest, String)>;
+        image: &oci_client_dep::Reference,
+        auth: &oci_client_dep::secrets::RegistryAuth,
+    ) -> Result<(oci_client_dep::manifest::OciManifest, String)>;
 
     async fn push(
         &mut self,
-        image_ref: &oci_distribution::Reference,
-        layers: &[oci_distribution::client::ImageLayer],
-        config: oci_distribution::client::Config,
-        auth: &oci_distribution::secrets::RegistryAuth,
-        manifest: Option<oci_distribution::manifest::OciImageManifest>,
-    ) -> Result<oci_distribution::client::PushResponse>;
+        image_ref: &oci_client_dep::Reference,
+        layers: &[oci_client_dep::client::ImageLayer],
+        config: oci_client_dep::client::Config,
+        auth: &oci_client_dep::secrets::RegistryAuth,
+        manifest: Option<oci_client_dep::manifest::OciImageManifest>,
+    ) -> Result<oci_client_dep::client::PushResponse>;
 }

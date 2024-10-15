@@ -20,14 +20,14 @@ use std::str::FromStr;
 /// `OciReference` provides a general type to represent any way of referencing images within an OCI registry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OciReference {
-    pub(crate) oci_reference: oci_distribution::Reference,
+    pub(crate) oci_reference: oci_client::Reference,
 }
 
 impl FromStr for OciReference {
     type Err = SigstoreError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<oci_distribution::Reference>()
+        s.parse::<oci_client::Reference>()
             .map_err(|_| SigstoreError::OciReferenceNotValidError {
                 reference: s.to_string(),
             })
@@ -39,14 +39,14 @@ impl OciReference {
     /// Create a Reference with a registry, repository and tag.
     pub fn with_tag(registry: String, repository: String, tag: String) -> Self {
         OciReference {
-            oci_reference: oci_distribution::Reference::with_tag(registry, repository, tag),
+            oci_reference: oci_client::Reference::with_tag(registry, repository, tag),
         }
     }
 
     /// Create a Reference with a registry, repository and digest.
     pub fn with_digest(registry: String, repository: String, digest: String) -> Self {
         OciReference {
-            oci_reference: oci_distribution::Reference::with_digest(registry, repository, digest),
+            oci_reference: oci_client::Reference::with_digest(registry, repository, digest),
         }
     }
 

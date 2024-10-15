@@ -21,7 +21,7 @@ use crate::registry::OciReference;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, fmt};
+use std::{collections::BTreeMap, fmt};
 use tracing::{debug, error, info};
 
 /// Default type name of [`Critical`] when doing cosign signing
@@ -65,7 +65,7 @@ impl SimpleSigning {
     }
 
     /// Checks whether all the provided `annotations` are satisfied
-    pub fn satisfies_annotations(&self, annotations: &HashMap<String, String>) -> bool {
+    pub fn satisfies_annotations(&self, annotations: &BTreeMap<String, String>) -> bool {
         if annotations.is_empty() {
             debug!("no annotations have been provided -> returning true");
             return true;
@@ -128,12 +128,12 @@ pub struct Optional {
     pub timestamp: Option<i64>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub extra: BTreeMap<String, Value>,
 }
 
 impl Optional {
     /// Checks whether all the provided `annotations` are satisfied
-    pub fn satisfies_annotations(&self, annotations: &HashMap<String, String>) -> bool {
+    pub fn satisfies_annotations(&self, annotations: &BTreeMap<String, String>) -> bool {
         if self.extra.is_empty() {
             info!(?annotations, "Annotations are not satisfied, no annotations are part of the Simple Signing object");
             return false;
@@ -221,7 +221,7 @@ mod tests {
         });
         let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
 
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(String::from("env"), String::from("prod"));
 
         assert!(!ss.satisfies_annotations(&annotations));
@@ -241,14 +241,14 @@ mod tests {
             }
         });
         let ss: SimpleSigning = serde_json::from_value(ss_json).unwrap();
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
 
         assert!(ss.satisfies_annotations(&annotations));
     }
 
     #[test]
     fn optional_has_all_the_required_annotations() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(String::from("env"), String::from("prod"));
         annotations.insert(String::from("number"), String::from("1"));
         annotations.insert(String::from("bool"), String::from("true"));
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn optional_does_not_satisfy_annotations_because_one_annotation_is_missing() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(String::from("env"), String::from("prod"));
         annotations.insert(String::from("owner"), String::from("flavio"));
 
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn optional_does_not_satisfy_annotations_because_one_annotation_has_different_value() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(String::from("env"), String::from("prod"));
         annotations.insert(String::from("owner"), String::from("flavio"));
 
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn optional_satisfies_annotations_when_no_annotation_is_provided() {
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
 
         let optional_json = json!({
             "env": "prod",

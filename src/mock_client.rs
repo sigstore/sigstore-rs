@@ -18,7 +18,7 @@ pub(crate) mod test {
     use crate::errors::{Result, SigstoreError};
 
     use async_trait::async_trait;
-    use oci_distribution::{
+    use oci_client::{
         client::{ImageData, PushResponse},
         manifest::OciManifest,
         secrets::RegistryAuth,
@@ -106,11 +106,11 @@ pub(crate) mod test {
 
         async fn push(
             &mut self,
-            image_ref: &oci_distribution::Reference,
-            _layers: &[oci_distribution::client::ImageLayer],
-            _config: oci_distribution::client::Config,
-            _auth: &oci_distribution::secrets::RegistryAuth,
-            _manifest: Option<oci_distribution::manifest::OciImageManifest>,
+            image_ref: &oci_client::Reference,
+            _layers: &[oci_client::client::ImageLayer],
+            _config: oci_client::client::Config,
+            _auth: &oci_client::secrets::RegistryAuth,
+            _manifest: Option<oci_client::manifest::OciImageManifest>,
         ) -> Result<PushResponse> {
             let mock_response =
                 self.push_response

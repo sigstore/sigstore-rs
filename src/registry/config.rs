@@ -30,22 +30,22 @@ pub enum Auth {
     Basic(String, String),
 }
 
-impl From<&Auth> for oci_distribution::secrets::RegistryAuth {
+impl From<&Auth> for oci_client::secrets::RegistryAuth {
     fn from(auth: &Auth) -> Self {
         match auth {
-            Auth::Anonymous => oci_distribution::secrets::RegistryAuth::Anonymous,
+            Auth::Anonymous => oci_client::secrets::RegistryAuth::Anonymous,
             Auth::Basic(username, pass) => {
-                oci_distribution::secrets::RegistryAuth::Basic(username.clone(), pass.clone())
+                oci_client::secrets::RegistryAuth::Basic(username.clone(), pass.clone())
             }
         }
     }
 }
 
-impl From<&oci_distribution::secrets::RegistryAuth> for Auth {
-    fn from(auth: &oci_distribution::secrets::RegistryAuth) -> Self {
+impl From<&oci_client::secrets::RegistryAuth> for Auth {
+    fn from(auth: &oci_client::secrets::RegistryAuth) -> Self {
         match auth {
-            oci_distribution::secrets::RegistryAuth::Anonymous => Auth::Anonymous,
-            oci_distribution::secrets::RegistryAuth::Basic(username, pass) => {
+            oci_client::secrets::RegistryAuth::Anonymous => Auth::Anonymous,
+            oci_client::secrets::RegistryAuth::Basic(username, pass) => {
                 Auth::Basic(username.clone(), pass.clone())
             }
         }
@@ -64,13 +64,13 @@ pub enum ClientProtocol {
     HttpsExcept(Vec<String>),
 }
 
-impl From<ClientProtocol> for oci_distribution::client::ClientProtocol {
+impl From<ClientProtocol> for oci_client::client::ClientProtocol {
     fn from(cp: ClientProtocol) -> Self {
         match cp {
-            ClientProtocol::Http => oci_distribution::client::ClientProtocol::Http,
-            ClientProtocol::Https => oci_distribution::client::ClientProtocol::Https,
+            ClientProtocol::Http => oci_client::client::ClientProtocol::Http,
+            ClientProtocol::Https => oci_client::client::ClientProtocol::Https,
             ClientProtocol::HttpsExcept(exceptions) => {
-                oci_distribution::client::ClientProtocol::HttpsExcept(exceptions)
+                oci_client::client::ClientProtocol::HttpsExcept(exceptions)
             }
         }
     }
@@ -85,11 +85,11 @@ pub enum CertificateEncoding {
     Pem,
 }
 
-impl From<CertificateEncoding> for oci_distribution::client::CertificateEncoding {
+impl From<CertificateEncoding> for oci_client::client::CertificateEncoding {
     fn from(ce: CertificateEncoding) -> Self {
         match ce {
-            CertificateEncoding::Der => oci_distribution::client::CertificateEncoding::Der,
-            CertificateEncoding::Pem => oci_distribution::client::CertificateEncoding::Pem,
+            CertificateEncoding::Der => oci_client::client::CertificateEncoding::Der,
+            CertificateEncoding::Pem => oci_client::client::CertificateEncoding::Pem,
         }
     }
 }
@@ -116,9 +116,9 @@ impl PartialOrd for Certificate {
     }
 }
 
-impl From<&Certificate> for oci_distribution::client::Certificate {
+impl From<&Certificate> for oci_client::client::Certificate {
     fn from(cert: &Certificate) -> Self {
-        oci_distribution::client::Certificate {
+        oci_client::client::Certificate {
             encoding: cert.encoding.clone().into(),
             data: cert.data.clone(),
         }
@@ -157,6 +157,16 @@ pub struct ClientConfig {
     /// A list of extra root certificate to trust. This can be used to connect
     /// to servers using self-signed certificates
     pub extra_root_certificates: Vec<Certificate>,
+
+    /// Set the `HTTPS PROXY` used by the client.
+    ///
+    /// This defaults to `None`.
+    pub https_proxy: Option<String>,
+
+    /// Set the `NO PROXY` used by the client.
+    ///
+    /// This defaults to `None`.
+    pub no_proxy: Option<String>,
 }
 
 impl Default for ClientConfig {
@@ -167,13 +177,15 @@ impl Default for ClientConfig {
             accept_invalid_hostnames: false,
             accept_invalid_certificates: false,
             extra_root_certificates: Vec::new(),
+            https_proxy: None,
+            no_proxy: None,
         }
     }
 }
 
-impl From<ClientConfig> for oci_distribution::client::ClientConfig {
+impl From<ClientConfig> for oci_client::client::ClientConfig {
     fn from(config: ClientConfig) -> Self {
-        oci_distribution::client::ClientConfig {
+        oci_client::client::ClientConfig {
             protocol: config.protocol.into(),
             accept_invalid_certificates: config.accept_invalid_certificates,
             #[cfg(feature = "full-native-tls")]
@@ -183,6 +195,8 @@ impl From<ClientConfig> for oci_distribution::client::ClientConfig {
                 .iter()
                 .map(|c| c.into())
                 .collect(),
+            https_proxy: config.https_proxy,
+            no_proxy: config.no_proxy,
             ..Default::default()
         }
     }
@@ -197,17 +211,17 @@ pub struct PushResponse {
     pub manifest_url: String,
 }
 
-impl From<PushResponse> for oci_distribution::client::PushResponse {
+impl From<PushResponse> for oci_client::client::PushResponse {
     fn from(pr: PushResponse) -> Self {
-        oci_distribution::client::PushResponse {
+        oci_client::client::PushResponse {
             config_url: pr.config_url,
             manifest_url: pr.manifest_url,
         }
     }
 }
 
-impl From<oci_distribution::client::PushResponse> for PushResponse {
-    fn from(pr: oci_distribution::client::PushResponse) -> Self {
+impl From<oci_client::client::PushResponse> for PushResponse {
+    fn from(pr: oci_client::client::PushResponse) -> Self {
         PushResponse {
             config_url: pr.config_url,
             manifest_url: pr.manifest_url,
