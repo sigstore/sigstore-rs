@@ -21,6 +21,7 @@ use crate::errors::*;
 
 pub use signing_key::SigStoreSigner;
 pub use verification_key::CosignVerificationKey;
+pub(crate) mod merkle;
 
 /// Different digital signature algorithms.
 /// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256
