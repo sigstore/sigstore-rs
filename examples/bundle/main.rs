@@ -66,14 +66,24 @@ pub fn main() {
 }
 
 fn sign(artifact_path: &PathBuf) {
+    let filename = artifact_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("Failed to parse artifact filename");
     let mut artifact = fs::File::open(artifact_path)
         .unwrap_or_else(|_| panic!("Failed to read artifact {}", artifact_path.display()));
 
-    let bundle_path = format!("{}.sigstore.json", artifact_path.display());
+    let mut bundle_path = artifact_path.clone();
+    bundle_path.set_file_name(format!("{}.sigstore.json", filename));
     let bundle = fs::File::create_new(&bundle_path).unwrap_or_else(|e| {
-        println!("Failed to create signature bundle {}: {}", bundle_path, e);
+        println!(
+            "Failed to create signature bundle {}: {}",
+            bundle_path.display(),
+            e
+        );
         std::process::exit(1);
     });
+
     let token = authorize();
     let email = &token.unverified_claims().email.clone();
     debug!("Signing with {}", email);
@@ -94,14 +104,21 @@ fn sign(artifact_path: &PathBuf) {
     }
     println!(
         "Created signature bundle {} with identity {}",
-        &bundle_path, email
+        bundle_path.display(),
+        email
     );
 }
 
 fn verify(artifact_path: &PathBuf, identity: &str, issuer: &str) {
-    let bundle_path = format!("{}.sigstore.json", artifact_path.display());
+    let filename = artifact_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("Failed to parse artifact filename");
+    let mut bundle_path = artifact_path.clone();
+    bundle_path.set_file_name(format!("{}.sigstore.json", filename));
+
     let bundle = fs::File::open(&bundle_path)
-        .unwrap_or_else(|_| panic!("Failed to open signature bundle {}", &bundle_path));
+        .unwrap_or_else(|_| panic!("Failed to open signature bundle {}", &bundle_path.display()));
     let mut artifact = fs::File::open(artifact_path)
         .unwrap_or_else(|_| panic!("Failed to read artifact {}", artifact_path.display()));
 
