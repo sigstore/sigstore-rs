@@ -693,10 +693,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreMediaTypeNotFoundError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreMediaTypeNotFoundError);
         assert!(found, "Got a different error type: {}", error);
     }
 
@@ -725,10 +722,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreMediaTypeNotFoundError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreMediaTypeNotFoundError);
         assert!(found, "Got a different error type: {}", error);
     }
 
@@ -758,10 +752,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreLayerDigestMismatchError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreLayerDigestMismatchError);
         assert!(found, "Got a different error type: {}", error);
     }
 

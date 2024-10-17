@@ -351,10 +351,10 @@ mod tests {
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
-        let found = match err {
-            SigstoreError::CertificateWithoutDigitalSignatureKeyUsage => true,
-            _ => false,
-        };
+        let found = matches!(
+            err,
+            SigstoreError::CertificateWithoutDigitalSignatureKeyUsage
+        );
         assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
@@ -376,10 +376,7 @@ mod tests {
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_key_usages(&cert).expect_err("Was supposed to return an error");
-        let found = match err {
-            SigstoreError::CertificateWithoutCodeSigningKeyUsage => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::CertificateWithoutCodeSigningKeyUsage);
         assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
@@ -402,10 +399,10 @@ mod tests {
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let error = verify_has_san(&cert).expect_err("Didn't get an error");
-        let found = match error {
-            SigstoreError::CertificateWithoutSubjectAlternativeName => true,
-            _ => false,
-        };
+        let found = matches!(
+            error,
+            SigstoreError::CertificateWithoutSubjectAlternativeName
+        );
         assert!(found, "Didn't get the expected error: {}", error);
 
         Ok(())
@@ -446,10 +443,7 @@ mod tests {
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
         let err = verify_validity(&cert).expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::CertificateValidityError(_) => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::CertificateValidityError(_));
         assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())
@@ -508,13 +502,13 @@ mod tests {
 
         let err = verify_expiration(&cert, integrated_time.timestamp())
             .expect_err("Was expecting an error");
-        let found = match err {
+        let found = matches!(
+            err,
             SigstoreError::CertificateIssuedAfterSignaturesSubmittedToRekor {
                 integrated_time: _,
                 not_after: _,
-            } => true,
-            _ => false,
-        };
+            }
+        );
         assert!(found, "Didn't get expected error, got {:?} instead", err);
 
         Ok(())

@@ -425,10 +425,7 @@ mod tests {
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::PublicKeyVerificationError => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::PublicKeyVerificationError);
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
@@ -443,10 +440,7 @@ mod tests {
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::Base64DecodeError(_) => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::Base64DecodeError(_));
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
@@ -468,10 +462,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::PublicKeyVerificationError => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::PublicKeyVerificationError);
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 

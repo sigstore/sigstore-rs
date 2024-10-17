@@ -129,7 +129,7 @@ mod tests {
 
         // Generate the key id.
         let mut hasher = sha2::Sha256::new();
-        hasher.write(pub_key.as_slice()).unwrap();
+        hasher.write_all(pub_key.as_slice()).unwrap();
         let key_id: [u8; 32] = hasher.finalize().into();
 
         // Check for success.
