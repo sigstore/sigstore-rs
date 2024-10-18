@@ -54,7 +54,6 @@ sigstore-trust-root = [
   "futures-util",
   "tough",
   "reqwest_0_11",
-  "regex",
   "tokio/sync",
 ]
 sigstore-trust-root-native-tls = [
@@ -78,7 +77,7 @@ cosign-rustls-tls = [
   "cosign",
   "registry-rustls-tls",
 ]
-cosign = ["olpc-cjson"]
+cosign = ["olpc-cjson", "regex"]
 cert = []
 
 registry-native-tls = ["oci-client/native-tls", "registry"]
