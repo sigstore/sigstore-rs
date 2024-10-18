@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use clap::Parser;
 use sigstore::cosign::bundle::SignedArtifactBundle;
 use sigstore::cosign::client::Client;
@@ -62,7 +63,14 @@ pub async fn main() {
     let blob = fs::read(cli.blob.as_str()).expect("error reading blob file");
 
     let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
-    match Client::verify_blob(&bundle.cert, &bundle.base64_signature, &blob) {
+
+    // certificate in bundle is double base64 encoded, remove one layer:
+    let cert_data = BASE64_STD_ENGINE
+        .decode(bundle.cert)
+        .expect("Error decoding base64 certificate");
+    let cert = String::from_utf8(cert_data).expect("error stringifying PEM certificate");
+
+    match Client::verify_blob(&cert, &bundle.base64_signature, &blob) {
         Ok(_) => println!("Verification succeeded"),
         Err(e) => eprintln!("Verification failed: {}", e),
     }
