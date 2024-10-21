@@ -148,6 +148,8 @@ fn authorize() -> oauth::IdentityToken {
 
     webbrowser::open(oidc_url.0.as_ref()).expect("Failed to open browser");
 
+    println!("Please authorize signing in web browser.");
+
     let listener = oauth::openidflow::RedirectListener::new(
         "127.0.0.1:8080",
         oidc_url.1, // client
