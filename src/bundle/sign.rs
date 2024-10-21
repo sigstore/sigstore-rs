@@ -44,7 +44,7 @@ use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
-use crate::oauth::IdentityToken;
+use crate::oauth::{Identity, IdentityToken};
 use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
@@ -85,6 +85,15 @@ impl<'ctx> SigningSession<'ctx> {
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
+        let identity = match &token.identity {
+            Identity::Sub(_) => {
+                return Err(SigstoreError::IdentityTokenError(
+                    "Non-email identities are not yet supported".to_string(),
+                ))
+            }
+            Identity::Email(identity) => identity.as_str(),
+        };
+
         let subject =
                 // SEQUENCE OF RelativeDistinguishedName
                 vec![
@@ -95,7 +104,7 @@ impl<'ctx> SigningSession<'ctx> {
                             oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
                             value: AttributeValue::new(
                                 pkcs8::der::Tag::Utf8String,
-                                token.unverified_claims().email.as_ref(),
+                                identity.as_ref(),
                             )?,
                         }
                     ].try_into()?

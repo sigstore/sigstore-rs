@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use openidconnect::core::CoreIdToken;
 use serde::Deserialize;
@@ -28,15 +30,35 @@ pub struct Claims {
     #[serde(with = "chrono::serde::ts_seconds_option")]
     #[serde(default)]
     pub nbf: Option<DateTime<Utc>>,
-    pub email: String,
+    pub email: Option<String>,
+    pub iss: String,
+    pub sub: Option<String>,
 }
 
 pub type UnverifiedClaims = Claims;
+
+// identity is the claim that we believe Fulcio uses: Depending on the issuer it is
+// either a "sub" or "email" claim.
+#[derive(Debug, PartialEq)]
+pub enum Identity {
+    Sub(String),
+    Email(String),
+}
+
+impl fmt::Display for Identity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Identity::Sub(sub) => sub.fmt(f),
+            Identity::Email(email) => email.fmt(f),
+        }
+    }
+}
 
 /// A Sigstore token.
 pub struct IdentityToken {
     original_token: String,
     claims: UnverifiedClaims,
+    pub identity: Identity,
 }
 
 impl IdentityToken {
@@ -82,9 +104,35 @@ impl TryFrom<&str> for IdentityToken {
             ));
         }
 
+        // Find the identity claim that we believe Fulcio used for this token.
+        // This means a few special cases and fall back on "sub" claim
+        let identity = match claims.iss.as_str() {
+            "https://accounts.google.com"
+            | "https://oauth2.sigstore.dev/auth"
+            | "https://oauth2.sigstage.dev/auth" => {
+                if let Some(email) = claims.email.as_ref() {
+                    Identity::Email(email.clone())
+                } else {
+                    return Err(SigstoreError::IdentityTokenError(
+                        "Email claim not found in JWT".into(),
+                    ));
+                }
+            }
+            _ => {
+                if let Some(sub) = claims.sub.as_ref() {
+                    Identity::Sub(sub.clone())
+                } else {
+                    return Err(SigstoreError::IdentityTokenError(
+                        "Sub claim not found in JWT".into(),
+                    ));
+                }
+            }
+        };
+
         Ok(IdentityToken {
             original_token: value.to_owned(),
             claims,
+            identity,
         })
     }
 }
@@ -107,16 +155,53 @@ impl std::fmt::Display for IdentityToken {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use super::*;
+    use std::fs;
 
-   #[test]
-   fn interactive_token() {
-       let content = fs::read_to_string("tests/data/tokens/interactive-token.txt").unwrap();
-       let identity_token = IdentityToken::try_from(content.as_str()).unwrap();
-       assert_eq!(identity_token.claims.email, "jku@goto.fi");
-       assert_eq!(identity_token.claims.aud, "sigstore");
-       assert_eq!(identity_token.claims.exp, DateTime::parse_from_rfc3339("2024-10-21T12:15:30Z").unwrap());
-   }
+    #[test]
+    fn interactive_token() {
+        let content = fs::read_to_string("tests/data/tokens/interactive-token.txt").unwrap();
+        let identity_token = IdentityToken::try_from(content.as_str()).unwrap();
+        assert_eq!(
+            identity_token.claims.email,
+            Some(String::from("jku@goto.fi"))
+        );
+        assert_eq!(
+            identity_token.identity,
+            Identity::Email(String::from("jku@goto.fi"))
+        );
+        assert_eq!(identity_token.claims.aud, "sigstore");
+        assert_eq!(
+            identity_token.claims.iss,
+            "https://oauth2.sigstore.dev/auth"
+        );
+        assert_eq!(
+            identity_token.claims.exp,
+            DateTime::parse_from_rfc3339("2024-10-21T12:15:30Z").unwrap()
+        );
+    }
 
+    #[test]
+    fn github_actions_token() {
+        let content = fs::read_to_string("tests/data/tokens/gha-token.txt").unwrap();
+        let identity_token = IdentityToken::try_from(content.as_str()).unwrap();
+        assert_eq!(identity_token.claims.email, None);
+        assert_eq!(
+            identity_token.claims.sub,
+            Some(String::from("repo:sigstore-conformance/extremely-dangerous-public-oidc-beacon:ref:refs/heads/main"))
+        );
+        assert_eq!(
+            identity_token.identity,
+            Identity::Sub(String::from("repo:sigstore-conformance/extremely-dangerous-public-oidc-beacon:ref:refs/heads/main"))
+        );
+        assert_eq!(identity_token.claims.aud, "sigstore");
+        assert_eq!(
+            identity_token.claims.iss,
+            "https://token.actions.githubusercontent.com"
+        );
+        assert_eq!(
+            identity_token.claims.exp,
+            DateTime::parse_from_rfc3339("2024-10-21T07:29:49Z").unwrap()
+        );
+    }
 }
