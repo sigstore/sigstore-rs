@@ -104,3 +104,19 @@ impl std::fmt::Display for IdentityToken {
         write!(f, "{}", self.original_token.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use super::*;
+
+   #[test]
+   fn interactive_token() {
+       let content = fs::read_to_string("tests/data/tokens/interactive-token.txt").unwrap();
+       let identity_token = IdentityToken::try_from(content.as_str()).unwrap();
+       assert_eq!(identity_token.claims.email, "jku@goto.fi");
+       assert_eq!(identity_token.claims.aud, "sigstore");
+       assert_eq!(identity_token.claims.exp, DateTime::parse_from_rfc3339("2024-10-21T12:15:30Z").unwrap());
+   }
+
+}
