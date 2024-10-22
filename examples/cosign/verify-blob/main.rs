@@ -15,6 +15,7 @@
 
 extern crate clap;
 extern crate sigstore;
+use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
 use clap::Parser;
 use sigstore::cosign::client::Client;
 use sigstore::cosign::CosignCapabilities;
@@ -56,11 +57,17 @@ pub async fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    let certificate = fs::read_to_string(&cli.certificate).expect("error reading certificate");
+    // certificate may be PEM or "double base64 encoded PEM" (cosign).
+    let cert_input = fs::read_to_string(&cli.certificate).expect("error reading certificate");
+    let certificate = match BASE64_STD_ENGINE.decode(cert_input.clone()) {
+        Ok(res) => String::from_utf8(res).expect("error stringifying PEM certificate"),
+        Err(_) => cert_input,
+    };
+
     let signature = fs::read_to_string(&cli.signature).expect("error reading signature");
     let blob = fs::read(cli.blob.as_str()).expect("error reading blob file");
 
-    match Client::verify_blob(&certificate, &signature, &blob) {
+    match Client::verify_blob(&certificate, signature.trim(), &blob) {
         Ok(_) => println!("Verification succeeded"),
         Err(e) => eprintln!("Verification failed {:?}", e),
     }
