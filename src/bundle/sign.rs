@@ -85,13 +85,10 @@ impl<'ctx> SigningSession<'ctx> {
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
+        // NOTE: Currently both email and machine identities get wrapped in a "email" OID.
+        // Fulcio does not care about the content.
         let identity = match &token.identity {
-            Identity::Sub(_) => {
-                return Err(SigstoreError::IdentityTokenError(
-                    "Non-email identities are not yet supported".to_string(),
-                ))
-            }
-            Identity::Email(identity) => identity.as_str(),
+            Identity::Sub(identity) | Identity::Email(identity) => identity.as_str(),
         };
 
         let subject =
