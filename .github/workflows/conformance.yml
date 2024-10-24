@@ -7,15 +7,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1.0.3
-        with:
-          command: build
-          args: --manifest-path=tests/conformance/Cargo.toml
+      - name: Rustup
+        run: |
+          rustup install --profile minimal stable
+          rustup override set stable
+      - run: |
+          cargo build --manifest-path=tests/conformance/Cargo.toml
       - uses: sigstore/sigstore-conformance@main
         with:
           entrypoint: ${{ github.workspace }}/tests/conformance/target/debug/sigstore
