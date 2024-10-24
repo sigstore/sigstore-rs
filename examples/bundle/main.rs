@@ -85,7 +85,7 @@ fn sign(artifact_path: &PathBuf) {
     });
 
     let token = authorize();
-    let identity = token.identity.to_string();
+    let identity = token.identity_claim.to_string();
     debug!("Signing with {}", identity);
 
     let signing_artifact = SigningContext::production().and_then(|ctx| {

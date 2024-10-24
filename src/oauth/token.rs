@@ -37,28 +37,34 @@ pub struct Claims {
 
 pub type UnverifiedClaims = Claims;
 
-// identity is the claim that we believe Fulcio uses: Depending on the issuer it is
+// The identity that should be compatible with Fulcio: Depending on the issuer it is
 // either a "sub" or "email" claim.
 #[derive(Debug, PartialEq)]
-pub enum Identity {
+pub enum IdentityClaim {
     Sub(String),
     Email(String),
 }
 
-impl fmt::Display for Identity {
+impl fmt::Display for IdentityClaim {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Identity::Sub(sub) => sub.fmt(f),
-            Identity::Email(email) => email.fmt(f),
+            IdentityClaim::Sub(sub) => sub.fmt(f),
+            IdentityClaim::Email(email) => email.fmt(f),
         }
     }
 }
 
-/// A Sigstore token.
+/// A Sigstore (Fulcio) authentication token
+///
+/// An IdentityToken is built from a OIDC JWT received from an OIDC provider and is used to
+/// authenticate a signing identity to Fulcio to get a signing certificate for that identity.
+///
+/// The content of the token, including identity and issuer claims, come unverified from
+/// the JWT: IdentityToken only makes some validity checks.
 pub struct IdentityToken {
     original_token: String,
     claims: UnverifiedClaims,
-    pub identity: Identity,
+    pub identity_claim: IdentityClaim,
 }
 
 impl IdentityToken {
@@ -111,7 +117,7 @@ impl TryFrom<&str> for IdentityToken {
             | "https://oauth2.sigstore.dev/auth"
             | "https://oauth2.sigstage.dev/auth" => {
                 if let Some(email) = claims.email.as_ref() {
-                    Identity::Email(email.clone())
+                    IdentityClaim::Email(email.clone())
                 } else {
                     return Err(SigstoreError::IdentityTokenError(
                         "Email claim not found in JWT".into(),
@@ -120,7 +126,7 @@ impl TryFrom<&str> for IdentityToken {
             }
             _ => {
                 if let Some(sub) = claims.sub.as_ref() {
-                    Identity::Sub(sub.clone())
+                    IdentityClaim::Sub(sub.clone())
                 } else {
                     return Err(SigstoreError::IdentityTokenError(
                         "Sub claim not found in JWT".into(),
@@ -132,7 +138,7 @@ impl TryFrom<&str> for IdentityToken {
         Ok(IdentityToken {
             original_token: value.to_owned(),
             claims,
-            identity,
+            identity_claim: identity,
         })
     }
 }
@@ -167,8 +173,8 @@ mod tests {
             Some(String::from("jku@goto.fi"))
         );
         assert_eq!(
-            identity_token.identity,
-            Identity::Email(String::from("jku@goto.fi"))
+            identity_token.identity_claim,
+            IdentityClaim::Email(String::from("jku@goto.fi"))
         );
         assert_eq!(identity_token.claims.aud, "sigstore");
         assert_eq!(
@@ -191,8 +197,8 @@ mod tests {
             Some(String::from("repo:sigstore-conformance/extremely-dangerous-public-oidc-beacon:ref:refs/heads/main"))
         );
         assert_eq!(
-            identity_token.identity,
-            Identity::Sub(String::from("repo:sigstore-conformance/extremely-dangerous-public-oidc-beacon:ref:refs/heads/main"))
+            identity_token.identity_claim,
+            IdentityClaim::Sub(String::from("repo:sigstore-conformance/extremely-dangerous-public-oidc-beacon:ref:refs/heads/main"))
         );
         assert_eq!(identity_token.claims.aud, "sigstore");
         assert_eq!(
