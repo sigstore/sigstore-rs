@@ -12,6 +12,7 @@ jobs:
         run: |
           rustup install --profile minimal stable
           rustup override set stable
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           cargo check
 
@@ -25,6 +26,7 @@ jobs:
           rustup install --profile minimal stable
           rustup override set stable
           rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           cargo check --no-default-features --features wasm
 
@@ -37,6 +39,7 @@ jobs:
         run: |
           rustup install --profile minimal stable
           rustup override set stable
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           cargo test --workspace --features full-native-tls,test-registry
 
@@ -49,6 +52,7 @@ jobs:
         run: |
           rustup install --profile minimal nightly
           rustup override set nightly
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           make doc
 
@@ -62,6 +66,7 @@ jobs:
           rustup install --profile minimal stable
           rustup override set stable
           rustup component add rustfmt
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           cargo fmt --all -- --check
 
@@ -75,5 +80,6 @@ jobs:
           rustup install --profile minimal stable
           rustup override set stable
           rustup component add clippy
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
       - run: |
           cargo clippy --workspace -- -D warnings
