@@ -7,8 +7,7 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
 
-# Declare default permissions as read only.
-permissions: read-all
+permissions: {}
 
 jobs:
   audit:
@@ -19,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Generate lockfile
         run: cargo generate-lockfile
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
