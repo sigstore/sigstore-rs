@@ -320,10 +320,7 @@ impl SignatureLayer {
         fulcio_cert_pool: Option<&CertificatePool>,
         bundle: Option<&Bundle>,
     ) -> Option<CertificateSignature> {
-        let cert_raw = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
-            Some(value) => value,
-            None => return None,
-        };
+        let cert_raw = annotations.get(SIGSTORE_CERT_ANNOTATION)?;
 
         let fulcio_cert_pool = match fulcio_cert_pool {
             Some(cp) => cp,
