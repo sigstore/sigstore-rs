@@ -120,7 +120,7 @@ pem = { version = "3.0", features = ["serde"] }
 pkcs1 = { version = "0.7", features = ["std"] }
 pkcs8 = { version = "0.10", features = ["pem", "alloc", "pkcs5", "encryption"] }
 rand = { version = "0.8", features = ["getrandom", "std"] }
-getrandom = "0.2"
+getrandom = "0.3"
 regex = { version = "1.10", optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
