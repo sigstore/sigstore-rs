@@ -85,8 +85,8 @@ fn sign(artifact_path: &PathBuf) {
     });
 
     let token = authorize();
-    let email = &token.unverified_claims().email.clone();
-    debug!("Signing with {}", email);
+    let identity = token.identity_claim.to_string();
+    debug!("Signing with {}", identity);
 
     let signing_artifact = SigningContext::production().and_then(|ctx| {
         ctx.blocking_signer(token)
@@ -105,7 +105,7 @@ fn sign(artifact_path: &PathBuf) {
     println!(
         "Created signature bundle {} with identity {}",
         bundle_path.display(),
-        email
+        identity
     );
 }
 
