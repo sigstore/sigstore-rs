@@ -143,7 +143,9 @@ sigstore_protobuf_specs = { version = "0.3", optional = true }
 thiserror = "1.0"
 tokio = { version = "1", features = ["rt"] }
 tokio-util = { version = "0.7", features = ["io-util"] }
-tough = { version = "0.18", features = ["http"], optional = true }
+tough = { git = "https://github.com/flavio/tough.git", tag = "tough-v0.18.0+sigstore-keyid-patch-1", features = [
+  "http",
+], optional = true }
 tracing = "0.1"
 url = "2.5"
 x509-cert = { version = "0.2", features = ["builder", "pem", "std", "sct"] }
