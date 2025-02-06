@@ -202,6 +202,10 @@ pub enum SigstoreError {
     #[error("Verification of OIDC claims received from OpenIdProvider failed")]
     ClaimsVerificationError,
 
+    #[cfg(feature = "oauth")]
+    #[error("Claims configuration error: {0}")]
+    ClaimsConfigurationError(#[from] openidconnect::ConfigurationError),
+
     #[error("Failed to access token endpoint")]
     ClaimsAccessPointError,
 

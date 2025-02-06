@@ -53,17 +53,11 @@ sigstore-trust-root = [
   "sigstore_protobuf_specs",
   "futures-util",
   "tough",
-  "reqwest_0_11",
+  "reqwest",
   "tokio/sync",
 ]
-sigstore-trust-root-native-tls = [
-  "reqwest_0_11/native-tls",
-  "sigstore-trust-root",
-]
-sigstore-trust-root-rustls-tls = [
-  "reqwest_0_11/rustls-tls",
-  "sigstore-trust-root",
-]
+sigstore-trust-root-native-tls = ["reqwest/native-tls", "sigstore-trust-root"]
+sigstore-trust-root-rustls-tls = ["reqwest/rustls-tls", "sigstore-trust-root"]
 
 cosign-native-tls = [
   "oci-client/native-tls",
@@ -110,8 +104,9 @@ futures-util = { version = "0.3", optional = true }
 lazy_static = "1.5"
 oci-client = { default-features = false, optional = true, version = "0.14" }
 olpc-cjson = { version = "0.1", optional = true }
-openidconnect = { version = "3.5", default-features = false, features = [
+openidconnect = { version = "4.0", default-features = false, features = [
   "reqwest",
+  "reqwest-blocking",
 ], optional = true }
 p256 = "0.13"
 p384 = "0.13"
@@ -126,11 +121,6 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "multipart",
 ], optional = true }
-# We have to include this old version of reqwest because tough is currently using it.
-# By including it, we can configure which TLS backend it's going to use, otherwise fetching the
-# TUF sigstore repository will fail at runtime because the old version of reqwest
-# will be compiled withtout TLS support.
-reqwest_0_11 = { package = "reqwest", version = "0.11", default-features = false, optional = true }
 rsa = "0.9"
 scrypt = "0.11"
 serde = { version = "1.0", features = ["derive"] }
