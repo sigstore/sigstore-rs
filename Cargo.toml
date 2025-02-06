@@ -138,7 +138,7 @@ serde_json = "1.0"
 serde_with = { version = "3.9", features = ["base64", "json"], optional = true }
 sha2 = { version = "0.10", features = ["oid"] }
 signature = { version = "2.2" }
-sigstore_protobuf_specs = { version = "0.3", optional = true }
+sigstore_protobuf_specs = { version = "0.4", optional = true }
 thiserror = "2.0"
 tokio = { version = "1", features = ["rt"] }
 tokio-util = { version = "0.7", features = ["io-util"] }
