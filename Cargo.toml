@@ -59,6 +59,10 @@ sigstore-trust-root = [
 sigstore-trust-root-native-tls = ["reqwest/native-tls", "sigstore-trust-root"]
 sigstore-trust-root-rustls-tls = ["reqwest/rustls-tls", "sigstore-trust-root"]
 
+# This feature flag is used to allow using the platform's native certificate store
+# when using rustls suites
+rustls-tls-native-roots = ["oci-client/rustls-tls-native-roots"]
+
 cosign-native-tls = [
   "oci-client/native-tls",
   "cert",
