@@ -4,37 +4,65 @@ name: Continuous integration
 
 jobs:
   check:
-    name: Check
+    name: Check features
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Rustup
-        run: |
-          rustup install --profile minimal stable
-          rustup override set stable
+      - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - run: |
-          cargo check
+      - uses: taiki-e/install-action@7ea888af71a31437ad4e71c62d021b3bb2728ea9 # v2.49.3
+        with:
+          tool: cargo-hack
 
-  check-wasm:
-    name: Check WASM
+      # cosign, full, mock-client, registry will ONLY compile with a *-tls feature
+      - run: |
+          cargo hack check --each-feature --skip cosign --skip full --skip mock-client --skip registry
+
+  check-native-tls:
+    name: Check native-tls features
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Rustup
-        run: |
-          rustup install --profile minimal stable
-          rustup override set stable
-          rustup target add wasm32-unknown-unknown
+      - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - uses: taiki-e/install-action@7ea888af71a31437ad4e71c62d021b3bb2728ea9 # v2.49.3
+        with:
+          tool: cargo-hack
+      - run: |
+          cargo hack check --feature-powerset --features native-tls --skip wasm --skip test-registry --skip rustls-tls --skip rustls-tls-native-roots
+
+  check-rustls-tls:
+    name: Check rusttls-tls features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - uses: taiki-e/install-action@7ea888af71a31437ad4e71c62d021b3bb2728ea9 # v2.49.3
+        with:
+          tool: cargo-hack
+      - run: |
+          cargo hack check --feature-powerset --features rustls-tls --skip wasm --skip test-registry --skip native-tls
+
+  test-native-tls:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       - run: |
-          cargo check --no-default-features --features wasm
+          cargo test --workspace --no-default-features --features full,native-tls,test-registry
 
-  test:
+  test-rustls-tls:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
@@ -47,7 +75,7 @@ jobs:
           rustup override set stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       - run: |
-          cargo test --workspace --features full-native-tls,test-registry
+          cargo test --workspace --no-default-features --features full,rustls-tls,test-registry
 
   doc:
     name: Build Documentation
