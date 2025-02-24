@@ -142,7 +142,7 @@ url = "2.5"
 x509-cert = { version = "0.2", features = ["builder", "pem", "std", "sct"] }
 crypto_secretbox = "0.1"
 zeroize = "1.8"
-rustls-webpki = { version = "0.102", features = ["alloc"] }
+rustls-webpki = { version = "0.103", features = ["alloc"] }
 serde_repr = "0.1"
 hex = "0.4"
 json-syntax = { version = "0.12", features = ["canonicalize", "serde"] }
