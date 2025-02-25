@@ -5,6 +5,7 @@ build:
 .PHONY: fmt
 fmt:
 	cargo fmt --all -- --check
+	taplo fmt --check
 
 .PHONY: lint
 lint:
