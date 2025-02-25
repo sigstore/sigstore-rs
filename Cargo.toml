@@ -95,7 +95,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "now",
     "serde",
 ] }
-const-oid = { version = "0.9", default-features = false, features = ["db"] }
+const-oid = { version = "0.10", default-features = false, features = ["db"] }
 crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",
