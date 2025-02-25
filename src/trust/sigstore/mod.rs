@@ -25,13 +25,13 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use tokio_util::bytes::BytesMut;
 
+use pki_types::CertificateDer;
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::TimeRange,
     trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
 };
 use tough::TargetName;
 use tracing::debug;
-use webpki::types::CertificateDer;
 
 mod constants;
 

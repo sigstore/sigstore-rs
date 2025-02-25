@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pki_types::CertificateDer;
 use tracing::info;
-use webpki::types::CertificateDer;
 
 use super::client::Client;
 use crate::crypto::SigningScheme;
