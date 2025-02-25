@@ -155,7 +155,7 @@ pkcs8 = { version = "0.10", default-features = false, features = [
     "pkcs5",
     "std",
 ] }
-rand = { version = "0.8", default-features = false, features = [
+rand = { version = "0.9", default-features = false, features = [
     "getrandom",
     "std",
 ] }
