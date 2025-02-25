@@ -147,8 +147,8 @@ pub struct ClientConfig {
     pub protocol: ClientProtocol,
 
     /// Accept invalid hostname. Defaults to false
-    #[cfg_attr(docsrs, doc(cfg(feature = "full-native-tls")))]
-    #[cfg(feature = "full-native-tls")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
+    #[cfg(feature = "native-tls")]
     pub accept_invalid_hostnames: bool,
 
     /// Accept invalid certificates. Defaults to false
@@ -173,7 +173,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         ClientConfig {
             protocol: ClientProtocol::Https,
-            #[cfg(feature = "full-native-tls")]
+            #[cfg(feature = "native-tls")]
             accept_invalid_hostnames: false,
             accept_invalid_certificates: false,
             extra_root_certificates: Vec::new(),
@@ -188,7 +188,7 @@ impl From<ClientConfig> for oci_client::client::ClientConfig {
         oci_client::client::ClientConfig {
             protocol: config.protocol.into(),
             accept_invalid_certificates: config.accept_invalid_certificates,
-            #[cfg(feature = "full-native-tls")]
+            #[cfg(feature = "native-tls")]
             accept_invalid_hostnames: config.accept_invalid_hostnames,
             extra_root_certificates: config
                 .extra_root_certificates

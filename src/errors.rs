@@ -144,8 +144,8 @@ pub enum SigstoreError {
     SCTError(#[from] crate::crypto::transparency::SCTError),
 
     // HACK(tnytown): Remove when we rework the Fulcio V2 endpoint.
-    #[cfg(feature = "fulcio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "fulcio")))]
+    #[cfg(any(feature = "fulcio", feature = "oauth"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "fulcio", feature = "oauth"))))]
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
 

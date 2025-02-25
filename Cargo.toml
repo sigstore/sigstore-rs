@@ -1,166 +1,238 @@
 [package]
-name = "sigstore"
-description = "An experimental crate to interact with sigstore"
-version = "0.11.0"
-edition = "2021"
 authors = ["sigstore-rs developers"]
+description = "An experimental crate to interact with sigstore"
+edition = "2021"
 license = "Apache-2.0"
+name = "sigstore"
 readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
+version = "0.11.0"
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
-default = ["full-native-tls", "cached-client", "sigstore-trust-root", "bundle"]
-wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js", "chrono/wasmbind"]
+default = ["full", "native-tls"]
 
-full-native-tls = [
-  "fulcio-native-tls",
-  "rekor-native-tls",
-  "cosign-native-tls",
-  "mock-client-native-tls",
-  "sigstore-trust-root-native-tls",
-]
-full-rustls-tls = [
-  "fulcio-rustls-tls",
-  "rekor-rustls-tls",
-  "cosign-rustls-tls",
-  "mock-client-rustls-tls",
-  "sigstore-trust-root-rustls-tls",
-]
-
-# This features is used by tests that use docker to create a registry
-test-registry = []
-
-oauth-native-tls = ["openidconnect/native-tls", "oauth"]
-oauth-rustls-tls = ["openidconnect/rustls-tls", "oauth"]
-oauth = ["openidconnect"]
-
-fulcio-native-tls = ["oauth-native-tls", "reqwest/native-tls", "fulcio"]
-fulcio-rustls-tls = ["oauth-rustls-tls", "reqwest/rustls-tls", "fulcio"]
-fulcio = ["oauth", "serde_with"]
-
-rekor-native-tls = ["reqwest/native-tls", "rekor"]
-rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
-rekor = ["reqwest"]
-
-sign = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
-verify = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
 bundle = ["sign", "verify"]
-
-sigstore-trust-root = [
-  "sigstore_protobuf_specs",
-  "futures-util",
-  "tough",
-  "reqwest",
-  "tokio/sync",
+cached-client = ["dep:cached"]
+cert = ["dep:ring"]
+cosign = [
+    "cert",
+    "dep:async-trait",
+    "dep:cfg-if",
+    "dep:oci-client",
+    "dep:olpc-cjson",
+    "dep:regex",
+    "registry",
 ]
-sigstore-trust-root-native-tls = ["reqwest/native-tls", "sigstore-trust-root"]
-sigstore-trust-root-rustls-tls = ["reqwest/rustls-tls", "sigstore-trust-root"]
-
+fulcio = [
+    "dep:reqwest",
+    "dep:serde_repr",
+    "dep:serde_with",
+    "dep:webbrowser",
+    "oauth",
+]
+full = [
+    "bundle",
+    "cached-client",
+    "cosign",
+    "fulcio",
+    "mock-client",
+    "rekor",
+    "sigstore-trust-root",
+]
+mock-client = ["dep:async-trait", "dep:oci-client"]
+native-tls = [
+    "oci-client?/native-tls",
+    "openidconnect?/native-tls",
+    "reqwest?/native-tls",
+]
+oauth = ["dep:openidconnect", "dep:reqwest"]
+registry = ["dep:async-trait", "dep:oci-client", "dep:olpc-cjson"]
+rekor = ["dep:reqwest"]
+rustls-tls = [
+    "oci-client?/rustls-tls",
+    "openidconnect?/rustls-tls",
+    "reqwest?/rustls-tls",
+]
 # This feature flag is used to allow using the platform's native certificate store
 # when using rustls suites
-rustls-tls-native-roots = ["oci-client/rustls-tls-native-roots"]
-
-cosign-native-tls = [
-  "oci-client/native-tls",
-  "cert",
-  "cosign",
-  "registry-native-tls",
+rustls-tls-native-roots = ["oci-client?/rustls-tls-native-roots"]
+sign = [
+    "cert",
+    "dep:hex",
+    "dep:json-syntax",
+    "dep:sigstore_protobuf_specs",
+    "fulcio",
+    "rekor",
 ]
-cosign-rustls-tls = [
-  "oci-client/rustls-tls",
-  "cert",
-  "cosign",
-  "registry-rustls-tls",
+sigstore-trust-root = [
+    "dep:futures",
+    "dep:futures-util",
+    "dep:reqwest",
+    "dep:sigstore_protobuf_specs",
+    "dep:tough",
+    "tokio/sync",
 ]
-cosign = ["olpc-cjson", "regex"]
-cert = []
-
-registry-native-tls = ["oci-client/native-tls", "registry"]
-registry-rustls-tls = ["oci-client/rustls-tls", "registry"]
-registry = ["olpc-cjson"]
-
-mock-client-native-tls = ["oci-client/native-tls", "mock-client"]
-mock-client-rustls-tls = ["oci-client/rustls-tls", "mock-client"]
-mock-client = []
-
-cached-client = ["cached"]
+test-registry = [] # used for testing against a test registry
+verify = [
+    "cert",
+    "dep:hex",
+    "dep:json-syntax",
+    "dep:sigstore_protobuf_specs",
+    "fulcio",
+    "rekor",
+]
+wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
 
 [dependencies]
-async-trait = "0.1"
-base64 = "0.22"
+async-trait = { version = "0.1", optional = true, default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 cached = { version = "0.54", optional = true, features = ["async"] }
-cfg-if = "1.0.0"
+cfg-if = { version = "1.0.0", optional = true, default-features = false }
 chrono = { version = "0.4", default-features = false, features = [
-  "now",
-  "serde",
+    "now",
+    "serde",
 ] }
-const-oid = { version = "0.9", features = ["db"] }
+const-oid = { version = "0.9", default-features = false, features = ["db"] }
+crypto_secretbox = { version = "0.1", default-features = false, features = [
+    "alloc",
+    "salsa20",
+] }
 digest = { version = "0.10", default-features = false }
-ecdsa = { version = "0.16", features = ["pkcs8", "digest", "der", "signing"] }
-ed25519 = { version = "2.2", features = ["alloc"] }
-ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
-elliptic-curve = { version = "0.13", features = ["arithmetic", "pem"] }
-futures = "0.3"
-futures-util = { version = "0.3", optional = true }
-lazy_static = "1.5"
-oci-client = { default-features = false, optional = true, version = "0.14" }
-olpc-cjson = { version = "0.1", optional = true }
+ecdsa = { version = "0.16", default-features = false, features = [
+    "der",
+    "digest",
+    "pkcs8",
+    "signing",
+    "std",
+] }
+ed25519 = { version = "2.2", default-features = false, features = ["alloc"] }
+ed25519-dalek = { version = "2.1", default-features = false, features = [
+    "alloc",
+    "pkcs8",
+    "rand_core",
+] }
+elliptic-curve = { version = "0.13", default-features = false, features = [
+    "arithmetic",
+    "pem",
+    "std",
+] }
+futures = { version = "0.3", default-features = false, optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+getrandom = { version = "0.2", default-features = false, optional = true }
+hex = { version = "0.4", default-features = false, optional = true, features = [
+    "std",
+] }
+json-syntax = { version = "0.12", default-features = false, features = [
+    "canonicalize",
+    "serde",
+], optional = true }
+oci-client = { version = "0.14", default-features = false, optional = true }
+olpc-cjson = { version = "0.1", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
-  "reqwest",
-  "reqwest-blocking",
+    "reqwest",
+    "reqwest-blocking",
 ], optional = true }
-p256 = "0.13"
-p384 = "0.13"
-webbrowser = "1.0"
-pem = { version = "3.0", features = ["serde"] }
-pkcs1 = { version = "0.7", features = ["std"] }
-pkcs8 = { version = "0.10", features = ["pem", "alloc", "pkcs5", "encryption"] }
-rand = { version = "0.8", features = ["getrandom", "std"] }
-getrandom = "0.2"
-regex = { version = "1.10", optional = true }
+p256 = { version = "0.13", default-features = false, features = [
+    "arithmetic",
+    "ecdsa",
+    "pem",
+    "std",
+] }
+p384 = { version = "0.13", default-features = false, features = [
+    "arithmetic",
+    "ecdsa",
+    "pem",
+    "std",
+] }
+pem = { version = "3.0", default-features = false, features = ["serde", "std"] }
+pkcs1 = { version = "0.7", default-features = false, features = ["std"] }
+pkcs8 = { version = "0.10", default-features = false, features = [
+    "encryption",
+    "pem",
+    "pkcs5",
+    "std",
+] }
+rand = { version = "0.8", default-features = false, features = [
+    "getrandom",
+    "std",
+] }
+regex = { version = "1.10", default-features = false, optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
-  "json",
-  "multipart",
+    "json",
+    "multipart",
 ], optional = true }
-rsa = "0.9"
-scrypt = "0.11"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_with = { version = "3.9", features = ["base64", "json"], optional = true }
-sha2 = { version = "0.10", features = ["oid"] }
-signature = { version = "2.2" }
-sigstore_protobuf_specs = { version = "0.4", optional = true }
-thiserror = "2.0"
-tokio = { version = "1", features = ["rt"] }
-tokio-util = { version = "0.7", features = ["io-util"] }
-tough = { version = "0.19", features = ["http"], optional = true }
-tracing = "0.1"
-url = "2.5"
-x509-cert = { version = "0.2", features = ["builder", "pem", "std", "sct"] }
-crypto_secretbox = "0.1"
-zeroize = "1.8"
-rustls-webpki = { version = "0.102", features = ["alloc"] }
-serde_repr = "0.1"
-hex = "0.4"
-json-syntax = { version = "0.12", features = ["canonicalize", "serde"] }
-tls_codec = { version = "0.4", features = ["derive"] }
-ring = "0.17"
+ring = { version = "0.17", default-features = false, optional = true }
+rsa = { version = "0.9", default-features = false, features = ["std"] }
+rustls-webpki = { version = "0.102", default-features = false, features = [
+    "std",
+] }
+scrypt = { version = "0.11", default-features = false, features = [
+    "simple",
+    "std",
+] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_repr = { version = "0.1", default-features = false, optional = true }
+serde_with = { version = "3.9", default-features = false, features = [
+    "base64",
+    "json",
+], optional = true }
+sha2 = { version = "0.10", default-features = false, features = ["oid"] }
+signature = { version = "2.2", default-features = false }
+sigstore_protobuf_specs = { version = "0.4", default-features = false, optional = true }
+thiserror = { version = "2.0", default-features = false, features = ["std"] }
+tls_codec = { version = "0.4", default-features = false, features = ["derive"] }
+tokio = { version = "1", default-features = false, features = ["rt"] }
+tokio-util = { version = "0.7", default-features = false, features = [
+    "io-util",
+] }
+tough = { version = "0.19", default-features = false, features = [
+    "http",
+], optional = true }
+tracing = { version = "0.1", default-features = false }
+url = { version = "2.5", default-features = false }
+webbrowser = { version = "1.0", default-features = false, optional = true }
+x509-cert = { version = "0.2", default-features = false, features = [
+    "builder",
+    "pem",
+    "sct",
+    "std",
+] }
+zeroize = { version = "1.8", default-features = false }
 
 [dev-dependencies]
-anyhow = { version = "1.0", features = ["backtrace"] }
-assert-json-diff = "2.0"
-clap = { version = "4.5", features = ["derive"] }
-docker_credential = "1.3"
-openssl = "0.10"
-rstest = "0.24"
-serial_test = "3.1"
-tempfile = "3.12"
-testcontainers = "0.23"
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = { version = "1.0", default-features = false, features = [
+    "backtrace",
+    "std",
+] }
+assert-json-diff = { version = "2.0", default-features = false }
+clap = { version = "4.5", default-features = false, features = [
+    "color",
+    "derive",
+    "error-context",
+    "help",
+    "std",
+    "suggestions",
+    "usage",
+] }
+docker_credential = { version = "1.3", default-features = false }
+openssl = { version = "0.10", default-features = false }
+rstest = { version = "0.24", default-features = false }
+serial_test = { version = "3.1", default-features = false }
+tempfile = { version = "3.12", default-features = false }
+testcontainers = { version = "0.23", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "ansi",
+    "env-filter",
+    "fmt",
+    "smallvec",
+    "std",
+    "tracing-log",
+] }
+
 
 # cosign example mappings
 

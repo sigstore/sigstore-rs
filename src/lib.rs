@@ -234,27 +234,30 @@
 //! # Feature Flags
 //!
 //! Sigstore-rs uses a set of [feature flags] to reduce the amount of compiled code.
-//! It is suggested to just enable those features in need. The features includes:
+//! By default, all features are enabled, and `native-tls` is used for TLS.
+//! It is recommended to use `default-features = false` in your `Cargo.toml`
+//! and only enable the features you need.
 //!
-//! - `default`: Enables `full-native-tls`, `cached-client` and `test-registry` features.
-//! - `full-native-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
-//!    tls uses `native-tls`. This feature will not enable `test-registry.`
-//! - `full-rustls-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
-//!   tls uses `rustls-tls`. This feature will not enable `test-registry.`
+//! ## TLS (Required)
 //!
-//! - `fulcio-native-tls` and `fulcio-rustls-tls`: Enables support for `fulcio`, but one uses
-//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
+//! One of these features must be enabled:
 //!
-//! - `rekor-native-tls` and `rekor-rustls-tls`: Enables support for `rekor`, but one uses
-//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
+//! - `native-tls`: Enables support for `native-tls` as the underlying tls for all the features.
+//! - `rustls-tls`: Enables support for `rustls-tls` as the underlying tls for all the features.
 //!
-//! - `cosign-native-tls` and `cosign-rustls-tls`: Enables support for `cosign`, but one uses
-//!   `native-tls` as underlying tls and the other uses `rustls-tls`.
+//! ## Features
 //!
-//! - `cached-client`: Enables support for OCI registry client caching.
-//!
-//! - `test-registry`: Enables tests based on a temporary OCI registry.
-//! - `sigstore-trust-root`: Enables support for TUF to request for fulcio certs and rekor public key.
+//! - `full`: Enables all features documented below.
+//! - `cosign`: Enables support for `cosign`.
+//! - `cached-client`: Enables an in-memory cache for the cosign registry client.
+//! - `fulcio`: Enables support for `fulcio`.
+//! - `oauth`: Enables support for `oauth`.
+//! - `registry`: Enables support for `registry`.
+//! - `rekor`: Enables support for `rekor`.
+//! - `sign`: Enables support for signing.
+//! - `verify`: Enables support for verification.
+//! - `bundle`: Includes both `sign` and `verify`.
+//! - `sigstore-trust-root`: Enables support for Sigstore trust root.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]
