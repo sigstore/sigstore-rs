@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use webpki::types::CertificateDer;
+use pki_types::CertificateDer;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
 #[cfg(feature = "sigstore-trust-root")]

@@ -14,10 +14,8 @@
 // limitations under the License.
 
 use const_oid::db::rfc5280::ID_KP_CODE_SIGNING;
-use webpki::{
-    types::{CertificateDer, TrustAnchor, UnixTime},
-    EndEntityCert, KeyUsage, VerifiedPath,
-};
+use pki_types::{CertificateDer, TrustAnchor, UnixTime};
+use webpki::{EndEntityCert, KeyUsage, VerifiedPath};
 
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 
