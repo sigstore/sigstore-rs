@@ -36,7 +36,7 @@ pub(crate) struct OciCachingClient {
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ format!("{}", image) }"#,
     with_cached_flag = true
@@ -128,7 +128,7 @@ impl<'a> PullSettings<'a> {
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
     with_cached_flag = true
@@ -219,7 +219,7 @@ impl PullManifestSettings {
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
     with_cached_flag = true
