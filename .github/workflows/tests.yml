@@ -12,7 +12,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - uses: taiki-e/install-action@a209ff0ce0349f9e7cadc4ba8f6a415c8d3b0813 # v2.49.11
+      - uses: taiki-e/install-action@87b5304d4e82236718783683826c899da7e5470f # v2.49.19
         with:
           tool: cargo-hack
 
@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - uses: taiki-e/install-action@a209ff0ce0349f9e7cadc4ba8f6a415c8d3b0813 # v2.49.11
+      - uses: taiki-e/install-action@87b5304d4e82236718783683826c899da7e5470f # v2.49.19
         with:
           tool: cargo-hack
       - run: |
@@ -44,7 +44,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - uses: taiki-e/install-action@a209ff0ce0349f9e7cadc4ba8f6a415c8d3b0813 # v2.49.11
+      - uses: taiki-e/install-action@87b5304d4e82236718783683826c899da7e5470f # v2.49.19
         with:
           tool: cargo-hack
       - run: |
@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       - uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
-      - uses: taiki-e/install-action@a209ff0ce0349f9e7cadc4ba8f6a415c8d3b0813 # v2.49.11
+      - uses: taiki-e/install-action@87b5304d4e82236718783683826c899da7e5470f # v2.49.19
         with:
           tool: taplo-cli
       - run: |
