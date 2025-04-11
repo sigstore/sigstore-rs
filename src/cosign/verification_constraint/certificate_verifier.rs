@@ -23,10 +23,10 @@ impl CertificateVerifier {
     ///
     /// * `cert_bytes`: PEM encoded certificate
     /// * `require_rekor_bundle`: require the  signature layer to have a Rekor
-    ///    bundle. Having a Rekor bundle allows further checks to be performed,
-    ///    like ensuring the signature has been produced during the validity
-    ///    time frame of the certificate. It is recommended to set this value
-    ///    to `true` to have a more secure verification process.
+    ///   bundle. Having a Rekor bundle allows further checks to be performed,
+    ///   like ensuring the signature has been produced during the validity
+    ///   time frame of the certificate. It is recommended to set this value
+    ///   to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
     pub fn from_pem(
@@ -43,10 +43,10 @@ impl CertificateVerifier {
     ///
     /// * `cert_bytes`: DER encoded certificate
     /// * `require_rekor_bundle`: require the  signature layer to have a Rekor
-    ///    bundle. Having a Rekor bundle allows further checks to be performed,
-    ///    like ensuring the signature has been produced during the validity
-    ///    time frame of the certificate. It is recommended to set this value
-    ///    to `true` to have a more secure verification process.
+    ///   bundle. Having a Rekor bundle allows further checks to be performed,
+    ///   like ensuring the signature has been produced during the validity
+    ///   time frame of the certificate. It is recommended to set this value
+    ///   to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
     pub fn from_der(
