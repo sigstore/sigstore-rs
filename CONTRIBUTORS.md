@@ -19,13 +19,13 @@ Full test suite requires Docker daemon to be running (and the user must have per
 4. Update the README.md with details of changes to any interface, this includes new environment
    variables, exposed ports, useful file locations, CLI parameters and
    new or changed configuration values.
-5. Correctly format your commit message see [Commit Messages](#Commit Message Guidelines)
+5. Correctly format your commit message see [Commit Messages](#commit-message-guidelines)
    below.
 6. Ensure that CI passes, if it fails, fix the failures.
 7. Every pull request requires a review from the [core sigstore-rs team](https://github.com/orgs/github.com/sigstore/teams/sigstore-rs-codeowners)
    before merging.
 8. If your pull request consists of more than one commit, please squash your
-   commits as described in [Squash Commits](#Squash Commits)
+   commits as described in [Squash Commits](#squash-commits)
 
 ## Commit Message Guidelines
 
