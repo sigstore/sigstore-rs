@@ -16,7 +16,7 @@ default = ["full", "native-tls"]
 
 bundle = ["sign", "verify"]
 cached-client = ["dep:cached"]
-cert = ["dep:ring"]
+cert = ["dep:aws-lc-rs", "rustls-webpki/aws-lc-rs"]
 cosign = [
     "cert",
     "dep:async-trait",
@@ -88,6 +88,7 @@ wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
+aws-lc-rs = { version = "1", optional = true, default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 cached = { version = "0.55", optional = true, features = ["async"] }
 cfg-if = { version = "1.0.0", optional = true, default-features = false }
@@ -168,7 +169,6 @@ reqwest = { version = "0.12", default-features = false, features = [
 ring = { version = "0.17", default-features = false, optional = true }
 rsa = { version = "0.9", default-features = false, features = ["std"] }
 rustls-webpki = { version = "0.103", default-features = false, features = [
-    "ring",
     "std",
 ] }
 scrypt = { version = "0.11", default-features = false, features = [
