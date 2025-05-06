@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
+use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
 use digest::Digest;
-use ring::{signature as ring_signature, signature::UnparsedPublicKey};
 use thiserror::Error;
 use x509_cert::{
     der,
@@ -66,7 +66,7 @@ impl Key {
             // TODO(tnytown): should we also accept ed25519, p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
                 inner: UnparsedPublicKey::new(
-                    &ring_signature::ECDSA_P256_SHA256_ASN1,
+                    &aws_lc_rs_signature::ECDSA_P256_SHA256_ASN1,
                     spki.subject_public_key.raw_bytes().to_owned(),
                 ),
                 fingerprint: {
