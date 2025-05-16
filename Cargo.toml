@@ -130,7 +130,7 @@ json-syntax = { version = "0.12", default-features = false, features = [
     "canonicalize",
     "serde",
 ], optional = true }
-oci-client = { version = "0.14", default-features = false, optional = true }
+oci-client = { version = "0.15", default-features = false, optional = true }
 olpc-cjson = { version = "0.1", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",

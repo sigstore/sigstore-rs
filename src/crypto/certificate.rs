@@ -56,7 +56,7 @@ pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
 
     // code signing
-    if !key_ext_usage.0.iter().any(|ext| *ext == ID_KP_CODE_SIGNING) {
+    if !key_ext_usage.0.contains(&ID_KP_CODE_SIGNING) {
         return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
 
