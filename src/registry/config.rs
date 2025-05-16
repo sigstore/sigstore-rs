@@ -28,6 +28,8 @@ pub enum Auth {
     Anonymous,
     /// Access the registry using HTTP Basic authentication
     Basic(String, String),
+    /// Access the registry using a bearer token
+    Bearer(String),
 }
 
 impl From<&Auth> for oci_client::secrets::RegistryAuth {
@@ -37,6 +39,7 @@ impl From<&Auth> for oci_client::secrets::RegistryAuth {
             Auth::Basic(username, pass) => {
                 oci_client::secrets::RegistryAuth::Basic(username.clone(), pass.clone())
             }
+            Auth::Bearer(token) => oci_client::secrets::RegistryAuth::Bearer(token.clone()),
         }
     }
 }
@@ -48,6 +51,7 @@ impl From<&oci_client::secrets::RegistryAuth> for Auth {
             oci_client::secrets::RegistryAuth::Basic(username, pass) => {
                 Auth::Basic(username.clone(), pass.clone())
             }
+            oci_client::secrets::RegistryAuth::Bearer(token) => Auth::Bearer(token.clone()),
         }
     }
 }
