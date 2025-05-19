@@ -88,7 +88,6 @@ wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
-aws-lc-rs = { version = "1", optional = true, default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 cached = { version = "0.55", optional = true, features = ["async"] }
 cfg-if = { version = "1.0.0", optional = true, default-features = false }
@@ -237,6 +236,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "tracing-log",
 ] }
 
+[target.'cfg(not(target_arch = "powerpc64"))'.dependencies]
+aws-lc-rs = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "powerpc64")'.dependencies]
+aws-lc-rs = { version = "1", optional = true, features = ["bindgen"] }
 
 # cosign example mappings
 
