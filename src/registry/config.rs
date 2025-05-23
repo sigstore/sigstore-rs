@@ -167,6 +167,11 @@ pub struct ClientConfig {
     /// This defaults to `None`.
     pub https_proxy: Option<String>,
 
+    /// Set the `HTTP PROXY` used by the client.
+    ///
+    /// This defaults to `None`.
+    pub http_proxy: Option<String>,
+
     /// Set the `NO PROXY` used by the client.
     ///
     /// This defaults to `None`.
@@ -182,6 +187,7 @@ impl Default for ClientConfig {
             accept_invalid_certificates: false,
             extra_root_certificates: Vec::new(),
             https_proxy: None,
+            http_proxy: None,
             no_proxy: None,
         }
     }
@@ -200,6 +206,7 @@ impl From<ClientConfig> for oci_client::client::ClientConfig {
                 .map(|c| c.into())
                 .collect(),
             https_proxy: config.https_proxy,
+            http_proxy: config.http_proxy,
             no_proxy: config.no_proxy,
             ..Default::default()
         }
