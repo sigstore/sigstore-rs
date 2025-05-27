@@ -83,7 +83,7 @@ pub trait CosignCapabilities {
         auth: &Auth,
     ) -> Result<(OciReference, String)>;
 
-    /// Returns the list of [`SignatureLayer`](crate::cosign::signature_layers::SignatureLayer)
+    /// Returns the list of [`SignatureLayer`]
     /// objects that are associated with the given signature object.
     ///
     /// Each layer is verified, to ensure it contains legitimate data.
