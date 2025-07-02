@@ -17,7 +17,7 @@ cosign generate-key-pair
 Sign a container image:
 
 ```console
-cosign sign -key cosign.key registry-testing.svc.lan/busybox
+cosign sign --key cosign.key registry-testing.svc.lan/busybox
 ```
 
 Verify the image signature using the example program defined in

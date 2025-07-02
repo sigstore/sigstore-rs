@@ -120,7 +120,7 @@ impl Debug for CertSubjectEmailVerifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut issuer_str = String::new();
         if let Some(issuer) = &self.issuer {
-            issuer_str.push_str(&format!(" and {}", issuer));
+            issuer_str.push_str(&format!(" and {issuer}"));
         }
         f.write_fmt(format_args!(
             "email {}{}",
@@ -147,10 +147,8 @@ impl StringVerifier {
 impl std::fmt::Display for StringVerifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StringVerifier::ExactMatch(s) => f.write_fmt(format_args!("is exactly {}", s)),
-            StringVerifier::Regex(r) => {
-                f.write_fmt(format_args!("matches regular expression {}", r))
-            }
+            StringVerifier::ExactMatch(s) => f.write_fmt(format_args!("is exactly {s}")),
+            StringVerifier::Regex(r) => f.write_fmt(format_args!("matches regular expression {r}")),
         }
     }
 }

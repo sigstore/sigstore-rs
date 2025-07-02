@@ -114,8 +114,7 @@ impl TryFrom<&SubjectPublicKeyInfoOwned> for CosignVerificationKey {
                 ed25519_dalek::VerifyingKey::try_from(subject_pub_key_info.owned_to_ref())?,
             )),
             _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
-                "Key with algorithm OID {} is not supported",
-                algorithm
+                "Key with algorithm OID {algorithm} is not supported"
             ))),
         }
     }
