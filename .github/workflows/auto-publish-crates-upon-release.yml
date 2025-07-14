@@ -10,10 +10,16 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+
+      - uses: rust-lang/crates-io-auth-action@e919bc7605cde86df457cf5b93c5e103838bd879 # v1.0.1
+        id: auth
+
       - name: Rustup
         run: |
           rustup install stable
           rustup override set stable
 
       - name: publish crates
-        run: cargo publish --token ${{ secrets.CARGO_API_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: "${{ steps.auth.outputs.token }}"
+        run: cargo publish
