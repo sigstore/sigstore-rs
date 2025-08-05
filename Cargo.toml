@@ -224,7 +224,7 @@ openssl = { version = "0.10", default-features = false }
 rstest = { version = "0.26", default-features = false }
 serial_test = { version = "3.1", default-features = false }
 tempfile = { version = "3.12", default-features = false }
-testcontainers = { version = "0.24", default-features = false, features = [
+testcontainers = { version = "0.25", default-features = false, features = [
     "aws-lc-rs",
 ] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
