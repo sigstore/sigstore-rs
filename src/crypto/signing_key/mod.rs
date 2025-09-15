@@ -151,7 +151,7 @@ impl std::fmt::Display for SigStoreKeyPair {
 
 /// This macro helps to reduce duplicated code.
 macro_rules! sigstore_keypair_from {
-    ($func: ident ($($args:expr_2021),*)) => {
+    ($func: ident ($($args:expr),*)) => {
         if let Ok(keys) = ECDSAKeys::$func($($args,)*) {
             Ok(SigStoreKeyPair::ECDSA(keys))
         } else if let Ok(keys) = Ed25519Keys::$func($($args,)*) {
@@ -166,7 +166,7 @@ macro_rules! sigstore_keypair_from {
 
 /// This macro helps to reduce duplicated code.
 macro_rules! sigstore_keypair_code {
-    ($func: ident ($($args:expr_2021),*), $obj:ident) => {
+    ($func: ident ($($args:expr),*), $obj:ident) => {
         match $obj {
             SigStoreKeyPair::ECDSA(keys) => keys.as_inner().$func($($args,)*),
             SigStoreKeyPair::ED25519(keys) => keys.$func($($args,)*),

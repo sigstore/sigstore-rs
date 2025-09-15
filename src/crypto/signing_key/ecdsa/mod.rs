@@ -105,7 +105,7 @@ pub enum EllipticCurve {
 
 /// This macro helps to reduce duplicated code.
 macro_rules! iterate_on_curves {
-    ($func: ident ($($args:expr_2021),*), $errorinfo: literal) => {
+    ($func: ident ($($args:expr),*), $errorinfo: literal) => {
         if let Ok(keys) = EcdsaKeys::<p256::NistP256>::$func($($args,)*) {
             Ok(ECDSAKeys::P256(keys))
         } else if let Ok(keys) = EcdsaKeys::<p384::NistP384>::$func($($args,)*) {

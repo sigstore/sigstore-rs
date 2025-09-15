@@ -215,7 +215,7 @@ impl FulcioClient {
         let client = reqwest::Client::new();
 
         macro_rules! headers {
-            ($($key:expr_2021 => $val:expr_2021),+) => {
+            ($($key:expr => $val:expr),+) => {
                 {
                     let mut map = reqwest::header::HeaderMap::new();
                     $( map.insert($key, $val.parse().unwrap()); )+
