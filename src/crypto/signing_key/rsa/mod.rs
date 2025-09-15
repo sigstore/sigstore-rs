@@ -105,7 +105,7 @@ pub enum RSASigner {
 
 /// helper to generate match arms
 macro_rules! iter_on_rsa {
-    ($domain: ident, $match_item: expr, $signer: ident, $key: ident, $func: expr) => {
+    ($domain: ident, $match_item: expr_2021, $signer: ident, $key: ident, $func: expr_2021) => {
         match $match_item {
             $domain::RSA_PSS_SHA256($signer, $key) => $func,
             $domain::RSA_PSS_SHA384($signer, $key) => $func,

@@ -28,7 +28,7 @@ macro_rules! oids {
 }
 
 macro_rules! impl_policy {
-    ($policy:ident, $oid:expr, $doc:literal) => {
+    ($policy:ident, $oid:expr_2021, $doc:literal) => {
         #[doc = $doc]
         pub struct $policy(pub String);
 

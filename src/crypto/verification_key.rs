@@ -216,12 +216,13 @@ impl CosignVerificationKey {
             Ok(Self::ED25519(ed25519_dalek::VerifyingKey::from_bytes(
                 ed25519bytes.as_ref(),
             )?))
-        } else if let Ok(rsapk) = rsa::RsaPublicKey::from_public_key_der(der_data) {
-            Ok(Self::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(rsapk)))
         } else {
-            Err(SigstoreError::InvalidKeyFormat {
-                error: "Failed to parse the public key.".to_string(),
-            })
+            match rsa::RsaPublicKey::from_public_key_der(der_data) {
+                Ok(rsapk) => Ok(Self::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(rsapk))),
+                _ => Err(SigstoreError::InvalidKeyFormat {
+                    error: "Failed to parse the public key.".to_string(),
+                }),
+            }
         }
     }
 
