@@ -1,7 +1,7 @@
 [package]
 authors = ["sigstore-rs developers"]
 description = "An experimental crate to interact with sigstore"
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "sigstore"
 readme = "README.md"
