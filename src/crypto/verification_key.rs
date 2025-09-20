@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
 use ed25519::pkcs8::DecodePublicKey as ED25519DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
-use signature::{hazmat::PrehashVerifier, DigestVerifier, Verifier};
+use signature::{DigestVerifier, Verifier, hazmat::PrehashVerifier};
 use x509_cert::{der::referenced::OwnedToRef, spki::SubjectPublicKeyInfoOwned};
 
 use super::{
-    signing_key::{KeyPair, SigStoreSigner},
     Signature, SigningScheme,
+    signing_key::{KeyPair, SigStoreSigner},
 };
 
 use crate::errors::*;
@@ -396,8 +396,8 @@ impl CosignVerificationKey {
 
 #[cfg(test)]
 mod tests {
-    use x509_cert::der::Decode;
     use x509_cert::Certificate;
+    use x509_cert::der::Decode;
 
     use super::*;
     use crate::crypto::tests::*;
@@ -486,9 +486,11 @@ DwIDAQAB
         .expect("Cannot create CosignVerificationKey");
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry.suse.com/suse/sle-micro/5.0/toolbox"},"image":{"docker-manifest-digest":"sha256:356631f7603526a0af827741f5fe005acf19b7ef7705a34241a91c2d47a6db5e"},"type":"cosign container image signature"},"optional":{"creator":"OBS"}}"#;
 
-        assert!(verification_key
-            .verify_signature(signature, msg.as_bytes())
-            .is_ok());
+        assert!(
+            verification_key
+                .verify_signature(signature, msg.as_bytes())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -600,8 +602,8 @@ DwIDAQAB
     }
 
     #[test]
-    fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key(
-    ) -> anyhow::Result<()> {
+    fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key()
+    -> anyhow::Result<()> {
         let (private_key, public_key) = generate_dsa_keypair(2048);
         let issued_cert_generation_options = CertGenerationOptions {
             private_key,

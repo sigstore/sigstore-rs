@@ -21,9 +21,10 @@ use pkcs8::der::EncodePem;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_repr::Deserialize_repr;
 use serde_with::{
+    DeserializeAs, SerializeAs,
     base64::{Base64, Standard},
     formats::Padded,
-    serde_as, DeserializeAs, SerializeAs,
+    serde_as,
 };
 use x509_cert::Certificate;
 

@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use sha2::Digest;
 use sha2::Sha256;
-use sigstore::crypto::signing_key::SigStoreSigner;
 use sigstore::crypto::SigningScheme;
+use sigstore::crypto::signing_key::SigStoreSigner;
 use sigstore::rekor::apis::{configuration::Configuration, entries_api};
 use sigstore::rekor::models::{
-    hashedrekord::{AlgorithmKind, Data, Hash, PublicKey, Signature, Spec},
     ProposedEntry,
+    hashedrekord::{AlgorithmKind, Data, Hash, PublicKey, Signature, Spec},
 };
 
 use clap::{Arg, Command};

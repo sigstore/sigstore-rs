@@ -20,10 +20,10 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use tracing::{debug, info, warn};
-use x509_cert::der::DecodePem;
-use x509_cert::ext::pkix::name::GeneralName;
-use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::Certificate;
+use x509_cert::der::DecodePem;
+use x509_cert::ext::pkix::SubjectAltName;
+use x509_cert::ext::pkix::name::GeneralName;
 
 use super::bundle::Bundle;
 use super::constants::{
@@ -549,14 +549,16 @@ pub(crate) mod tests {
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
 
-    pub(crate) fn build_correct_signature_layer_without_bundle(
-    ) -> (SignatureLayer, CosignVerificationKey) {
+    pub(crate) fn build_correct_signature_layer_without_bundle()
+    -> (SignatureLayer, CosignVerificationKey) {
         let public_key = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
-        let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
+        let signature = String::from(
+            "MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=",
+        );
         let verification_key =
             CosignVerificationKey::from_pem(public_key.as_bytes(), &SigningScheme::default())
                 .expect("Cannot create CosignVerificationKey");
@@ -640,8 +642,12 @@ oXqqo/C9QnOHTto=
 
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
-            oci_digest: String::from("sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e"),
-            signature: Some(String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=")),
+            oci_digest: String::from(
+                "sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e",
+            ),
+            signature: Some(String::from(
+                "MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=",
+            )),
             bundle: Some(bundle),
             certificate_signature: Some(certificate_signature),
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
@@ -859,8 +865,8 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     // Testing CertificateSignature
     use crate::cosign::bundle::Payload;
-    use crate::crypto::tests::{generate_certificate, CertGenerationOptions};
     use crate::crypto::SigningScheme;
+    use crate::crypto::tests::{CertGenerationOptions, generate_certificate};
     use chrono::{TimeDelta, Utc};
 
     impl TryFrom<X509> for crate::registry::Certificate {
@@ -888,9 +894,11 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
-            .unwrap()
-            .try_into()?];
+        let certs = vec![
+            crate::registry::Certificate::try_from(ca_data.cert)
+                .unwrap()
+                .try_into()?,
+        ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now()
@@ -939,9 +947,11 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
-            .unwrap()
-            .try_into()?];
+        let certs = vec![
+            crate::registry::Certificate::try_from(ca_data.cert)
+                .unwrap()
+                .try_into()?,
+        ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now()
@@ -989,9 +999,11 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
         let issued_cert_pem = issued_cert.cert.to_pem()?;
 
-        let certs = vec![crate::registry::Certificate::try_from(ca_data.cert)
-            .unwrap()
-            .try_into()?];
+        let certs = vec![
+            crate::registry::Certificate::try_from(ca_data.cert)
+                .unwrap()
+                .try_into()?,
+        ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
         let integrated_time = Utc::now()

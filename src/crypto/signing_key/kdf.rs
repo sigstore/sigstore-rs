@@ -19,7 +19,7 @@
 //! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
 //! for golang version.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use crypto_secretbox::aead::{AeadMut, KeyInit};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

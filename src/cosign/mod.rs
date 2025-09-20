@@ -287,14 +287,14 @@ mod tests {
     use super::constraint::{AnnotationMarker, PrivateKeySigner};
     use super::verification_constraint::cert_subject_email_verifier::StringVerifier;
     use super::*;
-    use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::signature_layers::CertificateSubject;
+    use crate::cosign::signature_layers::tests::build_correct_signature_layer_with_certificate;
     use crate::cosign::simple_signing::Optional;
     use crate::cosign::verification_constraint::{
         AnnotationVerifier, CertSubjectEmailVerifier, VerificationConstraintVec,
     };
-    use crate::crypto::certificate_pool::CertificatePool;
     use crate::crypto::SigningScheme;
+    use crate::crypto::certificate_pool::CertificatePool;
 
     #[cfg(feature = "test-registry")]
     use testcontainers::{core::WaitFor, runners::AsyncRunner};

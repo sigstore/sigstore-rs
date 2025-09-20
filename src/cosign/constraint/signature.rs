@@ -15,13 +15,13 @@
 
 //! Structs that can be used to sign a [`crate::cosign::SignatureLayer`]
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use tracing::warn;
 use zeroize::Zeroizing;
 
 use crate::{
     cosign::SignatureLayer,
-    crypto::{signing_key::SigStoreKeyPair, SigStoreSigner, SigningScheme},
+    crypto::{SigStoreSigner, SigningScheme, signing_key::SigStoreKeyPair},
     errors::{Result, SigstoreError},
 };
 

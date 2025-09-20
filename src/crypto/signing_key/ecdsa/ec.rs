@@ -67,37 +67,37 @@
 use std::{marker::PhantomData, ops::Add};
 
 use digest::{
+    Digest, FixedOutput, FixedOutputReset,
     core_api::BlockSizeUser,
     typenum::{
-        bit::{B0, B1},
         UInt, UTerm,
+        bit::{B0, B1},
     },
-    Digest, FixedOutput, FixedOutputReset,
 };
 use ecdsa::{
-    hazmat::{DigestPrimitive, SignPrimitive},
     PrimeCurve, SignatureSize, SigningKey,
+    hazmat::{DigestPrimitive, SignPrimitive},
 };
 use elliptic_curve::{
+    AffinePoint, Curve, CurveArithmetic, FieldBytesSize, PublicKey, Scalar, SecretKey,
     bigint::ArrayEncoding,
     generic_array::ArrayLength,
     ops::{Invert, Reduce},
     sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint},
     subtle::CtOption,
     zeroize::Zeroizing,
-    AffinePoint, Curve, CurveArithmetic, FieldBytesSize, PublicKey, Scalar, SecretKey,
 };
 use pkcs8::{AssociatedOid, DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use signature::DigestSigner;
 
 use crate::{
     crypto::{
+        SigningScheme,
         signing_key::{
-            kdf, KeyPair, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
-            SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+            COSIGN_PRIVATE_KEY_PEM_LABEL, KeyPair, PRIVATE_KEY_PEM_LABEL,
+            SIGSTORE_PRIVATE_KEY_PEM_LABEL, Signer, kdf,
         },
         verification_key::CosignVerificationKey,
-        SigningScheme,
     },
     errors::*,
 };
@@ -376,9 +376,9 @@ mod tests {
     use rstest::rstest;
 
     use crate::crypto::{
-        signing_key::{tests::MESSAGE, KeyPair, Signer},
-        verification_key::CosignVerificationKey,
         Signature, SigningScheme,
+        signing_key::{KeyPair, Signer, tests::MESSAGE},
+        verification_key::CosignVerificationKey,
     };
 
     use super::{EcdsaKeys, EcdsaSigner};

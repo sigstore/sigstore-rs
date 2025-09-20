@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::debug;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use sigstore::bundle::sign::SigningContext;
 use sigstore::bundle::verify::{blocking::Verifier, policy};

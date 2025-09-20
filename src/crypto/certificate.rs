@@ -17,8 +17,8 @@ use chrono::{DateTime, Utc};
 use const_oid::db::rfc5912::ID_KP_CODE_SIGNING;
 use thiserror::Error;
 use x509_cert::{
-    ext::pkix::{constraints, ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName},
     Certificate,
+    ext::pkix::{ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName, constraints},
 };
 
 use crate::errors::{Result, SigstoreError};

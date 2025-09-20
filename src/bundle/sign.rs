@@ -17,7 +17,7 @@
 use std::io::{self, Read};
 use std::time::SystemTime;
 
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use hex;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};
@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use signature::DigestSigner;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
-    verification_material, Bundle, VerificationMaterial,
+    Bundle, VerificationMaterial, verification_material,
 };
 use sigstore_protobuf_specs::dev::sigstore::common::v1::{
     HashAlgorithm, HashOutput, MessageSignature, X509Certificate, X509CertificateChain,
@@ -40,10 +40,10 @@ use x509_cert::ext::pkix as x509_ext;
 
 use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
-use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
+use crate::crypto::transparency::{CertificateEmbeddedSCT, verify_sct};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
-use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
+use crate::fulcio::{self, FULCIO_ROOT, FulcioClient};
 use crate::oauth::IdentityToken;
 use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;

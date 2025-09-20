@@ -76,7 +76,7 @@ mod tests {
             build_correct_signature_layer_without_bundle,
         },
         verification_constraint::{
-            cert_subject_email_verifier::StringVerifier, CertSubjectEmailVerifier,
+            CertSubjectEmailVerifier, cert_subject_email_verifier::StringVerifier,
         },
     };
 

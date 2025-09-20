@@ -84,13 +84,17 @@ pub enum SigstoreError {
     #[error("Certificate has not been issued for {0}")]
     CertificateInvalidEmail(String),
 
-    #[error("Certificate expired before signatures were entered in log: {integrated_time} is before {not_before}")]
+    #[error(
+        "Certificate expired before signatures were entered in log: {integrated_time} is before {not_before}"
+    )]
     CertificateExpiredBeforeSignaturesSubmittedToRekor {
         integrated_time: String,
         not_before: String,
     },
 
-    #[error("Certificate was issued after signatures were entered in log: {integrated_time} is after {not_after}")]
+    #[error(
+        "Certificate was issued after signatures were entered in log: {integrated_time} is after {not_after}"
+    )]
     CertificateIssuedAfterSignaturesSubmittedToRekor {
         integrated_time: String,
         not_after: String,

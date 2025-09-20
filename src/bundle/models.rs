@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use json_syntax::Print;
 
 use sigstore_protobuf_specs::dev::sigstore::{
@@ -10,7 +10,7 @@ use sigstore_protobuf_specs::dev::sigstore::{
 };
 
 use crate::rekor::models::{
-    log_entry::InclusionProof as RekorInclusionProof, LogEntry as RekorLogEntry,
+    LogEntry as RekorLogEntry, log_entry::InclusionProof as RekorInclusionProof,
 };
 
 // Known Sigstore bundle media types.

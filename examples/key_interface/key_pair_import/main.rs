@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use sigstore::crypto::{
-    signing_key::{ecdsa::ECDSAKeys, SigStoreKeyPair},
     CosignVerificationKey, SigningScheme,
+    signing_key::{SigStoreKeyPair, ecdsa::ECDSAKeys},
 };
 
 const PASSWORD: &str = "password";
@@ -30,10 +30,14 @@ const ECDSA_P256_ASN1_ENCRYPTED_PRIVATE_PEM: &[u8] =
 
 fn main() -> Result<()> {
     let _ = CosignVerificationKey::from_pem(ECDSA_P256_ASN1_PUBLIC_PEM, &SigningScheme::default())?;
-    println!("Imported PEM encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm.");
+    println!(
+        "Imported PEM encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm."
+    );
 
     let _ = CosignVerificationKey::from_der(ECDSA_P256_ASN1_PUBLIC_DER, &SigningScheme::default())?;
-    println!("Imported DER encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm.");
+    println!(
+        "Imported DER encoded public key as CosignVerificationKey using ECDSA_P256_ASN1_PUBLIC_PEM as verification algorithm."
+    );
 
     let _ = CosignVerificationKey::try_from_pem(ECDSA_P256_ASN1_PUBLIC_PEM)?;
     println!("Imported PEM encoded public key as CosignVerificationKey.");

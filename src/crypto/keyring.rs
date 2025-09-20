@@ -133,21 +133,27 @@ mod tests {
         let key_id: [u8; 32] = hasher.finalize().into();
 
         // Check for success.
-        assert!(keyring
-            .verify(&key_id, signature.as_slice(), message)
-            .is_ok());
+        assert!(
+            keyring
+                .verify(&key_id, signature.as_slice(), message)
+                .is_ok()
+        );
 
         // Check for failure with incorrect key id.
-        assert!(keyring
-            .verify(&[0; 32], signature.as_slice(), message)
-            .is_err());
+        assert!(
+            keyring
+                .verify(&[0; 32], signature.as_slice(), message)
+                .is_err()
+        );
 
         // Check for failure with incorrect payload.
         let incorrect_message = b"another message";
 
-        assert!(keyring
-            .verify(&key_id, signature.as_slice(), incorrect_message)
-            .is_err());
+        assert!(
+            keyring
+                .verify(&key_id, signature.as_slice(), incorrect_message)
+                .is_err()
+        );
 
         // Check for failure with incorrect keyring.
         let incorrect_key_pair = ECDSAKeys::new(EllipticCurve::P256).unwrap();
@@ -158,8 +164,10 @@ mod tests {
             .as_slice()])
         .unwrap();
 
-        assert!(incorrect_keyring
-            .verify(&key_id, signature.as_slice(), message)
-            .is_err());
+        assert!(
+            incorrect_keyring
+                .verify(&key_id, signature.as_slice(), message)
+                .is_err()
+        );
     }
 }

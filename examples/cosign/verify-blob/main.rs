@@ -15,16 +15,16 @@
 
 extern crate clap;
 extern crate sigstore;
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use clap::Parser;
-use sigstore::cosign::client::Client;
 use sigstore::cosign::CosignCapabilities;
+use sigstore::cosign::client::Client;
 
 extern crate tracing_subscriber;
 use std::fs;
 use std::path::PathBuf;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

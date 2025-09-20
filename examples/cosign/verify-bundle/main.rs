@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use clap::Parser;
+use sigstore::cosign::CosignCapabilities;
 use sigstore::cosign::bundle::SignedArtifactBundle;
 use sigstore::cosign::client::Client;
-use sigstore::cosign::CosignCapabilities;
 use sigstore::crypto::{CosignVerificationKey, SigningScheme};
 use std::fs;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

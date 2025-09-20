@@ -185,7 +185,7 @@ pub mod verification_key;
 use self::signing_key::{
     ecdsa::ec::{EcdsaKeys, EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},
-    rsa::{keypair::RSAKeys, DigestAlgorithm, PaddingScheme, RSASigner, DEFAULT_KEY_SIZE},
+    rsa::{DEFAULT_KEY_SIZE, DigestAlgorithm, PaddingScheme, RSASigner, keypair::RSAKeys},
 };
 
 pub mod signing_key;
@@ -207,7 +207,7 @@ pub(crate) mod tests {
         AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
         SubjectAlternativeName, SubjectKeyIdentifier,
     };
-    use openssl::x509::{X509Extension, X509NameBuilder, X509};
+    use openssl::x509::{X509, X509Extension, X509NameBuilder};
 
     pub(crate) const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
@@ -263,8 +263,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         }
     }
 
-    pub(crate) fn generate_ecdsa_p256_keypair(
-    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+    pub(crate) fn generate_ecdsa_p256_keypair()
+    -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("Cannot create EcGroup");
         let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
         let ec_public_key = ec_private_key.public_key();
@@ -277,8 +277,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         (private_key, public_key)
     }
 
-    pub(crate) fn generate_ecdsa_p384_keypair(
-    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
+    pub(crate) fn generate_ecdsa_p384_keypair()
+    -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
         let group = EcGroup::from_curve_name(Nid::SECP384R1).expect("Cannot create EcGroup");
         let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
         let ec_public_key = ec_private_key.public_key();
