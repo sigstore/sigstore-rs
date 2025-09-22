@@ -204,7 +204,7 @@ struct Data {
 fn generate_random(len: u32) -> Vec<u8> {
     let mut res = Vec::new();
     for _ in 0..len {
-        res.push(rand::thread_rng().gen());
+        res.push(rand::thread_rng().r#gen());
     }
     res
 }

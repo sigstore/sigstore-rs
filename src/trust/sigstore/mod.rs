@@ -104,11 +104,16 @@ impl SigstoreTrustRoot {
             debug!("{}: reading from embedded resources", name.raw());
             embedded_data.to_vec()
         // If all else fails, read the data from the TUF repo.
-        } else if let Ok(remote_data) = read_remote_target().await {
-            debug!("{}: reading from remote", name.raw());
-            remote_data.to_vec()
         } else {
-            return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
+            match read_remote_target().await {
+                Ok(remote_data) => {
+                    debug!("{}: reading from remote", name.raw());
+                    remote_data.to_vec()
+                }
+                _ => {
+                    return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
+                }
+            }
         };
 
         // Get metadata (hash) of the target and update the disk copy if it doesn't match.
