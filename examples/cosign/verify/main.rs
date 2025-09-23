@@ -28,7 +28,7 @@ use std::time::Instant;
 use std::{collections::BTreeMap, fs};
 
 extern crate anyhow;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 extern crate clap;
 use clap::Parser;
@@ -36,7 +36,7 @@ use clap::Parser;
 extern crate tracing_subscriber;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

@@ -25,9 +25,9 @@ use x509_cert::der::Encode;
 use crate::{
     bundle::Bundle,
     crypto::{
-        keyring::Keyring,
-        transparency::{verify_sct, CertificateEmbeddedSCT},
         CertificatePool, CosignVerificationKey, Signature,
+        keyring::Keyring,
+        transparency::{CertificateEmbeddedSCT, verify_sct},
     },
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
@@ -38,9 +38,9 @@ use crate::{
 use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{
+    VerificationError, VerificationResult,
     models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
     policy::VerificationPolicy,
-    VerificationError, VerificationResult,
 };
 
 /// An asynchronous Sigstore verifier.

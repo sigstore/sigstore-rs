@@ -66,13 +66,13 @@ use ed25519::KeypairBytes;
 use ed25519_dalek::{Signer as _, SigningKey};
 
 use crate::{
-    crypto::{verification_key::CosignVerificationKey, SigningScheme},
+    crypto::{SigningScheme, verification_key::CosignVerificationKey},
     errors::*,
 };
 
 use super::{
-    kdf, KeyPair, SigStoreSigner, Signer, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL,
-    SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+    COSIGN_PRIVATE_KEY_PEM_LABEL, KeyPair, PRIVATE_KEY_PEM_LABEL, SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+    SigStoreSigner, Signer, kdf,
 };
 
 #[derive(Debug, Clone)]
@@ -288,9 +288,9 @@ mod tests {
     use rstest::rstest;
 
     use crate::crypto::{
-        signing_key::{tests::MESSAGE, KeyPair, Signer},
-        verification_key::CosignVerificationKey,
         Signature, SigningScheme,
+        signing_key::{KeyPair, Signer, tests::MESSAGE},
+        verification_key::CosignVerificationKey,
     };
 
     use super::{Ed25519Keys, Ed25519Signer};

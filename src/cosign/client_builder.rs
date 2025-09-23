@@ -18,7 +18,7 @@ use tracing::info;
 
 use super::client::Client;
 use crate::crypto::SigningScheme;
-use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
+use crate::crypto::{CosignVerificationKey, certificate_pool::CertificatePool};
 use crate::errors::Result;
 use crate::registry::ClientConfig;
 use crate::trust::TrustRoot;

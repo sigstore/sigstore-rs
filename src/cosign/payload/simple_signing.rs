@@ -135,7 +135,10 @@ impl Optional {
     /// Checks whether all the provided `annotations` are satisfied
     pub fn satisfies_annotations(&self, annotations: &BTreeMap<String, String>) -> bool {
         if self.extra.is_empty() {
-            info!(?annotations, "Annotations are not satisfied, no annotations are part of the Simple Signing object");
+            info!(
+                ?annotations,
+                "Annotations are not satisfied, no annotations are part of the Simple Signing object"
+            );
             return false;
         }
 

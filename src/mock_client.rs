@@ -19,10 +19,10 @@ pub(crate) mod test {
 
     use async_trait::async_trait;
     use oci_client::{
+        Reference,
         client::{ImageData, PushResponse},
         manifest::OciManifest,
         secrets::RegistryAuth,
-        Reference,
     };
 
     #[derive(Default)]

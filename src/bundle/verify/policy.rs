@@ -19,7 +19,7 @@
 use const_oid::ObjectIdentifier;
 use thiserror::Error;
 use tracing::warn;
-use x509_cert::ext::pkix::{name::GeneralName, SubjectAltName};
+use x509_cert::ext::pkix::{SubjectAltName, name::GeneralName};
 
 macro_rules! oids {
     ($($name:ident = $value:literal),+) => {

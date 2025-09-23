@@ -20,12 +20,11 @@ use thiserror::Error;
 use tls_codec::{SerializeBytes, TlsByteVecU16, TlsByteVecU24, TlsSerializeBytes, TlsSize};
 use tracing::debug;
 use x509_cert::{
-    der,
+    Certificate, der,
     der::{Decode, Encode},
     ext::pkix::{
-        sct::Version, ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList,
+        ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList, sct::Version,
     },
-    Certificate,
 };
 
 use super::{
@@ -308,14 +307,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_sct, CertificateEmbeddedSCT};
+    use super::{CertificateEmbeddedSCT, verify_sct};
     use crate::crypto::keyring::Keyring;
     use crate::fulcio::SigningCertificateDetachedSCT;
     use p256::ecdsa::VerifyingKey;
     use std::str::FromStr;
+    use x509_cert::Certificate;
     use x509_cert::der::DecodePem;
     use x509_cert::spki::EncodePublicKey;
-    use x509_cert::Certificate;
 
     #[test]
     fn verify_embedded_sct() {

@@ -172,7 +172,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::tests::{get_fulcio_cert_pool, REKOR_PUB_KEY};
+    use crate::cosign::tests::{REKOR_PUB_KEY, get_fulcio_cert_pool};
     use crate::crypto::SigningScheme;
     use crate::mock_client::test::MockOciClient;
 
