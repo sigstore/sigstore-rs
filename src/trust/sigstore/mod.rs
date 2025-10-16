@@ -20,16 +20,16 @@
 //!
 //! These can later be given to [`cosign::ClientBuilder`](crate::cosign::ClientBuilder)
 //! to enable Fulcio and Rekor integrations.
-use futures_util::TryStreamExt;
-use sha2::{Digest, Sha256};
-use std::path::Path;
-use tokio_util::bytes::BytesMut;
+use std::{collections::BTreeMap, path::Path};
 
+use futures_util::TryStreamExt;
 use pki_types::CertificateDer;
+use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::TimeRange,
     trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
 };
+use tokio_util::bytes::BytesMut;
 use tough::TargetName;
 use tracing::debug;
 
@@ -140,13 +140,30 @@ impl SigstoreTrustRoot {
     }
 
     #[inline]
-    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
+    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = (String, &[u8])> {
         tlogs
             .iter()
-            .filter_map(|tlog| tlog.public_key.as_ref())
-            .filter(|key| is_timerange_valid(key.valid_for.as_ref(), false))
-            .filter_map(|key| key.raw_bytes.as_ref())
-            .map(|key_bytes| key_bytes.as_slice())
+            .filter(|tlog| {
+                if let Some(public_key) = tlog.public_key.as_ref() {
+                    is_timerange_valid(public_key.valid_for.as_ref(), false)
+                } else {
+                    false
+                }
+            })
+            .filter_map(|tlog| {
+                let key_id = tlog
+                    .log_id
+                    .as_ref()
+                    .map(|log_id| hex::encode(log_id.key_id.as_slice()));
+                let public_key_raw = tlog
+                    .public_key
+                    .as_ref()
+                    .and_then(|pk| pk.raw_bytes.as_ref());
+                match (key_id, public_key_raw) {
+                    (Some(id), Some(key)) => Some((id, key.as_slice())),
+                    _ => None,
+                }
+            })
     }
 
     #[inline]
@@ -188,24 +205,18 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
+    fn rekor_keys(&self) -> Result<BTreeMap<String, &[u8]>> {
+        let keys: BTreeMap<String, &[u8]> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
 
-        if keys.len() != 1 {
-            Err(SigstoreError::TufMetadataError(
-                "Did not find exactly 1 active Rekor key".into(),
-            ))
-        } else {
-            Ok(keys)
-        }
+        Ok(keys)
     }
 
     /// Fetch CTFE public keys from the given TUF repository or reuse
     /// the local cache if it's not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
+    fn ctfe_keys(&self) -> Result<BTreeMap<String, &[u8]>> {
+        let keys: BTreeMap<String, &[u8]> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
 
         if keys.is_empty() {
             Err(SigstoreError::TufMetadataError(

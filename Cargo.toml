@@ -6,7 +6,7 @@ license = "Apache-2.0"
 name = "sigstore"
 readme = "README.md"
 repository = "https://github.com/sigstore/sigstore-rs"
-version = "0.12.1"
+version = "0.13.0"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -70,6 +70,7 @@ sign = [
 sigstore-trust-root = [
     "dep:futures",
     "dep:futures-util",
+    "dep:hex",
     "dep:reqwest",
     "dep:sigstore_protobuf_specs",
     "dep:tough",

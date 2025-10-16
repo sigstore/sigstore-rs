@@ -14,8 +14,10 @@
 
 //! Types for signing artifacts and producing Sigstore bundles.
 
-use std::io::{self, Read};
-use std::time::SystemTime;
+use std::{
+    io::{self, Read},
+    time::SystemTime,
+};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use hex;
@@ -287,7 +289,7 @@ impl SigningContext {
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
-            Keyring::new(trust_root.ctfe_keys()?)?,
+            Keyring::new(trust_root.ctfe_keys()?.values().copied())?,
         ))
     }
 

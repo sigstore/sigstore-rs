@@ -39,7 +39,7 @@ pub const CONFIG_DATA: &str = "{}";
 /// Instances of `Client` can be built via [`sigstore::cosign::ClientBuilder`](crate::cosign::ClientBuilder).
 pub struct Client {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
-    pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
+    pub(crate) rekor_pub_keys: Option<BTreeMap<String, CosignVerificationKey>>,
     pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
@@ -86,7 +86,7 @@ impl CosignCapabilities for Client {
             &image_manifest,
             source_image_digest,
             &layers,
-            self.rekor_pub_key.as_ref(),
+            self.rekor_pub_keys.as_ref(),
             self.fulcio_cert_pool.as_ref(),
         )?;
 
@@ -172,18 +172,19 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::tests::{REKOR_PUB_KEY, get_fulcio_cert_pool};
-    use crate::crypto::SigningScheme;
-    use crate::mock_client::test::MockOciClient;
+
+    use crate::{
+        cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key},
+        mock_client::test::MockOciClient,
+    };
 
     fn build_test_client(mock_client: MockOciClient) -> Client {
-        let rekor_pub_key =
-            CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
-                .expect("Cannot create CosignVerificationKey");
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         Client {
             registry_client: Box::new(mock_client),
-            rekor_pub_key: Some(rekor_pub_key),
+            rekor_pub_keys: Some(rekor_pub_keys),
             fulcio_cert_pool: Some(get_fulcio_cert_pool()),
         }
     }

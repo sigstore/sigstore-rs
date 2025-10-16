@@ -304,6 +304,9 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
 kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
 -----END PUBLIC KEY-----"#;
 
+    pub(crate) const REKOR_PUB_KEY_ID: &str =
+        "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d";
+
     const FULCIO_CRT_1_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIIB+DCCAX6gAwIBAgITNVkDZoCiofPDsy7dfm6geLbuhzAKBggqhkjOPQQDAzAq
 MRUwEwYDVQQKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIx
@@ -346,9 +349,11 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
         CertificatePool::from_certificates(certificates, []).unwrap()
     }
 
-    pub(crate) fn get_rekor_public_key() -> CosignVerificationKey {
-        CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
-            .expect("Cannot create test REKOR_PUB_KEY")
+    pub(crate) fn get_rekor_public_key() -> (String, CosignVerificationKey) {
+        let key =
+            CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
+                .expect("Cannot create test REKOR_PUB_KEY");
+        (REKOR_PUB_KEY_ID.to_string(), key)
     }
 
     #[test]

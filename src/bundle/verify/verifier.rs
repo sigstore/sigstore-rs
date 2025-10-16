@@ -62,7 +62,7 @@ impl Verifier {
         trust_repo: R,
     ) -> SigstoreResult<Self> {
         let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
-        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?)?;
+        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?.values().copied())?;
 
         Ok(Self {
             rekor_config,

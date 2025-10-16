@@ -136,6 +136,9 @@ pub enum SigstoreError {
     #[error("Rekor request unsuccessful: {0}")]
     RekorClientError(String),
 
+    #[error("Rekor public key not found for key id {0}")]
+    RekorPublicKeyNotFoundError(String),
+
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 
