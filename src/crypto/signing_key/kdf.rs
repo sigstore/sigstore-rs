@@ -166,7 +166,10 @@ impl SecretBoxCipher {
             ));
         }
         self.encrypted = true;
+
+        #[allow(deprecated)]
         let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        #[allow(deprecated)]
         let key = crypto_secretbox::Key::from_slice(key);
 
         let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
@@ -177,7 +180,9 @@ impl SecretBoxCipher {
 
     /// Unseal the ciphertext using the key
     fn decrypt(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        #[allow(deprecated)]
         let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        #[allow(deprecated)]
         let key = crypto_secretbox::Key::from_slice(key);
 
         let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
