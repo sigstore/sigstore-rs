@@ -34,8 +34,12 @@ struct Cli {
     blob: String,
 
     /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
-    #[clap(long, required(false))]
+    #[clap(long, required = true)]
     rekor_pub_key: String,
+
+    /// Rekor public key ID
+    #[clap(long, required = true)]
+    rekor_pub_key_id: String,
 
     /// Enable verbose mode
     #[clap(short, long)]
@@ -62,7 +66,11 @@ pub async fn main() {
     let bundle_json = fs::read_to_string(&cli.bundle).expect("error reading bundle json file");
     let blob = fs::read(cli.blob.as_str()).expect("error reading blob file");
 
-    let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_key).unwrap();
+    let rekor_pub_keys = [(cli.rekor_pub_key_id, rekor_pub_key)]
+        .into_iter()
+        .collect();
+
+    let bundle = SignedArtifactBundle::new_verified(&bundle_json, &rekor_pub_keys).unwrap();
 
     // certificate in bundle is double base64 encoded, remove one layer:
     let cert_data = BASE64_STD_ENGINE

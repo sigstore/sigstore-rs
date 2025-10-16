@@ -78,10 +78,11 @@ use ecdsa::{
     PrimeCurve, SignatureSize, SigningKey,
     hazmat::{DigestPrimitive, SignPrimitive},
 };
+#[allow(deprecated)]
+use elliptic_curve::generic_array::ArrayLength;
 use elliptic_curve::{
     AffinePoint, Curve, CurveArithmetic, FieldBytesSize, PublicKey, Scalar, SecretKey,
     bigint::ArrayEncoding,
-    generic_array::ArrayLength,
     ops::{Invert, Reduce},
     sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint},
     subtle::CtOption,
@@ -283,6 +284,7 @@ where
 ///
 /// For concrete digest algorithms, please refer to
 /// <https://github.com/RustCrypto/hashes#supported-algorithms>.
+#[allow(deprecated)]
 #[derive(Clone, Debug)]
 pub struct EcdsaSigner<C, D>
 where
@@ -297,6 +299,7 @@ where
     _marker: PhantomData<D>,
 }
 
+#[allow(deprecated)]
 impl<C, D> EcdsaSigner<C, D>
 where
     C: PrimeCurve + CurveArithmetic + AssociatedOid,
@@ -331,6 +334,7 @@ where
     }
 }
 
+#[allow(deprecated)]
 impl<C, D> Signer for EcdsaSigner<C, D>
 where
     C: PrimeCurve + CurveArithmetic + AssociatedOid + DigestPrimitive,

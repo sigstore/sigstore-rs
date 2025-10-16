@@ -61,7 +61,7 @@ struct Cli {
     #[clap(long)]
     use_sigstore_tuf_data: bool,
 
-    /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
+    /// Rekor's public key ID (in hex format) and path to the public key, separated by the ':' symbol (e.g.: c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d:~/.sigstore/root/targets/rekor.pub)
     #[clap(long, required(false))]
     rekor_pub_keys: Vec<String>,
 
@@ -232,14 +232,19 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
     if cli.use_sigstore_tuf_data {
         info!("Downloading data from Sigstore TUF repository");
 
-        let repo: sigstore::errors::Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
+        let trust_root: sigstore::errors::Result<SigstoreTrustRoot> =
+            SigstoreTrustRoot::new(None).await;
 
-        return Ok(Box::new(repo?));
+        return Ok(Box::new(trust_root?));
     };
 
-    let mut data = sigstore::trust::ManualTrustRoot::default();
-    for path in cli.rekor_pub_keys.iter() {
-        data.rekor_keys.push(
+    let mut trust_root = sigstore::trust::ManualTrustRoot::default();
+    for id_and_path in cli.rekor_pub_keys.iter() {
+        let (id, path) = id_and_path
+            .split_once(':')
+            .ok_or_else(|| anyhow!("Invalid format for rekor public key"))?;
+        trust_root.rekor_keys.insert(
+            id.to_string(),
             fs::read(path)
                 .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
         );
@@ -253,10 +258,10 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
             encoding: sigstore::registry::CertificateEncoding::Pem,
             data: cert_data,
         };
-        data.fulcio_certs.push(certificate.try_into()?);
+        trust_root.fulcio_certs.push(certificate.try_into()?);
     }
 
-    Ok(Box::new(data))
+    Ok(Box::new(trust_root))
 }
 
 #[tokio::main]

@@ -242,7 +242,7 @@ impl SignatureLayer {
         descriptor: &oci_client::manifest::OciDescriptor,
         layer: &oci_client::client::ImageLayer,
         source_image_digest: &str,
-        rekor_pub_key: Option<&CosignVerificationKey>,
+        rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
         fulcio_cert_pool: Option<&CertificatePool>,
     ) -> Result<SignatureLayer> {
         if descriptor.media_type != SIGSTORE_OCI_MEDIA_TYPE {
@@ -273,7 +273,7 @@ impl SignatureLayer {
         let annotations = descriptor.annotations.clone().unwrap_or_default();
 
         let signature = Self::get_signature_from_annotations(&annotations)?;
-        let bundle = Self::get_bundle_from_annotations(&annotations, rekor_pub_key)?;
+        let bundle = Self::get_bundle_from_annotations(&annotations, rekor_pub_keys)?;
         let certificate_signature = Self::get_certificate_signature_from_annotations(
             &annotations,
             fulcio_cert_pool,
@@ -300,11 +300,11 @@ impl SignatureLayer {
 
     fn get_bundle_from_annotations(
         annotations: &BTreeMap<String, String>,
-        rekor_pub_key: Option<&CosignVerificationKey>,
+        rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
     ) -> Result<Option<Bundle>> {
         let bundle = match annotations.get(SIGSTORE_BUNDLE_ANNOTATION) {
-            Some(value) => match rekor_pub_key {
-                Some(key) => Some(Bundle::new_verified(value, key)?),
+            Some(value) => match rekor_pub_keys {
+                Some(keys) => Some(Bundle::new_verified(value, keys)?),
                 None => {
                     info!(bundle = ?value, "Ignoring bundle, rekor public key not provided to verification client");
                     None
@@ -387,7 +387,7 @@ pub(crate) fn build_signature_layers(
     manifest: &oci_client::manifest::OciImageManifest,
     source_image_digest: &str,
     layers: &[oci_client::client::ImageLayer],
-    rekor_pub_key: Option<&CosignVerificationKey>,
+    rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
     fulcio_cert_pool: Option<&CertificatePool>,
 ) -> Result<Vec<SignatureLayer>> {
     let mut signature_layers: Vec<SignatureLayer> = Vec::new();
@@ -402,7 +402,7 @@ pub(crate) fn build_signature_layers(
                 manifest_layer,
                 layer,
                 source_image_digest,
-                rekor_pub_key,
+                rekor_pub_keys,
                 fulcio_cert_pool,
             ) {
                 Ok(sl) => signature_layers.push(sl),
@@ -683,7 +683,8 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -691,7 +692,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
@@ -712,7 +713,8 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -720,7 +722,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
@@ -742,7 +744,8 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -750,7 +753,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
@@ -785,10 +788,11 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         // We care only about the only case not tested: to not
         // fail when no bundle is specified.
         let annotations: BTreeMap<String, String> = BTreeMap::new();
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let actual =
-            SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_key));
+            SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_keys));
         assert!(actual.is_ok());
         assert!(actual.unwrap().is_none());
     }

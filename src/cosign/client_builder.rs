@@ -13,15 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use pki_types::CertificateDer;
 use tracing::info;
 
-use super::client::Client;
-use crate::crypto::SigningScheme;
-use crate::crypto::{CosignVerificationKey, certificate_pool::CertificatePool};
-use crate::errors::Result;
-use crate::registry::ClientConfig;
-use crate::trust::TrustRoot;
+use crate::{
+    cosign::client::Client,
+    crypto::{CosignVerificationKey, SigningScheme, certificate_pool::CertificatePool},
+    errors::Result,
+    registry::ClientConfig,
+    trust::TrustRoot,
+};
 
 /// A builder that generates Client objects.
 ///
@@ -54,7 +57,7 @@ use crate::trust::TrustRoot;
 #[derive(Default)]
 pub struct ClientBuilder<'a> {
     oci_client_config: ClientConfig,
-    rekor_pub_key: Option<&'a [u8]>,
+    rekor_pub_keys: Option<BTreeMap<String, &'a [u8]>>,
     fulcio_certs: Vec<CertificateDer<'a>>,
     #[cfg(feature = "cached-client")]
     enable_registry_caching: bool,
@@ -76,7 +79,7 @@ impl<'a> ClientBuilder<'a> {
     pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
         let rekor_keys = repo.rekor_keys()?;
         if !rekor_keys.is_empty() {
-            self.rekor_pub_key = Some(rekor_keys[0]);
+            self.rekor_pub_keys = Some(rekor_keys);
         }
         self.fulcio_certs = repo.fulcio_certs()?;
 
@@ -93,16 +96,22 @@ impl<'a> ClientBuilder<'a> {
     }
 
     pub fn build(self) -> Result<Client> {
-        let rekor_pub_key = match self.rekor_pub_key {
-            None => {
-                info!("Rekor public key not provided. Rekor integration disabled");
-                None
-            }
-            Some(data) => Some(CosignVerificationKey::from_der(
-                data,
-                &SigningScheme::default(),
-            )?),
-        };
+        let rekor_pub_keys: Option<BTreeMap<String, CosignVerificationKey>> = self
+            .rekor_pub_keys
+            .map(|keys| {
+                keys.iter()
+                    .filter_map(|(key_id, data)| {
+                        match CosignVerificationKey::from_der(data, &SigningScheme::default()) {
+                            Ok(key) => Some((key_id.clone(), key)),
+                            Err(e) => {
+                                info!("Cannot parse Rekor public key with id {key_id}: {e}");
+                                None
+                            }
+                        }
+                    })
+                    .collect::<BTreeMap<String, CosignVerificationKey>>()
+            })
+            .filter(|m| !m.is_empty());
 
         let fulcio_cert_pool = if self.fulcio_certs.is_empty() {
             info!("No Fulcio cert has been provided. Fulcio integration disabled");
@@ -136,7 +145,7 @@ impl<'a> ClientBuilder<'a> {
 
         Ok(Client {
             registry_client,
-            rekor_pub_key,
+            rekor_pub_keys,
             fulcio_cert_pool,
         })
     }
