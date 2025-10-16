@@ -77,6 +77,19 @@ impl SigstoreTrustRoot {
         Self::from_tough(&repository, cache_dir).await
     }
 
+    /// Constructs a new trust root from a JSON object containing a
+    /// [`TrustedRoot`](https://github.com/sigstore/protobuf-specs).
+    ///
+    /// # Warning
+    ///
+    /// This constructor does not perform any validation of the provided data.
+    /// The caller must ensure that the data is trustworthy.
+    /// Using untrusted data may lead to security vulnerabilities.
+    pub fn from_trusted_root_json_unchecked(data: &[u8]) -> Result<Self> {
+        let trusted_root: TrustedRoot = serde_json::from_slice(data)?;
+        Ok(Self { trusted_root })
+    }
+
     async fn fetch_target<N>(
         repository: &tough::Repository,
         checkout_dir: Option<&Path>,
