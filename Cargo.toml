@@ -122,7 +122,7 @@ elliptic-curve = { version = "0.13", default-features = false, features = [
 ] }
 futures = { version = "0.3", default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
-getrandom = { version = "0.2", default-features = false, optional = true }
+getrandom = { version = "0.3", default-features = false, optional = true }
 hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
