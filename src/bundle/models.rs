@@ -18,6 +18,8 @@ use crate::rekor::models::{
 pub enum Version {
     Bundle0_1,
     Bundle0_2,
+    Bundle0_3,
+    Bundle0_3Alt,
 }
 
 impl Display for Version {
@@ -25,6 +27,8 @@ impl Display for Version {
         f.write_str(match &self {
             Version::Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
             Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
+            Version::Bundle0_3 => "application/vnd.dev.sigstore.bundle.v0.3+json",
+            Version::Bundle0_3Alt => "application/vnd.dev.sigstore.bundle+json;version=0.3",
         })
     }
 }
@@ -36,6 +40,8 @@ impl FromStr for Version {
         match s {
             "application/vnd.dev.sigstore.bundle+json;version=0.1" => Ok(Version::Bundle0_1),
             "application/vnd.dev.sigstore.bundle+json;version=0.2" => Ok(Version::Bundle0_2),
+            "application/vnd.dev.sigstore.bundle.v0.3+json" => Ok(Version::Bundle0_3),
+            "application/vnd.dev.sigstore.bundle+json;version=0.3" => Ok(Version::Bundle0_3Alt),
             _ => Err(()),
         }
     }
@@ -103,5 +109,60 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
             }),
             log_index: value.log_index,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bundle_version_parsing() {
+        // Test Bundle 0.1
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.1"),
+            Ok(Version::Bundle0_1)
+        ));
+
+        // Test Bundle 0.2
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.2"),
+            Ok(Version::Bundle0_2)
+        ));
+
+        // Test Bundle 0.3 (canonical format)
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle.v0.3+json"),
+            Ok(Version::Bundle0_3)
+        ));
+
+        // Test Bundle 0.3 (alternate format)
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.3"),
+            Ok(Version::Bundle0_3Alt)
+        ));
+
+        // Test unknown version
+        assert!(Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.4").is_err());
+    }
+
+    #[test]
+    fn test_bundle_version_display() {
+        assert_eq!(
+            Version::Bundle0_1.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.1"
+        );
+        assert_eq!(
+            Version::Bundle0_2.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.2"
+        );
+        assert_eq!(
+            Version::Bundle0_3.to_string(),
+            "application/vnd.dev.sigstore.bundle.v0.3+json"
+        );
+        assert_eq!(
+            Version::Bundle0_3Alt.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.3"
+        );
     }
 }

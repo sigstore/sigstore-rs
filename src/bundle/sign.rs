@@ -30,7 +30,7 @@ use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
     Bundle, VerificationMaterial, verification_material,
 };
 use sigstore_protobuf_specs::dev::sigstore::common::v1::{
-    HashAlgorithm, HashOutput, MessageSignature, X509Certificate, X509CertificateChain,
+    HashAlgorithm, HashOutput, MessageSignature, X509Certificate,
 };
 use sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry;
 use tokio::io::AsyncRead;
@@ -339,22 +339,15 @@ impl SigningArtifact {
     ///
     /// The resulting bundle can be serialized with [`serde_json`].
     pub fn to_bundle(self) -> Bundle {
-        // NOTE: We explicitly only include the leaf certificate in the bundle's "chain"
-        // here: the specs explicitly forbid the inclusion of the root certificate,
-        // and discourage inclusion of any intermediates (since they're in the root of
-        // trust already).
-        let x509_certificate_chain = X509CertificateChain {
-            certificates: vec![X509Certificate {
-                raw_bytes: self.cert,
-            }],
+        // Bundle 0.3 uses a single certificate field instead of a certificate chain
+        let certificate = X509Certificate {
+            raw_bytes: self.cert,
         };
 
         let verification_material = Some(VerificationMaterial {
             timestamp_verification_data: None,
             tlog_entries: vec![self.log_entry],
-            content: Some(verification_material::Content::X509CertificateChain(
-                x509_certificate_chain,
-            )),
+            content: Some(verification_material::Content::Certificate(certificate)),
         });
 
         let message_signature = MessageSignature {
@@ -365,7 +358,7 @@ impl SigningArtifact {
             signature: self.signature,
         };
         Bundle {
-            media_type: Version::Bundle0_2.to_string(),
+            media_type: Version::Bundle0_3.to_string(),
             verification_material,
             content: Some(bundle::Content::MessageSignature(message_signature)),
         }

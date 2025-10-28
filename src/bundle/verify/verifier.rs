@@ -139,8 +139,15 @@ impl Verifier {
             .try_into()
             .map_err(SignatureErrorKind::AlgoUnsupported)?;
 
-        let verify_sig =
-            signing_key.verify_prehash(Signature::Raw(&materials.signature), &input_digest);
+        // For DSSE bundles, we verify against the PAE; for regular bundles, against the digest
+        let verify_sig = if materials.is_dsse() {
+            // DSSE verification: verify raw signature against PAE (not prehashed)
+            let pae = materials.verification_data(&input_digest);
+            signing_key.verify_signature(Signature::Raw(&materials.signature), &pae)
+        } else {
+            // Regular verification: verify against prehashed input digest
+            signing_key.verify_prehash(Signature::Raw(&materials.signature), &input_digest)
+        };
         verify_sig.map_err(SignatureErrorKind::VerificationFailed)?;
 
         debug!("signature corresponds to public key");

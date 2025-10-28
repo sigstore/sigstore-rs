@@ -4,6 +4,8 @@ pub mod alpine_all_of;
 pub use self::alpine_all_of::AlpineAllOf;
 pub mod consistency_proof;
 pub use self::consistency_proof::ConsistencyProof;
+pub mod dsse;
+pub use self::dsse::Dsse;
 pub mod error;
 pub use self::error::Error;
 pub mod hashedrekord;
