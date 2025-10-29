@@ -114,49 +114,7 @@ impl<'ctx> SigningSession<'ctx> {
         })?;
 
         let cert_req = builder.build::<p256::ecdsa::DerSignature>()?;
-
-        eprintln!("\n[DEBUG] CSR created with public key from private_key");
-        eprintln!("[DEBUG] Sending CSR to Fulcio...");
-
         let certs = fulcio.request_cert_v2(cert_req, token).await?;
-
-        eprintln!("[DEBUG] Certificate received from Fulcio");
-
-        // Extract and compare public keys
-        use p256::ecdsa::VerifyingKey;
-        let our_public_key = VerifyingKey::from(&private_key);
-        eprintln!("[DEBUG] Our public key (from private_key): {:?}", our_public_key.to_encoded_point(false));
-
-        // Try to extract public key from certificate
-        eprintln!("[DEBUG] Certificate subject: {:?}", certs.cert.tbs_certificate.subject);
-
-        // Extract the public key from the certificate to compare
-        use pkcs8::DecodePublicKey;
-        eprintln!("[DEBUG] Attempting to extract certificate public key...");
-        match certs.cert.tbs_certificate.subject_public_key_info.to_der() {
-            Ok(cert_spki_bytes) => {
-                eprintln!("[DEBUG] SPKI DER bytes length: {}", cert_spki_bytes.len());
-                match p256::PublicKey::from_public_key_der(&cert_spki_bytes) {
-                    Ok(cert_pub_key) => {
-                        let cert_verifying_key = VerifyingKey::from(&cert_pub_key);
-                        eprintln!("[DEBUG] Certificate public key: {:?}", cert_verifying_key.to_encoded_point(false));
-
-                        if our_public_key.to_encoded_point(false).as_bytes() == cert_verifying_key.to_encoded_point(false).as_bytes() {
-                            eprintln!("[DEBUG] ✅ Public keys MATCH!");
-                        } else {
-                            eprintln!("[DEBUG] ❌ Public keys DO NOT MATCH!");
-                            eprintln!("[DEBUG] This means the certificate is for a different key!");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[DEBUG] ❌ Failed to decode public key from DER: {:?}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[DEBUG] ❌ Failed to convert SPKI to DER: {:?}", e);
-            }
-        }
 
         Ok((private_key, certs))
     }
@@ -291,17 +249,6 @@ impl<'ctx> SigningSession<'ctx> {
         if self.is_expired() {
             return Err(SigstoreError::ExpiredSigningSession());
         }
-
-        eprintln!("\n========== RUST DEBUG: sign_dsse ==========");
-
-        // Serialize statement to JSON to see what we're signing
-        let statement_json = serde_json::to_string(statement)
-            .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to serialize statement: {}", e)))?;
-        eprintln!("[1] Statement JSON length: {} bytes", statement_json.len());
-        eprintln!("[1] Statement JSON content:\n{}", statement_json);
-        eprintln!("[1] Statement JSON hex (FULL): {}", hex::encode(&statement_json));
-        std::fs::write("/tmp/rust-statement.json", &statement_json).ok();
-        eprintln!("[1] Written to /tmp/rust-statement.json");
 
         // Create the DSSE envelope
         let mut envelope = dsse::create_envelope(statement)
