@@ -40,6 +40,8 @@ use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
 
+use crate::bundle::dsse;
+use crate::bundle::intoto::Statement;
 use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
 use crate::crypto::transparency::{CertificateEmbeddedSCT, verify_sct};
@@ -181,9 +183,11 @@ impl<'ctx> SigningSession<'ctx> {
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
 
         Ok(SigningArtifact {
-            input_digest: input_hash.to_owned(),
+            content: SigningArtifactContent::MessageSignature {
+                input_digest: input_hash.to_owned(),
+                signature: signature_bytes,
+            },
             cert: cert.to_der()?,
-            signature: signature_bytes,
             log_entry,
         })
     }
@@ -207,6 +211,98 @@ impl<'ctx> SigningSession<'ctx> {
         .await??;
 
         self.sign_digest(hasher).await
+    }
+
+    /// Signs an in-toto statement with a DSSE envelope.
+    ///
+    /// This creates a DSSE envelope containing the statement, signs the Pre-Authentication
+    /// Encoding (PAE), and submits the result to Rekor as a DSSE entry.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sigstore::bundle::intoto::{StatementBuilder, Subject};
+    /// # use sigstore::bundle::sign::SigningContext;
+    /// # use serde_json::json;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // Get identity token from OAuth flow (not shown)
+    /// # let token = unimplemented!();
+    ///
+    /// let ctx = SigningContext::production()?;
+    /// let session = ctx.signer(token).await?;
+    ///
+    /// let statement = StatementBuilder::new()
+    ///     .subject(Subject::new("myapp.tar.gz", "sha256", "abc123..."))
+    ///     .predicate_type("https://slsa.dev/provenance/v1")
+    ///     .predicate(json!({"buildType": "test"}))
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let artifact = session.sign_dsse(&statement).await?;
+    /// let bundle = artifact.to_bundle();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn sign_dsse(&self, statement: &Statement) -> SigstoreResult<SigningArtifact> {
+        if self.is_expired() {
+            return Err(SigstoreError::ExpiredSigningSession());
+        }
+
+        // Create the DSSE envelope
+        let mut envelope = dsse::create_envelope(statement)
+            .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to create DSSE envelope: {}", e)))?;
+
+        // Compute the PAE
+        let pae_bytes = dsse::pae(&envelope);
+
+        // Sign the PAE - we need to hash it first and then sign the digest
+        let mut pae_hasher = Sha256::new();
+        pae_hasher.update(&pae_bytes);
+        let pae_signature: p256::ecdsa::Signature = self.private_key.sign_digest(pae_hasher);
+        let signature_bytes = pae_signature.to_der().as_bytes().to_owned();
+
+        // Add signature to envelope
+        dsse::add_signature(&mut envelope, signature_bytes.clone(), String::new());
+
+        let cert = &self.certs.cert;
+
+        // Create the DSSE Rekor entry
+        // Serialize the envelope to JSON for Rekor submission
+        let envelope_json = serde_json::to_string(&envelope)
+            .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to serialize envelope: {}", e)))?;
+
+        // Compute payload hash for Rekor
+        let mut payload_hasher = Sha256::new();
+        payload_hasher.update(&envelope.payload);
+        let payload_hash = payload_hasher.finalize();
+
+        let proposed_entry = ProposedLogEntry::Intoto {
+            api_version: "0.0.2".to_owned(),
+            spec: serde_json::json!({
+                "content": {
+                    "envelope": envelope_json,
+                },
+                "payloadHash": {
+                    "algorithm": "sha256",
+                    "value": hex::encode(payload_hash),
+                },
+            }),
+        };
+
+        let log_entry = create_log_entry(&self.context.rekor_config, proposed_entry)
+            .await
+            .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
+        let log_entry = log_entry
+            .try_into()
+            .or(Err(SigstoreError::RekorClientError(
+                "Rekor returned malformed LogEntry".into(),
+            )))?;
+
+        Ok(SigningArtifact {
+            content: SigningArtifactContent::DsseEnvelope { envelope },
+            cert: cert.to_der()?,
+            log_entry,
+        })
     }
 }
 
@@ -248,6 +344,16 @@ pub mod blocking {
             let mut hasher = Sha256::new();
             io::copy(&mut input, &mut hasher)?;
             self.rt.block_on(self.inner.sign_digest(hasher))
+        }
+
+        /// Signs an in-toto statement with a DSSE envelope.
+        ///
+        /// This creates a DSSE envelope containing the statement, signs the Pre-Authentication
+        /// Encoding (PAE), and submits the result to Rekor as a DSSE entry.
+        ///
+        /// This is the synchronous version of [`SigningSession::sign_dsse`].
+        pub fn sign_dsse(&self, statement: &Statement) -> SigstoreResult<SigningArtifact> {
+            self.rt.block_on(self.inner.sign_dsse(statement))
         }
     }
 }
@@ -326,11 +432,23 @@ impl SigningContext {
     }
 }
 
+/// The content type of a signing artifact.
+enum SigningArtifactContent {
+    /// A message signature (hashedrekord)
+    MessageSignature {
+        input_digest: Vec<u8>,
+        signature: Vec<u8>,
+    },
+    /// A DSSE envelope (intoto)
+    DsseEnvelope {
+        envelope: sigstore_protobuf_specs::io::intoto::Envelope,
+    },
+}
+
 /// A signature and its associated metadata.
 pub struct SigningArtifact {
-    input_digest: Vec<u8>,
+    content: SigningArtifactContent,
     cert: Vec<u8>,
-    signature: Vec<u8>,
     log_entry: TransparencyLogEntry,
 }
 
@@ -350,17 +468,26 @@ impl SigningArtifact {
             content: Some(verification_material::Content::Certificate(certificate)),
         });
 
-        let message_signature = MessageSignature {
-            message_digest: Some(HashOutput {
-                algorithm: HashAlgorithm::Sha2256.into(),
-                digest: self.input_digest,
-            }),
-            signature: self.signature,
+        let content = match self.content {
+            SigningArtifactContent::MessageSignature { input_digest, signature } => {
+                let message_signature = MessageSignature {
+                    message_digest: Some(HashOutput {
+                        algorithm: HashAlgorithm::Sha2256.into(),
+                        digest: input_digest,
+                    }),
+                    signature,
+                };
+                bundle::Content::MessageSignature(message_signature)
+            }
+            SigningArtifactContent::DsseEnvelope { envelope } => {
+                bundle::Content::DsseEnvelope(envelope)
+            }
         };
+
         Bundle {
             media_type: Version::Bundle0_3.to_string(),
             verification_material,
-            content: Some(bundle::Content::MessageSignature(message_signature)),
+            content: Some(content),
         }
     }
 }

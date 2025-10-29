@@ -311,13 +311,39 @@ impl CheckedBundle {
     }
 
     /// Retrieves and checks consistency of the bundle's [TransparencyLogEntry].
+    ///
+    /// # Arguments
+    /// * `offline` - If true, only use data from the bundle (no online verification)
+    /// * `input_digest` - The digest of the input artifact (for hashedrekord bundles)
+    ///
+    /// # Returns
+    /// Returns `None` if verification fails, `Some(&TransparencyLogEntry)` if successful.
+    ///
+    /// # Note
+    /// Bundle v0.2+ requires inclusion proofs (enforced during bundle validation).
+    /// Bundle v0.1 allowed bundles with only an inclusion promise, but these are deprecated.
+    /// Online fetching from Rekor is not currently implemented.
     pub fn tlog_entry(&self, offline: bool, input_digest: &[u8]) -> Option<&TransparencyLogEntry> {
         let base64_pem_certificate =
             base64.encode(self.certificate.to_pem(pkcs8::LineEnding::LF).ok()?);
 
-        let entry = if !offline && self.tlog_entry.inclusion_proof.is_none() {
-            warn!("online rekor fetching is not implemented yet, but is necessary for this bundle");
-            return None;
+        // Check if we have an inclusion proof. Modern bundles (v0.2+) always have one
+        // due to validation in check_02_bundle/check_03_bundle.
+        let entry = if self.tlog_entry.inclusion_proof.is_none() {
+            if offline {
+                // In offline mode, we require the inclusion proof to be present
+                error!("Bundle is missing inclusion proof and offline verification is enabled");
+                return None;
+            } else {
+                // In online mode, we would need to fetch from Rekor, but this is not implemented.
+                // This should only happen with very old Bundle v0.1 entries.
+                error!(
+                    "Bundle is missing inclusion proof. Online Rekor fetching is not implemented. \
+                     Bundle v0.2+ always includes inclusion proofs. \
+                     Bundle v0.1 with only inclusion promise is not supported."
+                );
+                return None;
+            }
         } else {
             &self.tlog_entry
         };

@@ -92,6 +92,7 @@ async-trait = { version = "0.1", optional = true, default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 cached = { version = "0.56", optional = true, features = ["async"] }
 cfg-if = { version = "1.0.0", optional = true, default-features = false }
+clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], optional = true }
 chrono = { version = "0.4", default-features = false, features = [
     "now",
     "serde",
@@ -318,3 +319,9 @@ path = "examples/rekor/search_log_query/main.rs"
 [[example]]
 name = "fulcio_cert"
 path = "examples/fulcio/cert/main.rs"
+
+
+[[bin]]
+name = "sigstore-cli"
+path = "src/bin/sigstore-cli.rs"
+required-features = ["sign", "full", "clap", "sigstore-trust-root"]

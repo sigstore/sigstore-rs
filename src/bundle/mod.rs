@@ -17,6 +17,7 @@
 pub use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle;
 
 pub mod dsse;
+pub mod intoto;
 mod models;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "sign")))]
