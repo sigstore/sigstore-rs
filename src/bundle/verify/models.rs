@@ -301,7 +301,7 @@ impl CheckedBundle {
     pub fn verification_data(&self, input_digest: &[u8]) -> Vec<u8> {
         if let Some(envelope) = &self.dsse_envelope {
             // For DSSE, verify against the PAE
-            crate::bundle::dsse::pae(envelope)
+            crate::bundle::dsse::DsseEnvelope::from_envelope(envelope.clone()).pae()
         } else {
             // For regular bundles, verify against the input digest
             input_digest.to_vec()

@@ -251,12 +251,12 @@ impl<'ctx> SigningSession<'ctx> {
         }
 
         // Create the DSSE envelope
-        let mut envelope = dsse::create_envelope(statement).map_err(|e| {
+        let mut envelope = dsse::DsseEnvelope::from_statement(statement).map_err(|e| {
             SigstoreError::UnexpectedError(format!("Failed to create DSSE envelope: {}", e))
         })?;
 
         // Compute the PAE
-        let pae_bytes = dsse::pae(&envelope);
+        let pae_bytes = envelope.pae();
 
         // Sign the PAE directly (not pre-hashed)
         // The Signer trait will handle hashing internally
@@ -264,7 +264,7 @@ impl<'ctx> SigningSession<'ctx> {
         let signature_bytes = pae_signature.to_der().as_bytes().to_owned();
 
         // Add signature to envelope
-        dsse::add_signature(&mut envelope, signature_bytes.clone(), String::new());
+        envelope.add_signature(signature_bytes.clone(), String::new());
 
         let cert = &self.certs.cert;
 
@@ -275,9 +275,9 @@ impl<'ctx> SigningSession<'ctx> {
         // Build the DSSE envelope JSON for Rekor v0.0.1
         // NOTE: Do NOT include the keyid field - cosign doesn't include it
         let envelope_json = serde_json::json!({
-            "payload": base64.encode(&envelope.payload),
-            "payloadType": envelope.payload_type.clone(),
-            "signatures": envelope.signatures.iter().map(|sig| {
+            "payload": base64.encode(envelope.payload()),
+            "payloadType": envelope.payload_type().to_string(),
+            "signatures": envelope.signatures().iter().map(|sig| {
                 serde_json::json!({
                     "sig": base64.encode(&sig.sig),
                 })
@@ -309,7 +309,7 @@ impl<'ctx> SigningSession<'ctx> {
             )))?;
 
         Ok(SigningArtifact {
-            content: SigningArtifactContent::DsseEnvelope { envelope },
+            content: SigningArtifactContent::DsseEnvelope { envelope: envelope.into_inner() },
             cert: cert.to_der()?,
             log_entry,
         })

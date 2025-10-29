@@ -147,7 +147,8 @@ fn test_dsse_pae_format() {
         signatures: vec![],
     };
 
-    let pae = sigstore::bundle::dsse::pae(&envelope);
+    let dsse_envelope = sigstore::bundle::dsse::DsseEnvelope::from_envelope(envelope);
+    let pae = dsse_envelope.pae();
     let expected = b"DSSEv1 16 application/test 12 test payload";
 
     assert_eq!(pae, expected);
@@ -164,7 +165,8 @@ fn test_dsse_pae_with_intoto() {
         signatures: vec![],
     };
 
-    let pae = sigstore::bundle::dsse::pae(&envelope);
+    let dsse_envelope = sigstore::bundle::dsse::DsseEnvelope::from_envelope(envelope);
+    let pae = dsse_envelope.pae();
 
     // Should start with the correct prefix
     assert!(pae.starts_with(b"DSSEv1 28 application/vnd.in-toto+json "));
@@ -176,8 +178,7 @@ fn test_dsse_pae_with_intoto() {
 #[test]
 fn test_dsse_bundle_github_actions() {
     // Test a real GitHub Actions DSSE bundle (bundle2)
-    let bundle_json = std::fs::read_to_string("examples/bundle2.sigstore.json")
-        .expect("Failed to read bundle2.sigstore.json");
+    let bundle_json = include_str!("../tests/data/bundle_v3_github.sigstore.json");
 
     let bundle: Bundle = serde_json::from_str(&bundle_json).expect("Failed to parse bundle2 JSON");
 

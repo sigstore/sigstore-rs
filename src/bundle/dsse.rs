@@ -23,48 +23,16 @@ use sigstore_protobuf_specs::io::intoto::{Envelope, Signature as DsseSignature};
 
 use crate::bundle::intoto::Statement;
 
-/// Compute the DSSE Pre-Authentication Encoding (PAE) for the given envelope.
-///
-/// The PAE format is:
-/// ```text
-/// "DSSEv1" + SP + LEN(type) + SP + type + SP + LEN(body) + SP + body
-/// ```
-///
-/// Where:
-/// - `SP` is an ASCII space (0x20)
-/// - `LEN(s)` is the length of string `s` in ASCII decimal
-/// - `type` is the `payloadType` field
-/// - `body` is the `payload` field
-///
-/// # Example
-///
-/// ```text
-/// DSSEv1 28 application/vnd.in-toto+json 123 <payload-bytes>
-/// ```
-pub fn pae(envelope: &Envelope) -> Vec<u8> {
-    let payload_type = &envelope.payload_type;
-    let payload = &envelope.payload;
-
-    // Format: "DSSEv1 <type_len> <type> <payload_len> <payload>"
-    let mut pae = format!("DSSEv1 {} {} ", payload_type.len(), payload_type).into_bytes();
-    pae.extend_from_slice(format!("{} ", payload.len()).as_bytes());
-    pae.extend_from_slice(payload);
-
-    pae
-}
-
 /// The DSSE payload type for in-toto attestations.
 pub const PAYLOAD_TYPE_INTOTO: &str = "application/vnd.in-toto+json";
 
-/// Creates a DSSE envelope from an in-toto statement.
-///
-/// The statement is serialized to JSON and base64-encoded as the payload.
-/// The envelope is returned without signatures - use [`add_signature`] to add signatures.
+/// A wrapper around the protobuf `Envelope` that provides a convenient API for
+/// creating and manipulating DSSE envelopes.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use sigstore::bundle::dsse::create_envelope;
+/// use sigstore::bundle::dsse::DsseEnvelope;
 /// use sigstore::bundle::intoto::{StatementBuilder, Subject};
 /// use serde_json::json;
 ///
@@ -75,50 +43,108 @@ pub const PAYLOAD_TYPE_INTOTO: &str = "application/vnd.in-toto+json";
 ///     .build()
 ///     .unwrap();
 ///
-/// let envelope = create_envelope(&statement).unwrap();
-/// ```
-pub fn create_envelope(statement: &Statement) -> Result<Envelope, serde_json::Error> {
-    let payload_json = serde_json::to_vec(statement)?;
-
-    Ok(Envelope {
-        payload: payload_json, // Store RAW bytes, not base64!
-        payload_type: PAYLOAD_TYPE_INTOTO.to_string(),
-        signatures: vec![],
-    })
-}
-
-/// Adds a signature to a DSSE envelope.
+/// let mut envelope = DsseEnvelope::from_statement(&statement).unwrap();
 ///
-/// The signature should be computed over the PAE (Pre-Authentication Encoding) of the envelope.
-/// Use [`pae`] to compute the PAE that should be signed.
+/// // Compute PAE for signing
+/// let pae_bytes = envelope.pae();
 ///
-/// # Example
-///
-/// ```no_run
-/// use sigstore::bundle::dsse::{create_envelope, add_signature, pae};
-/// use sigstore::bundle::intoto::{StatementBuilder, Subject};
-/// use serde_json::json;
-///
-/// let statement = StatementBuilder::new()
-///     .subject(Subject::new("myapp.tar.gz", "sha256", "abc123..."))
-///     .predicate_type("https://slsa.dev/provenance/v1")
-///     .predicate(json!({"buildType": "test"}))
-///     .build()
-///     .unwrap();
-///
-/// let mut envelope = create_envelope(&statement).unwrap();
-///
-/// // Compute PAE and sign it (signing logic not shown)
-/// let pae_bytes = pae(&envelope);
+/// // Add signature (signing logic not shown)
 /// let signature_bytes: Vec<u8> = vec![]; // Your signature here
-///
-/// add_signature(&mut envelope, signature_bytes, "".to_string());
+/// envelope.add_signature(signature_bytes, "".to_string());
 /// ```
-pub fn add_signature(envelope: &mut Envelope, signature: Vec<u8>, keyid: String) {
-    envelope.signatures.push(DsseSignature {
-        keyid,
-        sig: signature,
-    });
+#[derive(Debug, Clone)]
+pub struct DsseEnvelope(Envelope);
+
+impl DsseEnvelope {
+    /// Creates a new DSSE envelope from an in-toto statement.
+    ///
+    /// The statement is serialized to JSON as the payload.
+    /// The envelope is returned without signatures - use [`add_signature`] to add signatures.
+    pub fn from_statement(statement: &Statement) -> Result<Self, serde_json::Error> {
+        let payload_json = serde_json::to_vec(statement)?;
+
+        Ok(Self(Envelope {
+            payload: payload_json, // Store RAW bytes, not base64!
+            payload_type: PAYLOAD_TYPE_INTOTO.to_string(),
+            signatures: vec![],
+        }))
+    }
+
+    /// Creates a DSSE envelope from a raw protobuf `Envelope`.
+    pub fn from_envelope(envelope: Envelope) -> Self {
+        Self(envelope)
+    }
+
+    /// Computes the DSSE Pre-Authentication Encoding (PAE) for this envelope.
+    ///
+    /// The PAE format is:
+    /// ```text
+    /// "DSSEv1" + SP + LEN(type) + SP + type + SP + LEN(body) + SP + body
+    /// ```
+    ///
+    /// Where:
+    /// - `SP` is an ASCII space (0x20)
+    /// - `LEN(s)` is the length of string `s` in ASCII decimal
+    /// - `type` is the `payloadType` field
+    /// - `body` is the `payload` field
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// DSSEv1 28 application/vnd.in-toto+json 123 <payload-bytes>
+    /// ```
+    pub fn pae(&self) -> Vec<u8> {
+        let payload_type = &self.0.payload_type;
+        let payload = &self.0.payload;
+
+        // Format: "DSSEv1 <type_len> <type> <payload_len> <payload>"
+        let mut pae = format!("DSSEv1 {} {} ", payload_type.len(), payload_type).into_bytes();
+        pae.extend_from_slice(format!("{} ", payload.len()).as_bytes());
+        pae.extend_from_slice(payload);
+
+        pae
+    }
+
+    /// Adds a signature to this envelope.
+    ///
+    /// The signature should be computed over the PAE (Pre-Authentication Encoding) of the envelope.
+    /// Use [`pae`] to compute the PAE that should be signed.
+    pub fn add_signature(&mut self, signature: Vec<u8>, keyid: String) {
+        self.0.signatures.push(DsseSignature {
+            keyid,
+            sig: signature,
+        });
+    }
+
+    /// Returns a reference to the underlying protobuf `Envelope`.
+    pub fn as_inner(&self) -> &Envelope {
+        &self.0
+    }
+
+    /// Returns a mutable reference to the underlying protobuf `Envelope`.
+    pub fn as_inner_mut(&mut self) -> &mut Envelope {
+        &mut self.0
+    }
+
+    /// Consumes this wrapper and returns the underlying protobuf `Envelope`.
+    pub fn into_inner(self) -> Envelope {
+        self.0
+    }
+
+    /// Returns the payload of this envelope.
+    pub fn payload(&self) -> &[u8] {
+        &self.0.payload
+    }
+
+    /// Returns the payload type of this envelope.
+    pub fn payload_type(&self) -> &str {
+        &self.0.payload_type
+    }
+
+    /// Returns the signatures in this envelope.
+    pub fn signatures(&self) -> &[DsseSignature] {
+        &self.0.signatures
+    }
 }
 
 #[cfg(test)]
@@ -130,13 +156,13 @@ mod tests {
     #[test]
     fn test_pae_format() {
         // Test the PAE format matches the specification
-        let envelope = Envelope {
+        let envelope = DsseEnvelope::from_envelope(Envelope {
             payload: b"test payload".to_vec(),
             payload_type: "application/test".to_string(),
             signatures: vec![],
-        };
+        });
 
-        let result = pae(&envelope);
+        let result = envelope.pae();
         let expected = b"DSSEv1 16 application/test 12 test payload";
 
         assert_eq!(result, expected);
@@ -145,13 +171,13 @@ mod tests {
     #[test]
     fn test_pae_with_intoto() {
         // Test with a typical in-toto payload type
-        let envelope = Envelope {
+        let envelope = DsseEnvelope::from_envelope(Envelope {
             payload: b"{\"_type\":\"https://in-toto.io/Statement/v1\"}".to_vec(),
             payload_type: "application/vnd.in-toto+json".to_string(),
             signatures: vec![],
-        };
+        });
 
-        let result = pae(&envelope);
+        let result = envelope.pae();
 
         // Should start with the correct prefix
         assert!(result.starts_with(b"DSSEv1 28 application/vnd.in-toto+json "));
@@ -169,16 +195,14 @@ mod tests {
             .build()
             .unwrap();
 
-        let envelope = create_envelope(&statement).unwrap();
+        let envelope = DsseEnvelope::from_statement(&statement).unwrap();
 
-        assert_eq!(envelope.payload_type, PAYLOAD_TYPE_INTOTO);
-        assert_eq!(envelope.signatures.len(), 0);
+        assert_eq!(envelope.payload_type(), PAYLOAD_TYPE_INTOTO);
+        assert_eq!(envelope.signatures().len(), 0);
 
-        // Decode the payload and verify it matches the statement
-        let payload_str = String::from_utf8(envelope.payload.clone()).unwrap();
-        let payload_json = base64.decode(payload_str.as_bytes()).unwrap();
+        // Verify the payload matches the statement
         let parsed_statement: crate::bundle::intoto::Statement =
-            serde_json::from_slice(&payload_json).unwrap();
+            serde_json::from_slice(envelope.payload()).unwrap();
 
         assert_eq!(
             parsed_statement.statement_type,
@@ -196,14 +220,14 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut envelope = create_envelope(&statement).unwrap();
+        let mut envelope = DsseEnvelope::from_statement(&statement).unwrap();
         let signature = vec![1, 2, 3, 4, 5];
 
-        add_signature(&mut envelope, signature.clone(), "test-key".to_string());
+        envelope.add_signature(signature.clone(), "test-key".to_string());
 
-        assert_eq!(envelope.signatures.len(), 1);
-        assert_eq!(envelope.signatures[0].sig, signature);
-        assert_eq!(envelope.signatures[0].keyid, "test-key");
+        assert_eq!(envelope.signatures().len(), 1);
+        assert_eq!(envelope.signatures()[0].sig, signature);
+        assert_eq!(envelope.signatures()[0].keyid, "test-key");
     }
 
     #[test]
@@ -215,18 +239,43 @@ mod tests {
             .build()
             .unwrap();
 
-        let envelope = create_envelope(&statement).unwrap();
-        let pae_result = pae(&envelope);
+        let envelope = DsseEnvelope::from_statement(&statement).unwrap();
+        let pae_result = envelope.pae();
 
         // PAE should start with the correct format
         assert!(pae_result.starts_with(b"DSSEv1 28 application/vnd.in-toto+json "));
 
-        // PAE should contain the base64-encoded payload
-        let payload_str = String::from_utf8(envelope.payload.clone()).unwrap();
+        // PAE should contain the payload
+        let payload_str = String::from_utf8(envelope.payload().to_vec()).unwrap();
         assert!(
             String::from_utf8(pae_result)
                 .unwrap()
                 .contains(&payload_str)
         );
+    }
+
+    #[test]
+    fn test_accessors() {
+        let statement = StatementBuilder::new()
+            .subject(Subject::new("test.tar.gz", "sha256", "abc123"))
+            .predicate_type("https://slsa.dev/provenance/v1")
+            .predicate(json!({"buildType": "test"}))
+            .build()
+            .unwrap();
+
+        let mut envelope = DsseEnvelope::from_statement(&statement).unwrap();
+
+        // Test accessors
+        assert_eq!(envelope.payload_type(), PAYLOAD_TYPE_INTOTO);
+        assert!(!envelope.payload().is_empty());
+        assert_eq!(envelope.signatures().len(), 0);
+
+        // Test mutable access
+        envelope.as_inner_mut().payload_type = "test".to_string();
+        assert_eq!(envelope.payload_type(), "test");
+
+        // Test into_inner
+        let inner = envelope.into_inner();
+        assert_eq!(inner.payload_type, "test");
     }
 }
