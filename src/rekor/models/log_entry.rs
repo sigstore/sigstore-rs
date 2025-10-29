@@ -69,6 +69,7 @@ pub enum Body {
     rpm(RpmAllOf),
     tuf(TufAllOf),
     intoto(IntotoAllOf),
+    dsse(IntotoAllOf),  // DSSE v0.0.1 has same structure as intoto
     hashedrekord(HashedrekordAllOf),
     rekord(RekordAllOf),
 }

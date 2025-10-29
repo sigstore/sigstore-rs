@@ -24,7 +24,7 @@ use hex;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};
 use sha2::{Digest, Sha256};
-use signature::DigestSigner;
+use signature::{DigestSigner, Signer};
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
     Bundle, VerificationMaterial, verification_material,
@@ -114,7 +114,51 @@ impl<'ctx> SigningSession<'ctx> {
         })?;
 
         let cert_req = builder.build::<p256::ecdsa::DerSignature>()?;
-        Ok((private_key, fulcio.request_cert_v2(cert_req, token).await?))
+
+        eprintln!("\n[DEBUG] CSR created with public key from private_key");
+        eprintln!("[DEBUG] Sending CSR to Fulcio...");
+
+        let certs = fulcio.request_cert_v2(cert_req, token).await?;
+
+        eprintln!("[DEBUG] Certificate received from Fulcio");
+
+        // Extract and compare public keys
+        use p256::ecdsa::VerifyingKey;
+        let our_public_key = VerifyingKey::from(&private_key);
+        eprintln!("[DEBUG] Our public key (from private_key): {:?}", our_public_key.to_encoded_point(false));
+
+        // Try to extract public key from certificate
+        eprintln!("[DEBUG] Certificate subject: {:?}", certs.cert.tbs_certificate.subject);
+
+        // Extract the public key from the certificate to compare
+        use pkcs8::DecodePublicKey;
+        eprintln!("[DEBUG] Attempting to extract certificate public key...");
+        match certs.cert.tbs_certificate.subject_public_key_info.to_der() {
+            Ok(cert_spki_bytes) => {
+                eprintln!("[DEBUG] SPKI DER bytes length: {}", cert_spki_bytes.len());
+                match p256::PublicKey::from_public_key_der(&cert_spki_bytes) {
+                    Ok(cert_pub_key) => {
+                        let cert_verifying_key = VerifyingKey::from(&cert_pub_key);
+                        eprintln!("[DEBUG] Certificate public key: {:?}", cert_verifying_key.to_encoded_point(false));
+
+                        if our_public_key.to_encoded_point(false).as_bytes() == cert_verifying_key.to_encoded_point(false).as_bytes() {
+                            eprintln!("[DEBUG] ✅ Public keys MATCH!");
+                        } else {
+                            eprintln!("[DEBUG] ❌ Public keys DO NOT MATCH!");
+                            eprintln!("[DEBUG] This means the certificate is for a different key!");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[DEBUG] ❌ Failed to decode public key from DER: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[DEBUG] ❌ Failed to convert SPKI to DER: {:?}", e);
+            }
+        }
+
+        Ok((private_key, certs))
     }
 
     /// Check if the session's identity token or key material is expired.
@@ -248,50 +292,184 @@ impl<'ctx> SigningSession<'ctx> {
             return Err(SigstoreError::ExpiredSigningSession());
         }
 
+        eprintln!("\n========== RUST DEBUG: sign_dsse ==========");
+
+        // Serialize statement to JSON to see what we're signing
+        let statement_json = serde_json::to_string(statement)
+            .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to serialize statement: {}", e)))?;
+        eprintln!("[1] Statement JSON length: {} bytes", statement_json.len());
+        eprintln!("[1] Statement JSON content:\n{}", statement_json);
+        eprintln!("[1] Statement JSON hex (FULL): {}", hex::encode(&statement_json));
+        std::fs::write("/tmp/rust-statement.json", &statement_json).ok();
+        eprintln!("[1] Written to /tmp/rust-statement.json");
+
         // Create the DSSE envelope
         let mut envelope = dsse::create_envelope(statement)
             .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to create DSSE envelope: {}", e)))?;
 
+        eprintln!("[2] Envelope created");
+        eprintln!("[2] Envelope.payload (raw JSON bytes) length: {} bytes", envelope.payload.len());
+        if let Ok(payload_str) = String::from_utf8(envelope.payload.clone()) {
+            eprintln!("[2] Envelope.payload content: {}", payload_str);
+        }
+        eprintln!("[2] Envelope.payloadType: {}", envelope.payload_type);
+
         // Compute the PAE
         let pae_bytes = dsse::pae(&envelope);
 
-        // Sign the PAE - we need to hash it first and then sign the digest
-        let mut pae_hasher = Sha256::new();
-        pae_hasher.update(&pae_bytes);
-        let pae_signature: p256::ecdsa::Signature = self.private_key.sign_digest(pae_hasher);
+        eprintln!("[3] PAE computed");
+        eprintln!("[3] PAE length: {} bytes", pae_bytes.len());
+        eprintln!("[3] PAE first 200 bytes: {}", String::from_utf8_lossy(&pae_bytes[..pae_bytes.len().min(200)]));
+        eprintln!("[3] PAE hex (FULL): {}", hex::encode(&pae_bytes));
+
+        // Write PAE to file for external verification
+        std::fs::write("/tmp/rust-pae-bytes.bin", &pae_bytes).ok();
+        eprintln!("[3] PAE written to /tmp/rust-pae-bytes.bin");
+
+        // Sign the PAE directly (not pre-hashed)
+        // The Signer trait will handle hashing internally
+        eprintln!("[4] Signing PAE with Signer::sign() (will hash internally with SHA256)");
+        eprintln!("[4] BYTES TO SIGN (hex, FULL): {}", hex::encode(&pae_bytes));
+
+        let pae_signature: p256::ecdsa::Signature = self.private_key.sign(&pae_bytes);
         let signature_bytes = pae_signature.to_der().as_bytes().to_owned();
+
+        // Also compute hash for debugging
+        let pae_hash = Sha256::digest(&pae_bytes);
+        eprintln!("[4] PAE SHA256 hash (for reference): {}", hex::encode(&pae_hash));
+
+        eprintln!("[5] Signature computed");
+        eprintln!("[5] Signature length: {} bytes", signature_bytes.len());
+        eprintln!("[5] Signature hex: {}", hex::encode(&signature_bytes));
+        eprintln!("[5] Signature base64: {}", base64.encode(&signature_bytes));
 
         // Add signature to envelope
         dsse::add_signature(&mut envelope, signature_bytes.clone(), String::new());
 
+        eprintln!("[6] Signature added to envelope");
+
         let cert = &self.certs.cert;
 
         // Create the DSSE Rekor entry
-        // Serialize the envelope to JSON for Rekor submission
-        let envelope_json = serde_json::to_string(&envelope)
+        // For intoto v0.0.2, Rekor expects:
+        // - content.envelope: the complete DSSE envelope with payloadType and signatures
+        // - Each signature needs a publicKey field (the certificate)
+
+        // Get the public key from the certificate
+        // For intoto v0.0.1, we need base64(PEM)
+
+        eprintln!("\n[CERT-DEBUG] Converting certificate to PEM...");
+        let cert_pem = cert.to_pem(pkcs8::LineEnding::LF)?;
+        eprintln!("[CERT-DEBUG] PEM length: {} bytes", cert_pem.len());
+        eprintln!("[CERT-DEBUG] PEM (first 100 chars): {}", &cert_pem[..cert_pem.len().min(100)]);
+
+        // Write out the PEM to a temp file for debugging
+        std::fs::write("/tmp/rust-cert-debug.pem", &cert_pem).ok();
+        eprintln!("[CERT-DEBUG] Certificate written to /tmp/rust-cert-debug.pem for inspection");
+
+        let cert_base64 = base64.encode(cert_pem.as_bytes());
+        eprintln!("[CERT-DEBUG] Base64 length: {} bytes", cert_base64.len());
+
+        // Build the envelope with signatures (no publicKey in the signatures themselves for v0.0.1)
+        let _rekor_signatures = envelope.signatures.iter().map(|sig| {
+            serde_json::json!({
+                "keyid": sig.keyid.clone(),
+                "sig": base64.encode(&sig.sig),
+                "publicKey": cert_base64.clone(),
+            })
+        }).collect::<Vec<_>>();
+
+        // Build the DSSE envelope JSON for Rekor v0.0.1
+        // The v0.0.1 API expects the envelope serialized to JSON as a string
+        // NOTE: Do NOT include the keyid field - cosign doesn't include it and it causes verification to fail
+
+        eprintln!("\n[ENCODE-1] Building envelope JSON structure...");
+        eprintln!("[ENCODE-1] Envelope.payload (raw bytes): {} bytes", envelope.payload.len());
+        eprintln!("[ENCODE-1] Envelope.payload (as UTF-8 string): {}",
+            String::from_utf8(envelope.payload.clone()).unwrap_or_else(|_| "<not UTF-8>".to_string()));
+        eprintln!("[ENCODE-1] Envelope.payloadType: {}", envelope.payload_type);
+        eprintln!("[ENCODE-1] Number of signatures: {}", envelope.signatures.len());
+
+        for (i, sig) in envelope.signatures.iter().enumerate() {
+            eprintln!("[ENCODE-1] Signature #{} length: {} bytes", i, sig.sig.len());
+            eprintln!("[ENCODE-1] Signature #{} hex: {}", i, hex::encode(&sig.sig));
+            eprintln!("[ENCODE-1] Signature #{} base64: {}", i, base64.encode(&sig.sig));
+        }
+
+        let envelope_json = serde_json::json!({
+            "payload": base64.encode(&envelope.payload),  // Base64 encode the raw payload bytes for JSON
+            "payloadType": envelope.payload_type.clone(),
+            "signatures": envelope.signatures.iter().map(|sig| {
+                serde_json::json!({
+                    "sig": base64.encode(&sig.sig),
+                })
+            }).collect::<Vec<_>>(),
+        });
+
+        eprintln!("[ENCODE-2] Envelope JSON object created");
+        eprintln!("[ENCODE-2] Envelope JSON (pretty):\n{}", serde_json::to_string_pretty(&envelope_json).unwrap());
+
+        let envelope_json_string = serde_json::to_string(&envelope_json)
             .map_err(|e| SigstoreError::UnexpectedError(format!("Failed to serialize envelope: {}", e)))?;
 
-        // Compute payload hash for Rekor
-        let mut payload_hasher = Sha256::new();
-        payload_hasher.update(&envelope.payload);
-        let payload_hash = payload_hasher.finalize();
+        eprintln!("[ENCODE-3] Envelope JSON string length: {} bytes", envelope_json_string.len());
+        eprintln!("[ENCODE-3] Envelope JSON string: {}", envelope_json_string);
 
-        let proposed_entry = ProposedLogEntry::Intoto {
-            api_version: "0.0.2".to_owned(),
+        // Use "dsse" kind with v0.0.1 API, matching cosign's implementation
+        // The spec needs proposedContent with envelope and verifiers
+        let proposed_entry = ProposedLogEntry::Dsse {
+            api_version: "0.0.1".to_owned(),
             spec: serde_json::json!({
-                "content": {
-                    "envelope": envelope_json,
-                },
-                "payloadHash": {
-                    "algorithm": "sha256",
-                    "value": hex::encode(payload_hash),
+                "proposedContent": {
+                    "envelope": envelope_json_string,
+                    "verifiers": [cert_base64],
                 },
             }),
         };
 
+        eprintln!("\nDEBUG: Submitting to Rekor with:");
+        eprintln!("  Kind: dsse");
+        eprintln!("  API Version: 0.0.1");
+        eprintln!("  Envelope payload length: {} bytes", envelope.payload.len());
+        if let Ok(payload_str) = String::from_utf8(envelope.payload.clone()) {
+            eprintln!("  Envelope payload (base64): {}", payload_str);
+        }
+        eprintln!("  Envelope signatures count: {}", envelope.signatures.len());
+        eprintln!("  Certificate length: {} bytes", cert_base64.len());
+
+        // Decode and log the PAE for debugging
+        eprintln!("\n  PAE verification:");
+        let test_pae = dsse::pae(&envelope);
+        eprintln!("    PAE length: {} bytes", test_pae.len());
+        eprintln!("    PAE (hex, first 100 bytes): {}", hex::encode(&test_pae[..test_pae.len().min(100)]));
+
+        if let Ok(pretty_spec) = serde_json::to_string_pretty(&proposed_entry) {
+            eprintln!("\n  Full Proposed Entry:\n{}", pretty_spec);
+        }
+
+        eprintln!("\n[7] Final envelope for Rekor submission:");
+        eprintln!("[7] Envelope JSON: {}", envelope_json_string);
+        eprintln!("==========================================\n");
+
         let log_entry = create_log_entry(&self.context.rekor_config, proposed_entry)
             .await
-            .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
+            .map_err(|err| {
+                eprintln!("DEBUG: Rekor submission failed!");
+                eprintln!("  Error type: {:?}", err);
+                match &err {
+                    crate::rekor::apis::Error::ResponseError(resp) => {
+                        eprintln!("  HTTP Status: {}", resp.status);
+                        eprintln!("  Response body: {}", resp.content);
+                        if let Some(entity) = &resp.entity {
+                            eprintln!("  Parsed error entity: {:#?}", entity);
+                        }
+                    }
+                    _ => {
+                        eprintln!("  Other error: {}", err);
+                    }
+                }
+                SigstoreError::RekorClientError(err.to_string())
+            })?;
         let log_entry = log_entry
             .try_into()
             .or(Err(SigstoreError::RekorClientError(

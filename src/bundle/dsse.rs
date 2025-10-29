@@ -80,10 +80,9 @@ pub const PAYLOAD_TYPE_INTOTO: &str = "application/vnd.in-toto+json";
 /// ```
 pub fn create_envelope(statement: &Statement) -> Result<Envelope, serde_json::Error> {
     let payload_json = serde_json::to_vec(statement)?;
-    let payload_b64 = base64.encode(&payload_json);
 
     Ok(Envelope {
-        payload: payload_b64.into_bytes(),
+        payload: payload_json,  // Store RAW bytes, not base64!
         payload_type: PAYLOAD_TYPE_INTOTO.to_string(),
         signatures: vec![],
     })

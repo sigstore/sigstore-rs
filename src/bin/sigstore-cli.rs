@@ -193,6 +193,12 @@ fn attest_blob(
     println!("  Predicate Type: {}", statement.predicate_type);
     println!("  Subjects: {}", statement.subject.len());
 
+    // Debug: print full statement
+    eprintln!("\nDEBUG: Full statement:");
+    if let Ok(statement_json) = serde_json::to_string_pretty(&statement) {
+        eprintln!("{}", statement_json);
+    }
+
     // Get identity token
     println!("\nAuthenticating...");
     let token = get_identity_token()?;

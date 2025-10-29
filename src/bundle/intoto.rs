@@ -14,32 +14,36 @@
 
 //! In-toto attestation statement support for creating DSSE bundles.
 //!
-//! This module provides a builder API for creating in-toto Statement v1 attestations
+//! This module provides a builder API for creating in-toto Statement v0.1 attestations
 //! that can be signed and wrapped in DSSE envelopes.
 //!
-//! See: <https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md>
+//! Note: This implements the v0.1 specification, which is currently used by cosign and Rekor.
+//! See: <https://github.com/in-toto/attestation/blob/main/spec/v0.1.0/statement.md>
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// The in-toto Statement v1 type identifier.
-pub const STATEMENT_TYPE_V1: &str = "https://in-toto.io/Statement/v1";
+/// The in-toto Statement v0.1 type identifier.
+/// Note: v0.1 is the currently used version by cosign and Rekor, not v1.
+pub const STATEMENT_TYPE_V1: &str = "https://in-toto.io/Statement/v0.1";
 
-/// An in-toto Statement v1 attestation.
+/// An in-toto Statement v0.1 attestation.
 ///
 /// This represents a verifiable claim about one or more software artifacts.
+/// Note: This uses the v0.1 specification which is currently used by cosign and Rekor.
+/// Field order matches the canonical JSON serialization used by cosign.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Statement {
-    /// The statement type (always "https://in-toto.io/Statement/v1")
+    /// The statement type (always "https://in-toto.io/Statement/v0.1")
     #[serde(rename = "_type")]
     pub statement_type: String,
-
-    /// The subjects of this statement (artifacts being attested to)
-    pub subject: Vec<Subject>,
 
     /// The type of predicate
     #[serde(rename = "predicateType")]
     pub predicate_type: String,
+
+    /// The subjects of this statement (artifacts being attested to)
+    pub subject: Vec<Subject>,
 
     /// The predicate contents (statement-specific data)
     pub predicate: serde_json::Value,
@@ -153,8 +157,8 @@ impl StatementBuilder {
 
         Ok(Statement {
             statement_type: STATEMENT_TYPE_V1.to_string(),
-            subject: self.subjects,
             predicate_type,
+            subject: self.subjects,
             predicate,
         })
     }
