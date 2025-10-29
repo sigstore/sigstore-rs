@@ -19,7 +19,6 @@
 //!
 //! See: <https://github.com/secure-systems-lab/dsse/blob/v1.0.0/envelope.md>
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use sigstore_protobuf_specs::io::intoto::{Envelope, Signature as DsseSignature};
 
 use crate::bundle::intoto::Statement;
@@ -82,7 +81,7 @@ pub fn create_envelope(statement: &Statement) -> Result<Envelope, serde_json::Er
     let payload_json = serde_json::to_vec(statement)?;
 
     Ok(Envelope {
-        payload: payload_json,  // Store RAW bytes, not base64!
+        payload: payload_json, // Store RAW bytes, not base64!
         payload_type: PAYLOAD_TYPE_INTOTO.to_string(),
         signatures: vec![],
     })
@@ -181,7 +180,10 @@ mod tests {
         let parsed_statement: crate::bundle::intoto::Statement =
             serde_json::from_slice(&payload_json).unwrap();
 
-        assert_eq!(parsed_statement.statement_type, crate::bundle::intoto::STATEMENT_TYPE_V1);
+        assert_eq!(
+            parsed_statement.statement_type,
+            crate::bundle::intoto::STATEMENT_TYPE_V1
+        );
         assert_eq!(parsed_statement.subject[0].name, "test.tar.gz");
     }
 
@@ -221,6 +223,10 @@ mod tests {
 
         // PAE should contain the base64-encoded payload
         let payload_str = String::from_utf8(envelope.payload.clone()).unwrap();
-        assert!(String::from_utf8(pae_result).unwrap().contains(&payload_str));
+        assert!(
+            String::from_utf8(pae_result)
+                .unwrap()
+                .contains(&payload_str)
+        );
     }
 }

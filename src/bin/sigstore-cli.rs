@@ -128,7 +128,10 @@ fn attest_blob(
         println!("Reading statement from: {}", statement_path.display());
 
         if !statement_path.exists() {
-            eprintln!("Error: Statement file not found: {}", statement_path.display());
+            eprintln!(
+                "Error: Statement file not found: {}",
+                statement_path.display()
+            );
             std::process::exit(1);
         }
 
@@ -172,7 +175,9 @@ fn attest_blob(
         // Create minimal statement with just the predicate type
         // Validate that it looks like a URI
         if !pred_type.contains("://") && !pred_type.starts_with("https://") {
-            eprintln!("Warning: Predicate type should be a valid URI (e.g., https://example.com/predicate/v1)");
+            eprintln!(
+                "Warning: Predicate type should be a valid URI (e.g., https://example.com/predicate/v1)"
+            );
             eprintln!("         Got: {}", pred_type);
         }
 
@@ -192,12 +197,6 @@ fn attest_blob(
     println!("  Type: {}", statement.statement_type);
     println!("  Predicate Type: {}", statement.predicate_type);
     println!("  Subjects: {}", statement.subject.len());
-
-    // Debug: print full statement
-    eprintln!("\nDEBUG: Full statement:");
-    if let Ok(statement_json) = serde_json::to_string_pretty(&statement) {
-        eprintln!("{}", statement_json);
-    }
 
     // Get identity token
     println!("\nAuthenticating...");

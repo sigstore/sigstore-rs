@@ -61,7 +61,11 @@ pub struct Subject {
 
 impl Subject {
     /// Creates a new subject with the given name and a single digest.
-    pub fn new(name: impl Into<String>, algorithm: impl Into<String>, digest: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        algorithm: impl Into<String>,
+        digest: impl Into<String>,
+    ) -> Self {
         let mut digest_map = HashMap::new();
         digest_map.insert(algorithm.into(), digest.into());
         Self {
@@ -149,11 +153,11 @@ impl StatementBuilder {
             return Err("Statement must have at least one subject");
         }
 
-        let predicate_type = self.predicate_type
+        let predicate_type = self
+            .predicate_type
             .ok_or("Statement must have a predicateType")?;
 
-        let predicate = self.predicate
-            .ok_or("Statement must have a predicate")?;
+        let predicate = self.predicate.ok_or("Statement must have a predicate")?;
 
         Ok(Statement {
             statement_type: STATEMENT_TYPE_V1.to_string(),
@@ -177,11 +181,7 @@ mod tests {
 
     #[test]
     fn test_subject_creation() {
-        let subject = Subject::new(
-            "myfile.tar.gz",
-            "sha256",
-            "abc123",
-        );
+        let subject = Subject::new("myfile.tar.gz", "sha256", "abc123");
 
         assert_eq!(subject.name, "myfile.tar.gz");
         assert_eq!(subject.digest.get("sha256"), Some(&"abc123".to_string()));
@@ -189,8 +189,8 @@ mod tests {
 
     #[test]
     fn test_subject_with_multiple_digests() {
-        let subject = Subject::new("myfile.tar.gz", "sha256", "abc123")
-            .with_digest("sha512", "def456");
+        let subject =
+            Subject::new("myfile.tar.gz", "sha256", "abc123").with_digest("sha512", "def456");
 
         assert_eq!(subject.digest.len(), 2);
         assert_eq!(subject.digest.get("sha256"), Some(&"abc123".to_string()));
@@ -222,7 +222,10 @@ mod tests {
             .build();
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Statement must have at least one subject");
+        assert_eq!(
+            result.unwrap_err(),
+            "Statement must have at least one subject"
+        );
     }
 
     #[test]

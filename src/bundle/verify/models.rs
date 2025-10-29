@@ -185,22 +185,25 @@ impl TryFrom<Bundle> for CheckedBundle {
         }
 
         // Extract signature from either MessageSignature or DSSE envelope
-        let (signature, dsse_envelope) = match input.content.ok_or(BundleErrorKind::SignatureMissing)? {
-            bundle::Content::MessageSignature(s) => (s.signature, None),
-            bundle::Content::DsseEnvelope(envelope) => {
-                // For DSSE, we need to extract the signature from the envelope
-                // DSSE uses PAE (Pre-Authentication Encoding): "DSSEv1 <payload_type_len> <payload_type> <payload_len> <payload>"
-                if envelope.signatures.is_empty() {
-                    return Err(BundleErrorKind::DsseInvalid("no signatures in envelope".to_string()));
+        let (signature, dsse_envelope) =
+            match input.content.ok_or(BundleErrorKind::SignatureMissing)? {
+                bundle::Content::MessageSignature(s) => (s.signature, None),
+                bundle::Content::DsseEnvelope(envelope) => {
+                    // For DSSE, we need to extract the signature from the envelope
+                    // DSSE uses PAE (Pre-Authentication Encoding): "DSSEv1 <payload_type_len> <payload_type> <payload_len> <payload>"
+                    if envelope.signatures.is_empty() {
+                        return Err(BundleErrorKind::DsseInvalid(
+                            "no signatures in envelope".to_string(),
+                        ));
+                    }
+                    // Use the first signature (bundles should have exactly one)
+                    if envelope.signatures.len() > 1 {
+                        warn!("DSSE envelope contains multiple signatures, using first one");
+                    }
+                    // The signature bytes are already decoded from base64 by the protobuf deserializer
+                    (envelope.signatures[0].sig.clone(), Some(envelope))
                 }
-                // Use the first signature (bundles should have exactly one)
-                if envelope.signatures.len() > 1 {
-                    warn!("DSSE envelope contains multiple signatures, using first one");
-                }
-                // The signature bytes are already decoded from base64 by the protobuf deserializer
-                (envelope.signatures[0].sig.clone(), Some(envelope))
-            }
-        };
+            };
 
         if tlog_entries.len() != 1 {
             return Err(BundleErrorKind::TlogEntry(tlog_entries.len()));
@@ -378,10 +381,12 @@ impl CheckedBundle {
                     payload_hasher.update(&envelope.payload);
                     let payload_hash = hex::encode(payload_hasher.finalize());
 
-                    let tlog_payload_hash = spec.get("payloadHash")?
-                        .get("value")?.as_str()?;
+                    let tlog_payload_hash = spec.get("payloadHash")?.get("value")?.as_str()?;
                     if payload_hash != tlog_payload_hash {
-                        debug!("DSSE v0.0.1 payload hash mismatch: computed={}, tlog={}", payload_hash, tlog_payload_hash);
+                        debug!(
+                            "DSSE v0.0.1 payload hash mismatch: computed={}, tlog={}",
+                            payload_hash, tlog_payload_hash
+                        );
                         return None;
                     }
 
@@ -419,19 +424,21 @@ impl CheckedBundle {
                     let payload_hash_bytes = payload_hasher.finalize();
                     let payload_hash_b64 = base64.encode(payload_hash_bytes);
 
-                    let tlog_payload_hash = dsse_v002.get("payloadHash")?
-                        .get("digest")?.as_str()?;
+                    let tlog_payload_hash =
+                        dsse_v002.get("payloadHash")?.get("digest")?.as_str()?;
 
                     // Verify algorithm is SHA2_256
-                    let algorithm = dsse_v002.get("payloadHash")?
-                        .get("algorithm")?.as_str()?;
+                    let algorithm = dsse_v002.get("payloadHash")?.get("algorithm")?.as_str()?;
                     if algorithm != "SHA2_256" {
                         debug!("DSSE v0.0.2 unexpected hash algorithm: {}", algorithm);
                         return None;
                     }
 
                     if payload_hash_b64 != tlog_payload_hash {
-                        debug!("DSSE v0.0.2 payload hash mismatch: computed={}, tlog={}", payload_hash_b64, tlog_payload_hash);
+                        debug!(
+                            "DSSE v0.0.2 payload hash mismatch: computed={}, tlog={}",
+                            payload_hash_b64, tlog_payload_hash
+                        );
                         return None;
                     }
 
@@ -451,8 +458,7 @@ impl CheckedBundle {
 
                     // For v0.0.2, the verifier is a complex object with x509Certificate.rawBytes
                     let verifier = tlog_signatures[0].get("verifier")?;
-                    let cert_bytes = verifier.get("x509Certificate")?
-                        .get("rawBytes")?.as_str()?;
+                    let cert_bytes = verifier.get("x509Certificate")?.get("rawBytes")?.as_str()?;
 
                     // The certificate in v0.0.2 is base64-encoded DER
                     // We need to convert our PEM to DER and base64 encode it
@@ -512,11 +518,14 @@ mod tests {
         // Test that we can parse a DSSE bundle without errors
         let bundle_json = include_str!("../../../tests/data/dsse_bundle.sigstore.json");
 
-        let bundle: Bundle = serde_json::from_str(bundle_json)
-            .expect("Failed to parse DSSE bundle JSON");
+        let bundle: Bundle =
+            serde_json::from_str(bundle_json).expect("Failed to parse DSSE bundle JSON");
 
         // Verify it's a v0.3 bundle
-        assert_eq!(bundle.media_type, "application/vnd.dev.sigstore.bundle.v0.3+json");
+        assert_eq!(
+            bundle.media_type,
+            "application/vnd.dev.sigstore.bundle.v0.3+json"
+        );
 
         // Try to convert to CheckedBundle - this validates the structure
         let checked = CheckedBundle::try_from(bundle);
@@ -525,12 +534,19 @@ mod tests {
         if let Err(e) = &checked {
             eprintln!("Error parsing DSSE bundle: {:?}", e);
         }
-        assert!(checked.is_ok(), "DSSE bundle should be structurally valid: {:?}", checked.err());
+        assert!(
+            checked.is_ok(),
+            "DSSE bundle should be structurally valid: {:?}",
+            checked.err()
+        );
 
         let checked = checked.unwrap();
 
         // Verify DSSE envelope is present
-        assert!(checked.dsse_envelope.is_some(), "DSSE envelope should be present");
+        assert!(
+            checked.dsse_envelope.is_some(),
+            "DSSE envelope should be present"
+        );
     }
 
     #[test]
@@ -538,20 +554,29 @@ mod tests {
         // Test that we can parse a regular (non-DSSE) v0.3 bundle
         let bundle_json = include_str!("../../../tests/data/bundle_v3.txt.sigstore");
 
-        let bundle: Bundle = serde_json::from_str(bundle_json)
-            .expect("Failed to parse v0.3 bundle JSON");
+        let bundle: Bundle =
+            serde_json::from_str(bundle_json).expect("Failed to parse v0.3 bundle JSON");
 
         // Verify it's a v0.3 bundle
-        assert_eq!(bundle.media_type, "application/vnd.dev.sigstore.bundle.v0.3+json");
+        assert_eq!(
+            bundle.media_type,
+            "application/vnd.dev.sigstore.bundle.v0.3+json"
+        );
 
         // Try to convert to CheckedBundle
         let checked = CheckedBundle::try_from(bundle);
-        assert!(checked.is_ok(), "Regular v0.3 bundle should be structurally valid");
+        assert!(
+            checked.is_ok(),
+            "Regular v0.3 bundle should be structurally valid"
+        );
 
         let checked = checked.unwrap();
 
         // Verify DSSE envelope is NOT present
-        assert!(checked.dsse_envelope.is_none(), "Regular bundle should not have DSSE envelope");
+        assert!(
+            checked.dsse_envelope.is_none(),
+            "Regular bundle should not have DSSE envelope"
+        );
     }
 
     #[test]
@@ -564,7 +589,10 @@ mod tests {
         // Verify the transparency log entry validates
         let empty_digest = vec![];
         let tlog_entry = checked.tlog_entry(true, &empty_digest);
-        assert!(tlog_entry.is_some(), "DSSE v0.0.1 transparency log entry should validate");
+        assert!(
+            tlog_entry.is_some(),
+            "DSSE v0.0.1 transparency log entry should validate"
+        );
     }
 
     #[test]
@@ -577,7 +605,10 @@ mod tests {
         // Verify the transparency log entry validates
         let empty_digest = vec![];
         let tlog_entry = checked.tlog_entry(true, &empty_digest);
-        assert!(tlog_entry.is_some(), "DSSE v0.0.2 transparency log entry should validate");
+        assert!(
+            tlog_entry.is_some(),
+            "DSSE v0.0.2 transparency log entry should validate"
+        );
     }
 
     #[test]
@@ -598,7 +629,10 @@ mod tests {
         // Verify the transparency log entry validation FAILS
         let empty_digest = vec![];
         let tlog_entry = checked.tlog_entry(true, &empty_digest);
-        assert!(tlog_entry.is_none(), "Transparency log verification should FAIL with tampered payload");
+        assert!(
+            tlog_entry.is_none(),
+            "Transparency log verification should FAIL with tampered payload"
+        );
     }
 
     #[test]
@@ -621,7 +655,10 @@ mod tests {
         // Verify the transparency log entry validation FAILS
         let empty_digest = vec![];
         let tlog_entry = checked.tlog_entry(true, &empty_digest);
-        assert!(tlog_entry.is_none(), "Transparency log verification should FAIL with tampered signature");
+        assert!(
+            tlog_entry.is_none(),
+            "Transparency log verification should FAIL with tampered signature"
+        );
     }
 
     #[test]
@@ -642,6 +679,9 @@ mod tests {
         // Verify the transparency log entry validation FAILS
         let empty_digest = vec![];
         let tlog_entry = checked.tlog_entry(true, &empty_digest);
-        assert!(tlog_entry.is_none(), "DSSE v0.0.2 transparency log verification should FAIL with tampered payload");
+        assert!(
+            tlog_entry.is_none(),
+            "DSSE v0.0.2 transparency log verification should FAIL with tampered payload"
+        );
     }
 }
