@@ -16,6 +16,7 @@
 
 use std::io::{self, Read};
 
+use base64::Engine;
 use pki_types::{CertificateDer, UnixTime};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -27,12 +28,14 @@ use crate::{
     crypto::{
         CertificatePool, CosignVerificationKey, Signature,
         keyring::Keyring,
+        merkle,
         transparency::{CertificateEmbeddedSCT, verify_sct},
     },
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
     trust::TrustRoot,
 };
+use serde::Serialize;
 
 #[cfg(feature = "sigstore-trust-root")]
 use crate::trust::sigstore::SigstoreTrustRoot;
@@ -51,6 +54,7 @@ pub struct Verifier {
     rekor_config: RekorConfiguration,
     cert_pool: CertificatePool,
     ctfe_keyring: Keyring,
+    rekor_keyring: Keyring,
 }
 
 impl Verifier {
@@ -63,11 +67,13 @@ impl Verifier {
     ) -> SigstoreResult<Self> {
         let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
         let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?.values().copied())?;
+        let rekor_keyring = Keyring::new(trust_repo.rekor_keys()?.values().copied())?;
 
         Ok(Self {
             rekor_config,
             cert_pool,
             ctfe_keyring,
+            rekor_keyring,
         })
     }
 
@@ -159,13 +165,123 @@ impl Verifier {
             .ok_or(SignatureErrorKind::Transparency)?;
         debug!("log entry is consistent with other materials");
 
-        // 5) Verify the inclusion proof supplied by Rekor for this artifact,
-        //    if we're doing online verification.
-        // TODO(tnytown): Merkle inclusion; sigstore-rs#285
+        // 5) Verify the inclusion proof supplied by Rekor for this artifact
+        if let Some(inclusion_proof) = &log_entry.inclusion_proof {
+            debug!("verifying Merkle inclusion proof");
+
+            // The hashes in the protobuf are already binary (Vec<u8>), no decoding needed
+            let proof_hashes = &inclusion_proof.hashes;
+            let root_hash = &inclusion_proof.root_hash;
+
+            // Compute leaf hash using RFC 6962 format
+            let leaf_hash = merkle::leaf_hash(&log_entry.canonicalized_body);
+
+            // Verify the inclusion proof
+            merkle::verify_inclusion(
+                inclusion_proof.log_index as u64,
+                inclusion_proof.tree_size as u64,
+                &leaf_hash,
+                &proof_hashes,
+                &root_hash,
+            )
+            .map_err(|e| SignatureErrorKind::TransparencyLogError(e.to_string()))?;
+
+            debug!("inclusion proof verified successfully");
+        } else {
+            debug!("no inclusion proof present, skipping verification");
+        }
 
         // 6) Verify the Signed Entry Timestamp (SET) supplied by Rekor for this
         //    artifact.
-        // TODO(tnytown) SET verification; sigstore-rs#285
+        if let Some(inclusion_promise) = &log_entry.inclusion_promise {
+            debug!("verifying Signed Entry Timestamp (SET)");
+
+            // The SET is a signature over a canonicalized JSON payload containing:
+            // {body, integratedTime, logIndex, logID}
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SetPayload<'a> {
+                body: &'a str,
+                integrated_time: i64,
+                log_index: i64,
+                #[serde(rename = "logID")]
+                log_id: String,
+            }
+
+            // Convert canonicalized_body to base64 string
+            let body_base64 = base64::engine::general_purpose::STANDARD
+                .encode(&log_entry.canonicalized_body);
+
+            // Get logID from the log entry for both verification and payload
+            let log_id_struct = log_entry
+                .log_id
+                .as_ref()
+                .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
+                    "log entry missing logID".into()
+                ))?;
+
+            // Extract key_id as &[u8; 32] for keyring verification
+            let key_id: &[u8; 32] = log_id_struct
+                .key_id
+                .as_slice()
+                .try_into()
+                .map_err(|_| SignatureErrorKind::TransparencyLogError(
+                    "log entry logID has invalid length (expected 32 bytes)".into()
+                ))?;
+
+            // Convert key_id to HEX string for SET payload (as per sigstore-go implementation)
+            let log_id = hex::encode(&log_id_struct.key_id);
+
+            let set_payload = SetPayload {
+                body: &body_base64,
+                integrated_time: log_entry.integrated_time,
+                log_index: log_entry.log_index,
+                log_id: log_id.clone(),
+            };
+
+            debug!("SET payload fields: body_len={}, integrated_time={}, log_index={}, log_id={}",
+                   body_base64.len(), log_entry.integrated_time, log_entry.log_index, log_id);
+
+            // Canonicalize the JSON using olpc-cjson
+            let payload_json = serde_json::to_vec(&set_payload)
+                .map_err(|e| SignatureErrorKind::TransparencyLogError(
+                    format!("failed to serialize SET payload: {}", e)
+                ))?;
+
+            use olpc_cjson::CanonicalFormatter;
+            let payload_value: serde_json::Value = serde_json::from_slice(&payload_json)
+                .map_err(|e| SignatureErrorKind::TransparencyLogError(
+                    format!("failed to parse SET payload: {}", e)
+                ))?;
+            let mut canonicalized = Vec::new();
+            let mut ser = serde_json::Serializer::with_formatter(
+                &mut canonicalized,
+                CanonicalFormatter::new(),
+            );
+            payload_value.serialize(&mut ser)
+                .map_err(|e| SignatureErrorKind::TransparencyLogError(
+                    format!("failed to canonicalize SET payload: {}", e)
+                ))?;
+
+            debug!("SET payload (canonical JSON): {}", String::from_utf8_lossy(&canonicalized));
+            debug!("SET signature (base64): {}", base64::engine::general_purpose::STANDARD.encode(&inclusion_promise.signed_entry_timestamp));
+
+            // Verify the signature using Rekor's public key
+            // Note: keyring.verify() will hash the canonicalized data internally with SHA256
+            self.rekor_keyring
+                .verify(
+                    key_id,
+                    &inclusion_promise.signed_entry_timestamp,
+                    &canonicalized,
+                )
+                .map_err(|e| SignatureErrorKind::TransparencyLogError(
+                    format!("SET signature verification failed: {}", e)
+                ))?;
+
+            debug!("SET verified successfully");
+        } else {
+            debug!("no inclusion promise present, skipping SET verification");
+        }
 
         // 7) Verify that the signing certificate was valid at the time of
         //    signing by comparing the expiry against the integrated timestamp.

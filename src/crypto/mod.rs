@@ -182,6 +182,8 @@ pub(crate) mod keyring;
 
 pub mod verification_key;
 
+pub mod merkle;
+
 use self::signing_key::{
     ecdsa::ec::{EcdsaKeys, EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},

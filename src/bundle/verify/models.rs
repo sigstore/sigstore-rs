@@ -119,6 +119,9 @@ pub enum SignatureErrorKind {
 
     #[error("signature transparency materials are inconsistent")]
     Transparency,
+
+    #[error("transparency log error: {0}")]
+    TransparencyLogError(String),
 }
 
 #[derive(Error, Debug)]

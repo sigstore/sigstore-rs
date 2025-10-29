@@ -388,7 +388,18 @@ impl CosignVerificationKey {
                     .map_err(|_| SigstoreError::PublicKeyVerificationError)
             }
             CosignVerificationKey::ED25519(_) => {
-                unimplemented!("Ed25519 doesn't implement verify_prehash")
+                // Ed25519 does not support prehashed message verification by design.
+                // The Ed25519 signature algorithm (RFC 8032) includes internal hashing
+                // (SHA-512) as part of the signature generation and verification.
+                // Verifying against a pre-computed digest would be incorrect.
+                //
+                // If you need to verify Ed25519 signatures, use verify_signature() instead,
+                // which will hash the full message internally.
+                Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(
+                    "Ed25519 does not support prehashed message verification. \
+                     Ed25519 signatures must be verified against the full original message, \
+                     not a pre-computed digest. This is by design in RFC 8032.".to_string()
+                ))
             }
         }
     }
