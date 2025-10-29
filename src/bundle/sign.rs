@@ -309,7 +309,9 @@ impl<'ctx> SigningSession<'ctx> {
             )))?;
 
         Ok(SigningArtifact {
-            content: SigningArtifactContent::DsseEnvelope { envelope: envelope.into_inner() },
+            content: SigningArtifactContent::DsseEnvelope {
+                envelope: envelope.into_inner(),
+            },
             cert: cert.to_der()?,
             log_entry,
         })
