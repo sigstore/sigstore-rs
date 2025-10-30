@@ -35,7 +35,7 @@
 //! The signature lines begin with the Unicode em dash (U+2014, "—"), not an ASCII hyphen.
 //! Each base64-decoded signature consists of a 4-byte key ID followed by the signature bytes.
 
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use thiserror::Error;
 
 /// Errors that can occur when parsing or verifying notes.
@@ -314,7 +314,8 @@ mod tests {
 
     #[test]
     fn test_parse_checkpoint_minimal() {
-        let text = "log2025-alpha1.rekor.sigstage.dev\n736\nrs1YPY0ydAV0lxgfrq5pE4oRpUJwo3syeps5+eGUTDI=";
+        let text =
+            "log2025-alpha1.rekor.sigstage.dev\n736\nrs1YPY0ydAV0lxgfrq5pE4oRpUJwo3syeps5+eGUTDI=";
         let checkpoint = LogCheckpoint::from_text(text).unwrap();
 
         assert_eq!(checkpoint.origin, "log2025-alpha1.rekor.sigstage.dev");
@@ -389,10 +390,7 @@ mod tests {
         assert_eq!(note.checkpoint.origin, "log2025-alpha1.rekor.sigstage.dev");
         assert_eq!(note.checkpoint.tree_size, 736);
         assert_eq!(note.signatures.len(), 1);
-        assert_eq!(
-            note.signatures[0].name,
-            "log2025-alpha1.rekor.sigstage.dev"
-        );
+        assert_eq!(note.signatures[0].name, "log2025-alpha1.rekor.sigstage.dev");
     }
 
     #[test]
@@ -401,10 +399,7 @@ mod tests {
         let note = SignedNote::from_text(text).unwrap();
 
         assert_eq!(note.signatures.len(), 2);
-        assert_eq!(
-            note.signatures[0].name,
-            "log2025-alpha1.rekor.sigstage.dev"
-        );
+        assert_eq!(note.signatures[0].name, "log2025-alpha1.rekor.sigstage.dev");
         assert_eq!(note.signatures[1].name, "witness.example");
     }
 

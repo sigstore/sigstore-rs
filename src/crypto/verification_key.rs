@@ -398,7 +398,8 @@ impl CosignVerificationKey {
                 Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(
                     "Ed25519 does not support prehashed message verification. \
                      Ed25519 signatures must be verified against the full original message, \
-                     not a pre-computed digest. This is by design in RFC 8032.".to_string()
+                     not a pre-computed digest. This is by design in RFC 8032."
+                        .to_string(),
                 ))
             }
         }

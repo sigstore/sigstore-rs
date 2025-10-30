@@ -56,6 +56,7 @@ pub struct Verifier {
     cert_pool: CertificatePool,
     ctfe_keyring: Keyring,
     rekor_keyring: Keyring,
+    tsa_certs: Vec<CertificateDer<'static>>,
 }
 
 impl Verifier {
@@ -80,13 +81,21 @@ impl Verifier {
                 Some((key_id, *key_bytes))
             })
             .collect();
-        let rekor_keyring = Keyring::new_with_ids(rekor_keys.iter().map(|(id, bytes)| (id, *bytes)))?;
+        let rekor_keyring =
+            Keyring::new_with_ids(rekor_keys.iter().map(|(id, bytes)| (id, *bytes)))?;
+
+        let tsa_certs: Vec<CertificateDer<'static>> = trust_repo
+            .tsa_certs()?
+            .into_iter()
+            .map(|c| c.into_owned())
+            .collect();
 
         Ok(Self {
             rekor_config,
             cert_pool,
             ctfe_keyring,
             rekor_keyring,
+            tsa_certs,
         })
     }
 
@@ -175,7 +184,10 @@ impl Verifier {
         let mut tsa_timestamp: Option<DateTime<Utc>> = None;
         if let Some(timestamp_data) = &materials.timestamp_verification_data {
             if !timestamp_data.rfc3161_timestamps.is_empty() {
-                debug!("verifying {} RFC 3161 timestamp(s)", timestamp_data.rfc3161_timestamps.len());
+                debug!(
+                    "verifying {} RFC 3161 timestamp(s)",
+                    timestamp_data.rfc3161_timestamps.len()
+                );
 
                 for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
                     // Verify the RFC 3161 timestamp against the signature bytes
@@ -185,14 +197,20 @@ impl Verifier {
                         crate::crypto::timestamp::VerifyOpts {
                             roots: vec![],
                             intermediates: vec![],
-                            tsa_certificate: None,
+                            tsa_certificate: self.tsa_certs.first().cloned(),
                         },
                     )
-                    .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                        format!("failed to verify RFC 3161 timestamp {}: {}", i, e)
-                    ))?;
+                    .map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "failed to verify RFC 3161 timestamp {}: {}",
+                            i, e
+                        ))
+                    })?;
 
-                    debug!("RFC 3161 timestamp {} verified successfully: {}", i, timestamp_result.time);
+                    debug!(
+                        "RFC 3161 timestamp {} verified successfully: {}",
+                        i, timestamp_result.time
+                    );
 
                     // Store the first timestamp for certificate validity checking
                     if tsa_timestamp.is_none() {
@@ -237,86 +255,105 @@ impl Verifier {
                 use crate::crypto::note::SignedNote;
 
                 // Parse the checkpoint note
-                let signed_note = SignedNote::from_text(&checkpoint.envelope)
-                    .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                        format!("failed to parse checkpoint: {}", e)
-                    ))?;
+                let signed_note = SignedNote::from_text(&checkpoint.envelope).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "failed to parse checkpoint: {}",
+                        e
+                    ))
+                })?;
 
                 // Check if this is a Rekor v1 Signed Tree Head (STH) by looking for
                 // a numeric Tree ID suffix in the checkpoint origin (e.g., "rekor.sigstore.dev - 2605736670972794746").
                 // Rekor v1 STHs have a different signature format and should not be verified as Rekor v2 checkpoints.
                 let is_rekor_v1_sth = signed_note.checkpoint.origin.contains(" - ")
-                    && signed_note.checkpoint.origin
+                    && signed_note
+                        .checkpoint
+                        .origin
                         .rsplit(" - ")
                         .next()
                         .map(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false);
 
                 if is_rekor_v1_sth {
-                    debug!("checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification");
+                    debug!(
+                        "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
+                    );
                 } else {
                     debug!("verifying Rekor v2 checkpoint");
 
                     // Verify the checkpoint root hash matches the inclusion proof root hash
                     debug!("verifying checkpoint root hash against inclusion proof root hash");
-                    signed_note.verify_root_hash(&root_hash)
-                        .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint root hash mismatch: {}", e)
-                        ))?;
+                    signed_note.verify_root_hash(&root_hash).map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint root hash mismatch: {}",
+                            e
+                        ))
+                    })?;
                     debug!("checkpoint root hash matches");
 
                     // Verify the checkpoint tree size matches the inclusion proof tree size
-                    debug!("verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
-                           signed_note.checkpoint.tree_size, inclusion_proof.tree_size);
+                    debug!(
+                        "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
+                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                    );
                     if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
-                        return Err(SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
-                                    signed_note.checkpoint.tree_size, inclusion_proof.tree_size)
-                        ))?;
+                        return Err(SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
+                            signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                        )))?;
                     }
                     debug!("checkpoint tree size matches");
 
                     // Get the log's key ID from the log entry
                     debug!("getting log key ID from log entry");
-                    let log_id_struct = log_entry
-                        .log_id
-                        .as_ref()
-                        .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                            "log entry missing logID for checkpoint verification".into()
-                        ))?;
+                    let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                        SignatureErrorKind::TransparencyLogError(
+                            "log entry missing logID for checkpoint verification".into(),
+                        )
+                    })?;
 
-                    let key_id: [u8; 32] = log_id_struct
-                        .key_id
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| SignatureErrorKind::TransparencyLogError(
-                            "log entry logID has invalid length (expected 32 bytes)".into()
-                        ))?;
+                    let key_id: [u8; 32] =
+                        log_id_struct.key_id.as_slice().try_into().map_err(|_| {
+                            SignatureErrorKind::TransparencyLogError(
+                                "log entry logID has invalid length (expected 32 bytes)".into(),
+                            )
+                        })?;
                     debug!("log key ID: {}", hex::encode(key_id));
 
                     // Find the signature in the checkpoint that matches the log's key ID
                     // Note signatures use the first 4 bytes of the key ID
                     let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
-                    debug!("looking for checkpoint signature with key ID prefix: {}", hex::encode(key_id_prefix));
-                    let checkpoint_sig = signed_note.find_signature(&key_id_prefix)
-                        .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint does not contain signature from log (key ID: {})",
-                                    hex::encode(key_id_prefix))
-                        ))?;
+                    debug!(
+                        "looking for checkpoint signature with key ID prefix: {}",
+                        hex::encode(key_id_prefix)
+                    );
+                    let checkpoint_sig =
+                        signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
+                            SignatureErrorKind::TransparencyLogError(format!(
+                                "checkpoint does not contain signature from log (key ID: {})",
+                                hex::encode(key_id_prefix)
+                            ))
+                        })?;
                     debug!("found checkpoint signature for log");
 
                     // Verify the signature over the checkpoint text
-                    debug!("verifying checkpoint signature (sig len: {}, data len: {})",
-                           checkpoint_sig.signature.len(), signed_note.checkpoint_text.len());
+                    debug!(
+                        "verifying checkpoint signature (sig len: {}, data len: {})",
+                        checkpoint_sig.signature.len(),
+                        signed_note.checkpoint_text.len()
+                    );
                     self.rekor_keyring
                         .verify(
                             &key_id,
                             &checkpoint_sig.signature,
                             signed_note.checkpoint_text.as_bytes(),
                         )
-                        .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint signature verification failed: {}", e)
-                        ))?;
+                        .map_err(|e| {
+                            SignatureErrorKind::TransparencyLogError(format!(
+                                "checkpoint signature verification failed: {}",
+                                e
+                            ))
+                        })?;
 
                     debug!("checkpoint verified successfully");
                 }
@@ -345,25 +382,20 @@ impl Verifier {
             }
 
             // Convert canonicalized_body to base64 string
-            let body_base64 = base64::engine::general_purpose::STANDARD
-                .encode(&log_entry.canonicalized_body);
+            let body_base64 =
+                base64::engine::general_purpose::STANDARD.encode(&log_entry.canonicalized_body);
 
             // Get logID from the log entry for both verification and payload
-            let log_id_struct = log_entry
-                .log_id
-                .as_ref()
-                .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                    "log entry missing logID".into()
-                ))?;
+            let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                SignatureErrorKind::TransparencyLogError("log entry missing logID".into())
+            })?;
 
             // Extract key_id as &[u8; 32] for keyring verification
-            let key_id: &[u8; 32] = log_id_struct
-                .key_id
-                .as_slice()
-                .try_into()
-                .map_err(|_| SignatureErrorKind::TransparencyLogError(
-                    "log entry logID has invalid length (expected 32 bytes)".into()
-                ))?;
+            let key_id: &[u8; 32] = log_id_struct.key_id.as_slice().try_into().map_err(|_| {
+                SignatureErrorKind::TransparencyLogError(
+                    "log entry logID has invalid length (expected 32 bytes)".into(),
+                )
+            })?;
 
             // Convert key_id to HEX string for SET payload (as per sigstore-go implementation)
             let log_id = hex::encode(&log_id_struct.key_id);
@@ -375,32 +407,51 @@ impl Verifier {
                 log_id: log_id.clone(),
             };
 
-            debug!("SET payload fields: body_len={}, integrated_time={}, log_index={}, log_id={}",
-                   body_base64.len(), log_entry.integrated_time, log_entry.log_index, log_id);
+            debug!(
+                "SET payload fields: body_len={}, integrated_time={}, log_index={}, log_id={}",
+                body_base64.len(),
+                log_entry.integrated_time,
+                log_entry.log_index,
+                log_id
+            );
 
             // Canonicalize the JSON using olpc-cjson
-            let payload_json = serde_json::to_vec(&set_payload)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to serialize SET payload: {}", e)
-                ))?;
+            let payload_json = serde_json::to_vec(&set_payload).map_err(|e| {
+                SignatureErrorKind::TransparencyLogError(format!(
+                    "failed to serialize SET payload: {}",
+                    e
+                ))
+            })?;
 
             use olpc_cjson::CanonicalFormatter;
-            let payload_value: serde_json::Value = serde_json::from_slice(&payload_json)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to parse SET payload: {}", e)
-                ))?;
+            let payload_value: serde_json::Value =
+                serde_json::from_slice(&payload_json).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "failed to parse SET payload: {}",
+                        e
+                    ))
+                })?;
             let mut canonicalized = Vec::new();
             let mut ser = serde_json::Serializer::with_formatter(
                 &mut canonicalized,
                 CanonicalFormatter::new(),
             );
-            payload_value.serialize(&mut ser)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to canonicalize SET payload: {}", e)
-                ))?;
+            payload_value.serialize(&mut ser).map_err(|e| {
+                SignatureErrorKind::TransparencyLogError(format!(
+                    "failed to canonicalize SET payload: {}",
+                    e
+                ))
+            })?;
 
-            debug!("SET payload (canonical JSON): {}", String::from_utf8_lossy(&canonicalized));
-            debug!("SET signature (base64): {}", base64::engine::general_purpose::STANDARD.encode(&inclusion_promise.signed_entry_timestamp));
+            debug!(
+                "SET payload (canonical JSON): {}",
+                String::from_utf8_lossy(&canonicalized)
+            );
+            debug!(
+                "SET signature (base64): {}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(&inclusion_promise.signed_entry_timestamp)
+            );
 
             // Verify the signature using Rekor's public key
             // Note: keyring.verify() will hash the canonicalized data internally with SHA256
@@ -410,9 +461,12 @@ impl Verifier {
                     &inclusion_promise.signed_entry_timestamp,
                     &canonicalized,
                 )
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("SET signature verification failed: {}", e)
-                ))?;
+                .map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "SET signature verification failed: {}",
+                        e
+                    ))
+                })?;
 
             debug!("SET verified successfully");
         } else {
@@ -425,16 +479,22 @@ impl Verifier {
         let signing_time = if log_entry.integrated_time == 0 {
             // Rekor v2: use TSA timestamp
             if let Some(tsa_time) = tsa_timestamp {
-                debug!("using TSA timestamp for certificate validity check: {}", tsa_time);
+                debug!(
+                    "using TSA timestamp for certificate validity check: {}",
+                    tsa_time
+                );
                 tsa_time.timestamp() as u64
             } else {
                 return Err(SignatureErrorKind::TransparencyLogError(
-                    "Rekor v2 entry has no integrated_time and no TSA timestamp found".to_string()
+                    "Rekor v2 entry has no integrated_time and no TSA timestamp found".to_string(),
                 ))?;
             }
         } else {
             // Rekor v1: use integrated_time
-            debug!("using Rekor integrated_time for certificate validity check: {}", log_entry.integrated_time);
+            debug!(
+                "using Rekor integrated_time for certificate validity check: {}",
+                log_entry.integrated_time
+            );
             log_entry.integrated_time as u64
         };
 
@@ -559,7 +619,10 @@ impl Verifier {
         let mut tsa_timestamp: Option<DateTime<Utc>> = None;
         if let Some(timestamp_data) = &materials.timestamp_verification_data {
             if !timestamp_data.rfc3161_timestamps.is_empty() {
-                debug!("verifying {} RFC 3161 timestamp(s)", timestamp_data.rfc3161_timestamps.len());
+                debug!(
+                    "verifying {} RFC 3161 timestamp(s)",
+                    timestamp_data.rfc3161_timestamps.len()
+                );
 
                 for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
                     // Verify the RFC 3161 timestamp against the signature bytes
@@ -569,14 +632,20 @@ impl Verifier {
                         crate::crypto::timestamp::VerifyOpts {
                             roots: vec![],
                             intermediates: vec![],
-                            tsa_certificate: None,
+                            tsa_certificate: self.tsa_certs.first().cloned(),
                         },
                     )
-                    .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                        format!("failed to verify RFC 3161 timestamp {}: {}", i, e)
-                    ))?;
+                    .map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "failed to verify RFC 3161 timestamp {}: {}",
+                            i, e
+                        ))
+                    })?;
 
-                    debug!("RFC 3161 timestamp {} verified successfully: {}", i, timestamp_result.time);
+                    debug!(
+                        "RFC 3161 timestamp {} verified successfully: {}",
+                        i, timestamp_result.time
+                    );
 
                     // Store the first timestamp for certificate validity checking
                     if tsa_timestamp.is_none() {
@@ -621,86 +690,105 @@ impl Verifier {
                 use crate::crypto::note::SignedNote;
 
                 // Parse the checkpoint note
-                let signed_note = SignedNote::from_text(&checkpoint.envelope)
-                    .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                        format!("failed to parse checkpoint: {}", e)
-                    ))?;
+                let signed_note = SignedNote::from_text(&checkpoint.envelope).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "failed to parse checkpoint: {}",
+                        e
+                    ))
+                })?;
 
                 // Check if this is a Rekor v1 Signed Tree Head (STH) by looking for
                 // a numeric Tree ID suffix in the checkpoint origin (e.g., "rekor.sigstore.dev - 2605736670972794746").
                 // Rekor v1 STHs have a different signature format and should not be verified as Rekor v2 checkpoints.
                 let is_rekor_v1_sth = signed_note.checkpoint.origin.contains(" - ")
-                    && signed_note.checkpoint.origin
+                    && signed_note
+                        .checkpoint
+                        .origin
                         .rsplit(" - ")
                         .next()
                         .map(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false);
 
                 if is_rekor_v1_sth {
-                    debug!("checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification");
+                    debug!(
+                        "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
+                    );
                 } else {
                     debug!("verifying Rekor v2 checkpoint");
 
                     // Verify the checkpoint root hash matches the inclusion proof root hash
                     debug!("verifying checkpoint root hash against inclusion proof root hash");
-                    signed_note.verify_root_hash(&root_hash)
-                        .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint root hash mismatch: {}", e)
-                        ))?;
+                    signed_note.verify_root_hash(&root_hash).map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint root hash mismatch: {}",
+                            e
+                        ))
+                    })?;
                     debug!("checkpoint root hash matches");
 
                     // Verify the checkpoint tree size matches the inclusion proof tree size
-                    debug!("verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
-                           signed_note.checkpoint.tree_size, inclusion_proof.tree_size);
+                    debug!(
+                        "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
+                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                    );
                     if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
-                        return Err(SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
-                                    signed_note.checkpoint.tree_size, inclusion_proof.tree_size)
-                        ))?;
+                        return Err(SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
+                            signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                        )))?;
                     }
                     debug!("checkpoint tree size matches");
 
                     // Get the log's key ID from the log entry
                     debug!("getting log key ID from log entry");
-                    let log_id_struct = log_entry
-                        .log_id
-                        .as_ref()
-                        .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                            "log entry missing logID for checkpoint verification".into()
-                        ))?;
+                    let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                        SignatureErrorKind::TransparencyLogError(
+                            "log entry missing logID for checkpoint verification".into(),
+                        )
+                    })?;
 
-                    let key_id: [u8; 32] = log_id_struct
-                        .key_id
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| SignatureErrorKind::TransparencyLogError(
-                            "log entry logID has invalid length (expected 32 bytes)".into()
-                        ))?;
+                    let key_id: [u8; 32] =
+                        log_id_struct.key_id.as_slice().try_into().map_err(|_| {
+                            SignatureErrorKind::TransparencyLogError(
+                                "log entry logID has invalid length (expected 32 bytes)".into(),
+                            )
+                        })?;
                     debug!("log key ID: {}", hex::encode(key_id));
 
                     // Find the signature in the checkpoint that matches the log's key ID
                     // Note signatures use the first 4 bytes of the key ID
                     let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
-                    debug!("looking for checkpoint signature with key ID prefix: {}", hex::encode(key_id_prefix));
-                    let checkpoint_sig = signed_note.find_signature(&key_id_prefix)
-                        .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint does not contain signature from log (key ID: {})",
-                                    hex::encode(key_id_prefix))
-                        ))?;
+                    debug!(
+                        "looking for checkpoint signature with key ID prefix: {}",
+                        hex::encode(key_id_prefix)
+                    );
+                    let checkpoint_sig =
+                        signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
+                            SignatureErrorKind::TransparencyLogError(format!(
+                                "checkpoint does not contain signature from log (key ID: {})",
+                                hex::encode(key_id_prefix)
+                            ))
+                        })?;
                     debug!("found checkpoint signature for log");
 
                     // Verify the signature over the checkpoint text
-                    debug!("verifying checkpoint signature (sig len: {}, data len: {})",
-                           checkpoint_sig.signature.len(), signed_note.checkpoint_text.len());
+                    debug!(
+                        "verifying checkpoint signature (sig len: {}, data len: {})",
+                        checkpoint_sig.signature.len(),
+                        signed_note.checkpoint_text.len()
+                    );
                     self.rekor_keyring
                         .verify(
                             &key_id,
                             &checkpoint_sig.signature,
                             signed_note.checkpoint_text.as_bytes(),
                         )
-                        .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                            format!("checkpoint signature verification failed: {}", e)
-                        ))?;
+                        .map_err(|e| {
+                            SignatureErrorKind::TransparencyLogError(format!(
+                                "checkpoint signature verification failed: {}",
+                                e
+                            ))
+                        })?;
 
                     debug!("checkpoint verified successfully");
                 }
@@ -729,25 +817,20 @@ impl Verifier {
             }
 
             // Convert canonicalized_body to base64 string
-            let body_base64 = base64::engine::general_purpose::STANDARD
-                .encode(&log_entry.canonicalized_body);
+            let body_base64 =
+                base64::engine::general_purpose::STANDARD.encode(&log_entry.canonicalized_body);
 
             // Get logID from the log entry for both verification and payload
-            let log_id_struct = log_entry
-                .log_id
-                .as_ref()
-                .ok_or_else(|| SignatureErrorKind::TransparencyLogError(
-                    "log entry missing logID".into()
-                ))?;
+            let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                SignatureErrorKind::TransparencyLogError("log entry missing logID".into())
+            })?;
 
             // Extract key_id as &[u8; 32] for keyring verification
-            let key_id: &[u8; 32] = log_id_struct
-                .key_id
-                .as_slice()
-                .try_into()
-                .map_err(|_| SignatureErrorKind::TransparencyLogError(
-                    "log entry logID has invalid length (expected 32 bytes)".into()
-                ))?;
+            let key_id: &[u8; 32] = log_id_struct.key_id.as_slice().try_into().map_err(|_| {
+                SignatureErrorKind::TransparencyLogError(
+                    "log entry logID has invalid length (expected 32 bytes)".into(),
+                )
+            })?;
 
             // Convert key_id to HEX string for SET payload (as per sigstore-go implementation)
             let log_id = hex::encode(&log_id_struct.key_id);
@@ -759,32 +842,51 @@ impl Verifier {
                 log_id: log_id.clone(),
             };
 
-            debug!("SET payload fields: body_len={}, integrated_time={}, log_index={}, log_id={}",
-                   body_base64.len(), log_entry.integrated_time, log_entry.log_index, log_id);
+            debug!(
+                "SET payload fields: body_len={}, integrated_time={}, log_index={}, log_id={}",
+                body_base64.len(),
+                log_entry.integrated_time,
+                log_entry.log_index,
+                log_id
+            );
 
             // Canonicalize the JSON using olpc-cjson
-            let payload_json = serde_json::to_vec(&set_payload)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to serialize SET payload: {}", e)
-                ))?;
+            let payload_json = serde_json::to_vec(&set_payload).map_err(|e| {
+                SignatureErrorKind::TransparencyLogError(format!(
+                    "failed to serialize SET payload: {}",
+                    e
+                ))
+            })?;
 
             use olpc_cjson::CanonicalFormatter;
-            let payload_value: serde_json::Value = serde_json::from_slice(&payload_json)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to parse SET payload: {}", e)
-                ))?;
+            let payload_value: serde_json::Value =
+                serde_json::from_slice(&payload_json).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "failed to parse SET payload: {}",
+                        e
+                    ))
+                })?;
             let mut canonicalized = Vec::new();
             let mut ser = serde_json::Serializer::with_formatter(
                 &mut canonicalized,
                 CanonicalFormatter::new(),
             );
-            payload_value.serialize(&mut ser)
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("failed to canonicalize SET payload: {}", e)
-                ))?;
+            payload_value.serialize(&mut ser).map_err(|e| {
+                SignatureErrorKind::TransparencyLogError(format!(
+                    "failed to canonicalize SET payload: {}",
+                    e
+                ))
+            })?;
 
-            debug!("SET payload (canonical JSON): {}", String::from_utf8_lossy(&canonicalized));
-            debug!("SET signature (base64): {}", base64::engine::general_purpose::STANDARD.encode(&inclusion_promise.signed_entry_timestamp));
+            debug!(
+                "SET payload (canonical JSON): {}",
+                String::from_utf8_lossy(&canonicalized)
+            );
+            debug!(
+                "SET signature (base64): {}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(&inclusion_promise.signed_entry_timestamp)
+            );
 
             // Verify the signature using Rekor's public key
             // Note: keyring.verify() will hash the canonicalized data internally with SHA256
@@ -794,9 +896,12 @@ impl Verifier {
                     &inclusion_promise.signed_entry_timestamp,
                     &canonicalized,
                 )
-                .map_err(|e| SignatureErrorKind::TransparencyLogError(
-                    format!("SET signature verification failed: {}", e)
-                ))?;
+                .map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "SET signature verification failed: {}",
+                        e
+                    ))
+                })?;
 
             debug!("SET verified successfully");
         } else {
@@ -809,16 +914,22 @@ impl Verifier {
         let signing_time = if log_entry.integrated_time == 0 {
             // Rekor v2: use TSA timestamp
             if let Some(tsa_time) = tsa_timestamp {
-                debug!("using TSA timestamp for certificate validity check: {}", tsa_time);
+                debug!(
+                    "using TSA timestamp for certificate validity check: {}",
+                    tsa_time
+                );
                 tsa_time.timestamp() as u64
             } else {
                 return Err(SignatureErrorKind::TransparencyLogError(
-                    "Rekor v2 entry has no integrated_time and no TSA timestamp found".to_string()
+                    "Rekor v2 entry has no integrated_time and no TSA timestamp found".to_string(),
                 ))?;
             }
         } else {
             // Rekor v1: use integrated_time
-            debug!("using Rekor integrated_time for certificate validity check: {}", log_entry.integrated_time);
+            debug!(
+                "using Rekor integrated_time for certificate validity check: {}",
+                log_entry.integrated_time
+            );
             log_entry.integrated_time as u64
         };
 

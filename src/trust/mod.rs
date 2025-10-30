@@ -26,6 +26,7 @@ pub trait TrustRoot {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
     fn rekor_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
     fn ctfe_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
+    fn tsa_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
@@ -35,6 +36,7 @@ pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Vec<CertificateDer<'a>>,
     pub rekor_keys: BTreeMap<String, Vec<u8>>,
     pub ctfe_keys: BTreeMap<String, Vec<u8>>,
+    pub tsa_certs: Vec<CertificateDer<'a>>,
 }
 
 impl<'a> TrustRoot for ManualTrustRoot<'a> {
@@ -56,5 +58,9 @@ impl<'a> TrustRoot for ManualTrustRoot<'a> {
             .iter()
             .map(|(k, v)| (k.clone(), v.as_slice()))
             .collect())
+    }
+
+    fn tsa_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'a>>> {
+        Ok(self.tsa_certs.clone())
     }
 }

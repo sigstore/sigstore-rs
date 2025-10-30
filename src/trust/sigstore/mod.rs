@@ -239,6 +239,20 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
             Ok(keys)
         }
     }
+
+    /// Fetch TSA certificates from the trusted root.
+    ///
+    /// Returns the leaf certificates from all timestamp authorities.
+    fn tsa_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get the leaf certificates from timestamp authorities
+        // Allow expired certificates: they may have been active when used
+        let certs = Self::ca_keys(&self.trusted_root.timestamp_authorities, true);
+        let certs: Vec<_> = certs
+            .map(|c| CertificateDer::from(c).into_owned())
+            .collect();
+
+        Ok(certs)
+    }
 }
 
 /// Given a `range`, checks that the the current time is not before `start`. If

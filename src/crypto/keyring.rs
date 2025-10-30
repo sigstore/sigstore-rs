@@ -15,7 +15,10 @@
 use std::collections::HashMap;
 
 use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
-use const_oid::{db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1}, ObjectIdentifier};
+use const_oid::{
+    ObjectIdentifier,
+    db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1},
+};
 use digest::Digest;
 use thiserror::Error;
 use x509_cert::{
@@ -128,17 +131,19 @@ impl Keyring {
         tracing::debug!("Creating keyring from {} key(s)", keys_vec.len());
 
         Ok(Self(
-            keys_vec.into_iter()
-                .flat_map(|key_bytes| {
-                    match Key::new(key_bytes) {
-                        Ok(key) => {
-                            tracing::debug!("Loaded key with fingerprint: {}", hex::encode(key.fingerprint));
-                            Some(key)
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to load key: {:?}", e);
-                            None
-                        }
+            keys_vec
+                .into_iter()
+                .flat_map(|key_bytes| match Key::new(key_bytes) {
+                    Ok(key) => {
+                        tracing::debug!(
+                            "Loaded key with fingerprint: {}",
+                            hex::encode(key.fingerprint)
+                        );
+                        Some(key)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load key: {:?}", e);
+                        None
                     }
                 })
                 .map(|k| Ok((k.fingerprint, k)))
@@ -154,22 +159,29 @@ impl Keyring {
         keys: impl IntoIterator<Item = (&'a [u8; 32], &'a [u8])>,
     ) -> Result<Self> {
         let keys_vec: Vec<_> = keys.into_iter().collect();
-        tracing::debug!("Creating keyring from {} key(s) with explicit IDs", keys_vec.len());
+        tracing::debug!(
+            "Creating keyring from {} key(s) with explicit IDs",
+            keys_vec.len()
+        );
 
         Ok(Self(
-            keys_vec.into_iter()
-                .flat_map(|(key_id, key_bytes)| {
-                    match Key::new_with_id(key_bytes, *key_id) {
+            keys_vec
+                .into_iter()
+                .flat_map(
+                    |(key_id, key_bytes)| match Key::new_with_id(key_bytes, *key_id) {
                         Ok(key) => {
-                            tracing::debug!("Loaded key with fingerprint: {}", hex::encode(key.fingerprint));
+                            tracing::debug!(
+                                "Loaded key with fingerprint: {}",
+                                hex::encode(key.fingerprint)
+                            );
                             Some(key)
                         }
                         Err(e) => {
                             tracing::warn!("Failed to load key: {:?}", e);
                             None
                         }
-                    }
-                })
+                    },
+                )
                 .map(|k| Ok((k.fingerprint, k)))
                 .collect::<Result<_>>()?,
         ))
@@ -179,12 +191,10 @@ impl Keyring {
     pub fn verify(&self, key_id: &[u8; 32], signature: &[u8], data: &[u8]) -> Result<()> {
         let key = self.0.get(key_id).ok_or(KeyringError::KeyNotFound)?;
 
-        key.inner
-            .verify(data, signature)
-            .map_err(|e| {
-                tracing::debug!("Keyring verification failed: {:?}", e);
-                KeyringError::VerificationFailed
-            })?;
+        key.inner.verify(data, signature).map_err(|e| {
+            tracing::debug!("Keyring verification failed: {:?}", e);
+            KeyringError::VerificationFailed
+        })?;
 
         Ok(())
     }
