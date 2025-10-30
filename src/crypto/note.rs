@@ -571,7 +571,10 @@ mod tests {
             origin: "log.example.com".to_string(),
             tree_size: 100,
             root_hash: vec![0xde, 0xad, 0xbe, 0xef],
-            metadata: vec!["Timestamp: 1234567890".to_string(), "Extra: data".to_string()],
+            metadata: vec![
+                "Timestamp: 1234567890".to_string(),
+                "Extra: data".to_string(),
+            ],
         };
 
         let text = checkpoint.to_text();
