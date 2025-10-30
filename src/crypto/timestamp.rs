@@ -384,17 +384,67 @@ pub fn verify_timestamp_response(
         );
     }
 
-    // Additional verification: Validate TSA certificate chain against trusted roots
-    // When embedded certificates are present, we MUST validate that they chain back to
-    // a trusted TSA root. This prevents accepting timestamps from untrusted TSAs.
-    //
+    // Additional verification: When embedded certificates are present, verify they match
+    // the trusted TSA certificate. This prevents accepting timestamps from untrusted TSAs.
+    if has_embedded_certs && opts.tsa_certificate.is_some() {
+        tracing::debug!("Verifying embedded TSA certificate matches trusted TSA certificate");
+
+        if let Some(ref embedded_cert_der) = tsa_cert_der {
+            if let Some(ref trusted_tsa_cert) = opts.tsa_certificate {
+                // Parse both certificates to compare their identity
+                // We can't just compare DER bytes because they might be re-encoded differently
+                use x509_cert::{Certificate, der::Decode};
+
+                let embedded_cert = Certificate::from_der(embedded_cert_der).map_err(|e| {
+                    TimestampError::SignatureVerificationError(format!(
+                        "failed to parse embedded TSA certificate: {}",
+                        e
+                    ))
+                })?;
+
+                let trusted_cert = Certificate::from_der(trusted_tsa_cert.as_ref()).map_err(|e| {
+                    TimestampError::SignatureVerificationError(format!(
+                        "failed to parse trusted TSA certificate: {}",
+                        e
+                    ))
+                })?;
+
+                // Compare subject, issuer, and serial number to determine if they're the same cert
+                let same_subject = embedded_cert.tbs_certificate.subject == trusted_cert.tbs_certificate.subject;
+                let same_issuer = embedded_cert.tbs_certificate.issuer == trusted_cert.tbs_certificate.issuer;
+                let same_serial = embedded_cert.tbs_certificate.serial_number == trusted_cert.tbs_certificate.serial_number;
+
+                let is_trusted = same_subject && same_issuer && same_serial;
+
+                if !is_trusted {
+                    tracing::error!("Embedded TSA certificate does not match trusted TSA certificate");
+                    tracing::debug!(
+                        "Embedded: subject={:?}, issuer={:?}, serial={:?}",
+                        embedded_cert.tbs_certificate.subject,
+                        embedded_cert.tbs_certificate.issuer,
+                        embedded_cert.tbs_certificate.serial_number
+                    );
+                    tracing::debug!(
+                        "Trusted: subject={:?}, issuer={:?}, serial={:?}",
+                        trusted_cert.tbs_certificate.subject,
+                        trusted_cert.tbs_certificate.issuer,
+                        trusted_cert.tbs_certificate.serial_number
+                    );
+                    return Err(TimestampError::SignatureVerificationError(
+                        "embedded TSA certificate is not from the trusted TSA".to_string()
+                    ));
+                }
+
+                tracing::debug!("Embedded TSA certificate matches trusted TSA certificate");
+            }
+        }
+    }
+
+    // Full chain validation (disabled due to webpki compatibility issues)
     // TODO: Re-enable this once webpki signature algorithm compatibility issues are resolved
     // The current issue is that webpki rejects ECDSA certificates with NULL parameters
     // in the signature algorithm OID, which is technically non-standard but appears in
     // some certificates.
-    //
-    // For now, we rely on the CMS signature verification which ensures cryptographic
-    // correctness, though not that it's from a trusted TSA when embedded certs are used.
     if false && has_embedded_certs && !opts.roots.is_empty() {
         tracing::debug!("Starting TSA certificate chain validation with {} trusted roots", opts.roots.len());
 

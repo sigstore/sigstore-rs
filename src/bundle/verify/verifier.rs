@@ -351,66 +351,67 @@ impl Verifier {
                 }
                 debug!("checkpoint tree size matches");
 
-                if is_rekor_v1_sth {
-                    debug!(
-                        "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
-                    );
+                // Verify checkpoint/STH signature for both Rekor v1 and v2
+                // The signature verification process is the same, just the format detection differs
+                let checkpoint_type = if is_rekor_v1_sth {
+                    "Rekor v1 STH"
                 } else {
-                    debug!("verifying Rekor v2 checkpoint signature");
+                    "Rekor v2 checkpoint"
+                };
+                debug!("verifying {} signature", checkpoint_type);
 
-                    // Get the log's key ID from the log entry
-                    debug!("getting log key ID from log entry");
-                    let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                // Get the log's key ID from the log entry
+                debug!("getting log key ID from log entry");
+                let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                    SignatureErrorKind::TransparencyLogError(
+                        "log entry missing logID for checkpoint verification".into(),
+                    )
+                })?;
+
+                let key_id: [u8; 32] =
+                    log_id_struct.key_id.as_slice().try_into().map_err(|_| {
                         SignatureErrorKind::TransparencyLogError(
-                            "log entry missing logID for checkpoint verification".into(),
+                            "log entry logID has invalid length (expected 32 bytes)".into(),
                         )
                     })?;
+                debug!("log key ID: {}", hex::encode(key_id));
 
-                    let key_id: [u8; 32] =
-                        log_id_struct.key_id.as_slice().try_into().map_err(|_| {
-                            SignatureErrorKind::TransparencyLogError(
-                                "log entry logID has invalid length (expected 32 bytes)".into(),
-                            )
-                        })?;
-                    debug!("log key ID: {}", hex::encode(key_id));
+                // Find the signature in the checkpoint that matches the log's key ID
+                // Note signatures use the first 4 bytes of the key ID (keyhint)
+                let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
+                debug!(
+                    "looking for checkpoint signature with key ID prefix: {}",
+                    hex::encode(key_id_prefix)
+                );
+                let checkpoint_sig =
+                    signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint does not contain signature from log (key ID: {})",
+                            hex::encode(key_id_prefix)
+                        ))
+                    })?;
+                debug!("found checkpoint signature for log");
 
-                    // Find the signature in the checkpoint that matches the log's key ID
-                    // Note signatures use the first 4 bytes of the key ID
-                    let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
-                    debug!(
-                        "looking for checkpoint signature with key ID prefix: {}",
-                        hex::encode(key_id_prefix)
-                    );
-                    let checkpoint_sig =
-                        signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
-                            SignatureErrorKind::TransparencyLogError(format!(
-                                "checkpoint does not contain signature from log (key ID: {})",
-                                hex::encode(key_id_prefix)
-                            ))
-                        })?;
-                    debug!("found checkpoint signature for log");
+                // Verify the signature over the checkpoint text
+                debug!(
+                    "verifying checkpoint signature (sig len: {}, data len: {})",
+                    checkpoint_sig.signature.len(),
+                    signed_note.checkpoint_text.len()
+                );
+                self.rekor_keyring
+                    .verify(
+                        &key_id,
+                        &checkpoint_sig.signature,
+                        signed_note.checkpoint_text.as_bytes(),
+                    )
+                    .map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint signature verification failed: {}",
+                            e
+                        ))
+                    })?;
 
-                    // Verify the signature over the checkpoint text
-                    debug!(
-                        "verifying checkpoint signature (sig len: {}, data len: {})",
-                        checkpoint_sig.signature.len(),
-                        signed_note.checkpoint_text.len()
-                    );
-                    self.rekor_keyring
-                        .verify(
-                            &key_id,
-                            &checkpoint_sig.signature,
-                            signed_note.checkpoint_text.as_bytes(),
-                        )
-                        .map_err(|e| {
-                            SignatureErrorKind::TransparencyLogError(format!(
-                                "checkpoint signature verification failed: {}",
-                                e
-                            ))
-                        })?;
-
-                    debug!("checkpoint verified successfully");
-                }
+                debug!("{} verified successfully", checkpoint_type);
             } else {
                 debug!("no checkpoint present (Rekor v1), skipping checkpoint verification");
             }
@@ -819,66 +820,67 @@ impl Verifier {
                 }
                 debug!("checkpoint tree size matches");
 
-                if is_rekor_v1_sth {
-                    debug!(
-                        "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
-                    );
+                // Verify checkpoint/STH signature for both Rekor v1 and v2
+                // The signature verification process is the same, just the format detection differs
+                let checkpoint_type = if is_rekor_v1_sth {
+                    "Rekor v1 STH"
                 } else {
-                    debug!("verifying Rekor v2 checkpoint signature");
+                    "Rekor v2 checkpoint"
+                };
+                debug!("verifying {} signature", checkpoint_type);
 
-                    // Get the log's key ID from the log entry
-                    debug!("getting log key ID from log entry");
-                    let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                // Get the log's key ID from the log entry
+                debug!("getting log key ID from log entry");
+                let log_id_struct = log_entry.log_id.as_ref().ok_or_else(|| {
+                    SignatureErrorKind::TransparencyLogError(
+                        "log entry missing logID for checkpoint verification".into(),
+                    )
+                })?;
+
+                let key_id: [u8; 32] =
+                    log_id_struct.key_id.as_slice().try_into().map_err(|_| {
                         SignatureErrorKind::TransparencyLogError(
-                            "log entry missing logID for checkpoint verification".into(),
+                            "log entry logID has invalid length (expected 32 bytes)".into(),
                         )
                     })?;
+                debug!("log key ID: {}", hex::encode(key_id));
 
-                    let key_id: [u8; 32] =
-                        log_id_struct.key_id.as_slice().try_into().map_err(|_| {
-                            SignatureErrorKind::TransparencyLogError(
-                                "log entry logID has invalid length (expected 32 bytes)".into(),
-                            )
-                        })?;
-                    debug!("log key ID: {}", hex::encode(key_id));
+                // Find the signature in the checkpoint that matches the log's key ID
+                // Note signatures use the first 4 bytes of the key ID (keyhint)
+                let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
+                debug!(
+                    "looking for checkpoint signature with key ID prefix: {}",
+                    hex::encode(key_id_prefix)
+                );
+                let checkpoint_sig =
+                    signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint does not contain signature from log (key ID: {})",
+                            hex::encode(key_id_prefix)
+                        ))
+                    })?;
+                debug!("found checkpoint signature for log");
 
-                    // Find the signature in the checkpoint that matches the log's key ID
-                    // Note signatures use the first 4 bytes of the key ID
-                    let key_id_prefix: [u8; 4] = [key_id[0], key_id[1], key_id[2], key_id[3]];
-                    debug!(
-                        "looking for checkpoint signature with key ID prefix: {}",
-                        hex::encode(key_id_prefix)
-                    );
-                    let checkpoint_sig =
-                        signed_note.find_signature(&key_id_prefix).ok_or_else(|| {
-                            SignatureErrorKind::TransparencyLogError(format!(
-                                "checkpoint does not contain signature from log (key ID: {})",
-                                hex::encode(key_id_prefix)
-                            ))
-                        })?;
-                    debug!("found checkpoint signature for log");
+                // Verify the signature over the checkpoint text
+                debug!(
+                    "verifying checkpoint signature (sig len: {}, data len: {})",
+                    checkpoint_sig.signature.len(),
+                    signed_note.checkpoint_text.len()
+                );
+                self.rekor_keyring
+                    .verify(
+                        &key_id,
+                        &checkpoint_sig.signature,
+                        signed_note.checkpoint_text.as_bytes(),
+                    )
+                    .map_err(|e| {
+                        SignatureErrorKind::TransparencyLogError(format!(
+                            "checkpoint signature verification failed: {}",
+                            e
+                        ))
+                    })?;
 
-                    // Verify the signature over the checkpoint text
-                    debug!(
-                        "verifying checkpoint signature (sig len: {}, data len: {})",
-                        checkpoint_sig.signature.len(),
-                        signed_note.checkpoint_text.len()
-                    );
-                    self.rekor_keyring
-                        .verify(
-                            &key_id,
-                            &checkpoint_sig.signature,
-                            signed_note.checkpoint_text.as_bytes(),
-                        )
-                        .map_err(|e| {
-                            SignatureErrorKind::TransparencyLogError(format!(
-                                "checkpoint signature verification failed: {}",
-                                e
-                            ))
-                        })?;
-
-                    debug!("checkpoint verified successfully");
-                }
+                debug!("{} verified successfully", checkpoint_type);
             } else {
                 debug!("no checkpoint present (Rekor v1), skipping checkpoint verification");
             }
