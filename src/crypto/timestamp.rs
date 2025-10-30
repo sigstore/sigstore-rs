@@ -440,11 +440,17 @@ pub fn verify_timestamp_response(
         }
     }
 
-    // Full chain validation (disabled due to webpki compatibility issues)
-    // TODO: Re-enable this once webpki signature algorithm compatibility issues are resolved
-    // The current issue is that webpki rejects ECDSA certificates with NULL parameters
-    // in the signature algorithm OID, which is technically non-standard but appears in
-    // some certificates.
+    // Full chain validation using webpki (disabled due to compatibility issues)
+    //
+    // NOTE: We now validate embedded TSA certificates by comparing their identity
+    // (subject, issuer, serial number) with the trusted TSA certificate above.
+    // This prevents accepting timestamps from untrusted TSAs.
+    //
+    // TODO: Re-enable full chain validation once webpki signature algorithm compatibility
+    // issues are resolved. The current issue is that webpki rejects ECDSA certificates
+    // with NULL parameters in the signature algorithm OID, which is technically non-standard
+    // but appears in some certificates. Full chain validation would provide additional
+    // security by verifying the entire certificate chain to a root CA.
     if false && has_embedded_certs && !opts.roots.is_empty() {
         tracing::debug!("Starting TSA certificate chain validation with {} trusted roots", opts.roots.len());
 
