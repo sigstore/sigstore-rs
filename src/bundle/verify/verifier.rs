@@ -157,7 +157,7 @@ impl Verifier {
     /// # use sigstore::bundle::verify::{Verifier, policy};
     /// # use sigstore::bundle::Bundle;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let verifier = Verifier::production()?;
+    /// let verifier = Verifier::production().await?;
     /// let bundle: Bundle = todo!();
     /// let policy = policy::Identity::new("user@example.com", "https://issuer.example.com");
     ///
@@ -333,8 +333,8 @@ impl Verifier {
                 inclusion_proof.log_index as u64,
                 inclusion_proof.tree_size as u64,
                 &leaf_hash,
-                roof_hashes,
-                &root_hash,
+                proof_hashes,
+                root_hash,
             )
             .map_err(|e| SignatureErrorKind::TransparencyLogError(e.to_string()))?;
 

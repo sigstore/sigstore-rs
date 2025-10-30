@@ -434,7 +434,7 @@ impl CheckedBundle {
 
                 // Normalize both by removing all whitespace except for the BEGIN/END markers
                 // The tlog cert has no line wrapping, while our PEM has standard 64-char lines
-                let normalize = |s: &str| s.replace('\n', "").replace('\r', "");
+                let normalize = |s: &str| s.replace(['\n', '\r'], "");
                 if normalize(&cert_pem_str) != normalize(&tlog_pubkey_str) {
                     debug!("intoto v0.0.2 public key (certificate) mismatch");
                     return None;

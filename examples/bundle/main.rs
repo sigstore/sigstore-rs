@@ -85,12 +85,15 @@ fn sign(artifact_path: &PathBuf) {
     });
 
     let token = authorize();
-    let claims = token.unverified_claims();
-    let identity = claims
-        .email
-        .as_ref()
-        .or(claims.sub.as_ref())
-        .expect("Token must have either email or sub claim");
+    let identity = {
+        let claims = token.unverified_claims();
+        claims
+            .email
+            .as_ref()
+            .or(claims.sub.as_ref())
+            .expect("Token must have either email or sub claim")
+            .clone()
+    };
     debug!("Signing with {}", identity);
 
     let signing_artifact = SigningContext::production().and_then(|ctx| {
