@@ -591,10 +591,10 @@ fn verify_message_imprint(
         })?;
 
     // Compare the hashes
-    if signature_hash.as_slice() != imprint_hash {
+    if &signature_hash[..] != imprint_hash {
         return Err(TimestampError::HashMismatch {
             expected: hex::encode(imprint_hash),
-            actual: hex::encode(signature_hash),
+            actual: hex::encode(&signature_hash[..]),
         });
     }
 

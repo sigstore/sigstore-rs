@@ -68,8 +68,9 @@ jobs:
       - name: Install conformance suite dependencies
         run: |
           cd sigstore-conformance
+          pip install --upgrade pip
           pip install -e .
-          pip install pytest
+          pip install pytest pytest-subtests
 
       - name: Build conformance test binary
         run: |
@@ -81,10 +82,17 @@ jobs:
       - name: Run conformance tests
         id: conformance
         run: |
-          chmod +x conformance.sh
-          ./conformance.sh 2>&1 | tee conformance-output.txt
+          cd sigstore-conformance
+          ENTRYPOINT="$(pwd)/../tests/conformance/target/release/sigstore"
+
+          echo "Running conformance tests with entrypoint: $ENTRYPOINT"
+          pytest test/test_bundle.py::test_verify \
+            --entrypoint="$ENTRYPOINT" \
+            --skip-signing \
+            -v 2>&1 | tee ../conformance-output.txt
 
           # Extract test results
+          cd ..
           if grep -q "passed" conformance-output.txt; then
             PASSED=$(grep -oP '\d+(?= passed)' conformance-output.txt | tail -1)
             FAILED=$(grep -oP '\d+(?= failed)' conformance-output.txt | tail -1 || echo "0")

@@ -178,10 +178,8 @@ impl Verifier {
     where
         P: VerificationPolicy,
     {
-        use sha2::digest::generic_array::GenericArray;
-
-        // Convert the digest bytes to GenericArray which is what verify_digest expects
-        let input_digest = GenericArray::from(*digest_bytes);
+        // Convert the digest bytes to Digest output type
+        let input_digest: digest::Output<Sha256> = (*digest_bytes).into();
         let materials: CheckedBundle = bundle.try_into()?;
 
         // Reuse the existing verification logic by jumping to the point after finalization
