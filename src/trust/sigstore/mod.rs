@@ -300,6 +300,28 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
 
         Ok(result)
     }
+
+    fn tsa_root_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get the root certificates (last cert in each chain) from timestamp authorities
+        let root_certs: Vec<_> = self
+            .trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter_map(|ca| {
+                let cert_chain = ca.cert_chain.as_ref()?;
+                // Get the last certificate in the chain (the root)
+                let root_cert = cert_chain.certificates.last()?;
+                Some(CertificateDer::from(root_cert.raw_bytes.as_slice()).into_owned())
+            })
+            .collect();
+
+        tracing::debug!(
+            "Extracted {} TSA root certificates for chain validation",
+            root_certs.len()
+        );
+
+        Ok(root_certs)
+    }
 }
 
 /// Given a `range`, checks that the the current time is not before `start`. If

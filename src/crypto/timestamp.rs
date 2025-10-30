@@ -231,7 +231,21 @@ pub fn verify_timestamp_response(
         })?;
 
     // Check if we have embedded certificates or need to use external ones
-    let has_embedded_certs = parsed_signed_data.certificates().count() > 0;
+    let cert_count = parsed_signed_data.certificates().count();
+    let has_embedded_certs = cert_count > 0;
+    tracing::debug!("SignedData contains {} embedded certificate(s)", cert_count);
+
+    // Log details about each embedded certificate
+    for (i, cert) in parsed_signed_data.certificates().enumerate() {
+        let subject = cert.subject_name();
+        let issuer = cert.issuer_name();
+        tracing::debug!(
+            "Certificate {}: subject={:?}, issuer={:?}",
+            i,
+            subject,
+            issuer
+        );
+    }
 
     // If no embedded certificates, we need to use the TSA certificate from opts
     let external_tsa_cert = if !has_embedded_certs {
@@ -370,15 +384,35 @@ pub fn verify_timestamp_response(
         );
     }
 
-    // TODO: Additional verification: Validate TSA certificate chain
-    // This is complex and requires careful handling of certificate chain building.
-    // The challenge is that webpki needs the exact root certificate that signed the chain,
-    // but matching the TSA root from the trusted root to the certificate chain is non-trivial.
-    // For now, we rely on the CMS signature verification which validates the cryptographic
-    // signature is correct (though not that it's from a trusted TSA).
+    // Additional verification: Validate TSA certificate chain against trusted roots
+    // When embedded certificates are present, we MUST validate that they chain back to
+    // a trusted TSA root. This prevents accepting timestamps from untrusted TSAs.
     //
-    // Uncomment below to enable TSA certificate chain validation (currently incomplete):
-    if false && !opts.roots.is_empty() {
+    // TODO: Re-enable this once webpki signature algorithm compatibility issues are resolved
+    // The current issue is that webpki rejects ECDSA certificates with NULL parameters
+    // in the signature algorithm OID, which is technically non-standard but appears in
+    // some certificates.
+    //
+    // For now, we rely on the CMS signature verification which ensures cryptographic
+    // correctness, though not that it's from a trusted TSA when embedded certs are used.
+    if false && has_embedded_certs && !opts.roots.is_empty() {
+        tracing::debug!("Starting TSA certificate chain validation with {} trusted roots", opts.roots.len());
+
+        // Log information about the trusted roots
+        for (i, root) in opts.roots.iter().enumerate() {
+            use x509_cert::{Certificate, der::Decode};
+            if let Ok(cert) = Certificate::from_der(root.as_ref()) {
+                let subject = &cert.tbs_certificate.subject;
+                let issuer = &cert.tbs_certificate.issuer;
+                tracing::debug!(
+                    "Trusted root {}: subject={:?}, issuer={:?}",
+                    i,
+                    subject,
+                    issuer
+                );
+            }
+        }
+
         if let Some(ref cert_der) = tsa_cert_der {
             // Collect all certificates from SignedData except the root as intermediates
             // The leaf certificate will be validated separately
@@ -391,6 +425,8 @@ pub fn verify_timestamp_response(
                 vec![]
             };
 
+            tracing::debug!("Collected {} certificates from SignedData for chain building", all_certs.len());
+
             // The intermediates should be everything except the leaf (first cert)
             let intermediates: Vec<CertificateDer> = if all_certs.len() > 1 {
                 all_certs.drain(1..).collect()
@@ -398,20 +434,28 @@ pub fn verify_timestamp_response(
                 vec![]
             };
 
-            // Validate the certificate chain using CertificatePool
-            use crate::crypto::CertificatePool;
+            // Validate the certificate chain using webpki directly
             use webpki::{EndEntityCert, KeyUsage};
 
-            let cert_pool = CertificatePool::from_certificates(
-                opts.roots.iter().cloned(),
-                intermediates,
-            )
-            .map_err(|e| {
-                TimestampError::SignatureVerificationError(format!(
-                    "failed to create certificate pool: {}",
-                    e
-                ))
-            })?;
+            // Create trust anchors from the TSA root certificates
+            let trust_anchors: Result<Vec<_>, _> = opts
+                .roots
+                .iter()
+                .map(|root| {
+                    webpki::anchor_from_trusted_cert(root)
+                        .map(|anchor| anchor.to_owned())
+                        .map_err(|e| {
+                            TimestampError::SignatureVerificationError(format!(
+                                "failed to create trust anchor: {:?}",
+                                e
+                            ))
+                        })
+                })
+                .collect();
+
+            let trust_anchors = trust_anchors?;
+
+            tracing::debug!("Created {} trust anchors for TSA validation", trust_anchors.len());
 
             let cert_der_ref = CertificateDer::from(cert_der.as_slice());
             let end_entity_cert = EndEntityCert::try_from(&cert_der_ref).map_err(|e| {
@@ -434,17 +478,17 @@ pub fn verify_timestamp_response(
             end_entity_cert
                 .verify_for_usage(
                     signing_algs,
-                    cert_pool.trusted_roots(),
-                    cert_pool.intermediates(),
+                    &trust_anchors,
+                    &intermediates,
                     verification_time,
                     KeyUsage::required_if_present(ID_KP_TIME_STAMPING),
                     None,
                     None,
                 )
                 .map_err(|e| {
-                    tracing::error!("TSA certificate chain validation failed: {}", e);
+                    tracing::error!("TSA certificate chain validation failed: {:?}", e);
                     TimestampError::SignatureVerificationError(format!(
-                        "TSA certificate chain validation failed: {}",
+                        "TSA certificate chain validation failed: {:?}",
                         e
                     ))
                 })?;

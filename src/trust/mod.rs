@@ -44,6 +44,14 @@ pub trait TrustRoot {
         let certs = self.tsa_certs()?;
         Ok(certs.into_iter().map(|c| (c, None, None)).collect())
     }
+
+    /// Get TSA root certificates for chain validation.
+    /// Returns the root certificates (last cert in each chain) that should be used
+    /// as trust anchors when validating TSA certificate chains.
+    /// Default implementation returns empty vector.
+    fn tsa_root_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
+        Ok(vec![])
+    }
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.

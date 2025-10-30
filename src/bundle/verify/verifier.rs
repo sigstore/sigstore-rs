@@ -64,6 +64,7 @@ pub struct Verifier {
     ctfe_keyring: Keyring,
     rekor_keyring: Keyring,
     tsa_certs: Vec<TsaCertificate>,
+    tsa_root_certs: Vec<CertificateDer<'static>>,
 }
 
 impl Verifier {
@@ -102,12 +103,20 @@ impl Verifier {
             })
             .collect();
 
+        debug!("Fetching TSA root certificates for chain validation");
+        let tsa_root_certs: Vec<CertificateDer<'static>> = trust_repo
+            .tsa_root_certs()?
+            .into_iter()
+            .map(|cert| cert.into_owned())
+            .collect();
+
         Ok(Self {
             rekor_config,
             cert_pool,
             ctfe_keyring,
             rekor_keyring,
             tsa_certs,
+            tsa_root_certs,
         })
     }
 
@@ -213,14 +222,11 @@ impl Verifier {
                         (None, None)
                     };
 
-                    // Collect TSA root certificates for chain validation
-                    let tsa_roots: Vec<_> = self.tsa_certs.iter().map(|tsa| tsa.cert.clone()).collect();
-
                     let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
                         &ts.signed_timestamp,
                         &materials.signature,
                         crate::crypto::timestamp::VerifyOpts {
-                            roots: tsa_roots,
+                            roots: self.tsa_root_certs.clone(),
                             intermediates: vec![],
                             tsa_certificate: tsa_cert,
                             tsa_valid_for,
@@ -242,6 +248,26 @@ impl Verifier {
                     if tsa_timestamp.is_none() {
                         tsa_timestamp = Some(timestamp_result.time);
                     }
+
+                    // Verify that the timestamp is within the signing certificate's validity period
+                    let timestamp_unix = timestamp_result.time.timestamp() as u64;
+                    let cert_not_before = tbs_certificate
+                        .validity
+                        .not_before
+                        .to_unix_duration()
+                        .as_secs();
+                    let cert_not_after = tbs_certificate
+                        .validity
+                        .not_after
+                        .to_unix_duration()
+                        .as_secs();
+                    if timestamp_unix < cert_not_before || timestamp_unix > cert_not_after {
+                        return Err(SignatureErrorKind::TransparencyLogError(format!(
+                            "RFC 3161 timestamp {} is outside signing certificate validity period (cert valid from {} to {}, timestamp is {})",
+                            i, cert_not_before, cert_not_after, timestamp_unix
+                        )))?;
+                    }
+                    debug!("RFC 3161 timestamp {} is within signing certificate validity period", i);
                 }
             }
         }
@@ -300,35 +326,37 @@ impl Verifier {
                         .map(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false);
 
+                // Verify the checkpoint root hash matches the inclusion proof root hash
+                // This check applies to both Rekor v1 and v2
+                debug!("verifying checkpoint root hash against inclusion proof root hash");
+                signed_note.verify_root_hash(&root_hash).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "checkpoint root hash mismatch: {}",
+                        e
+                    ))
+                })?;
+                debug!("checkpoint root hash matches");
+
+                // Verify the checkpoint tree size matches the inclusion proof tree size
+                // This check also applies to both Rekor v1 and v2
+                debug!(
+                    "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
+                    signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                );
+                if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
+                    return Err(SignatureErrorKind::TransparencyLogError(format!(
+                        "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
+                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                    )))?;
+                }
+                debug!("checkpoint tree size matches");
+
                 if is_rekor_v1_sth {
                     debug!(
                         "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
                     );
                 } else {
-                    debug!("verifying Rekor v2 checkpoint");
-
-                    // Verify the checkpoint root hash matches the inclusion proof root hash
-                    debug!("verifying checkpoint root hash against inclusion proof root hash");
-                    signed_note.verify_root_hash(&root_hash).map_err(|e| {
-                        SignatureErrorKind::TransparencyLogError(format!(
-                            "checkpoint root hash mismatch: {}",
-                            e
-                        ))
-                    })?;
-                    debug!("checkpoint root hash matches");
-
-                    // Verify the checkpoint tree size matches the inclusion proof tree size
-                    debug!(
-                        "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
-                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
-                    );
-                    if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
-                        return Err(SignatureErrorKind::TransparencyLogError(format!(
-                            "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
-                            signed_note.checkpoint.tree_size, inclusion_proof.tree_size
-                        )))?;
-                    }
-                    debug!("checkpoint tree size matches");
+                    debug!("verifying Rekor v2 checkpoint signature");
 
                     // Get the log's key ID from the log entry
                     debug!("getting log key ID from log entry");
@@ -662,14 +690,11 @@ impl Verifier {
                         (None, None)
                     };
 
-                    // Collect TSA root certificates for chain validation
-                    let tsa_roots: Vec<_> = self.tsa_certs.iter().map(|tsa| tsa.cert.clone()).collect();
-
                     let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
                         &ts.signed_timestamp,
                         &materials.signature,
                         crate::crypto::timestamp::VerifyOpts {
-                            roots: tsa_roots,
+                            roots: self.tsa_root_certs.clone(),
                             intermediates: vec![],
                             tsa_certificate: tsa_cert,
                             tsa_valid_for,
@@ -691,6 +716,26 @@ impl Verifier {
                     if tsa_timestamp.is_none() {
                         tsa_timestamp = Some(timestamp_result.time);
                     }
+
+                    // Verify that the timestamp is within the signing certificate's validity period
+                    let timestamp_unix = timestamp_result.time.timestamp() as u64;
+                    let cert_not_before = tbs_certificate
+                        .validity
+                        .not_before
+                        .to_unix_duration()
+                        .as_secs();
+                    let cert_not_after = tbs_certificate
+                        .validity
+                        .not_after
+                        .to_unix_duration()
+                        .as_secs();
+                    if timestamp_unix < cert_not_before || timestamp_unix > cert_not_after {
+                        return Err(SignatureErrorKind::TransparencyLogError(format!(
+                            "RFC 3161 timestamp {} is outside signing certificate validity period (cert valid from {} to {}, timestamp is {})",
+                            i, cert_not_before, cert_not_after, timestamp_unix
+                        )))?;
+                    }
+                    debug!("RFC 3161 timestamp {} is within signing certificate validity period", i);
                 }
             }
         }
@@ -749,35 +794,37 @@ impl Verifier {
                         .map(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false);
 
+                // Verify the checkpoint root hash matches the inclusion proof root hash
+                // This check applies to both Rekor v1 and v2
+                debug!("verifying checkpoint root hash against inclusion proof root hash");
+                signed_note.verify_root_hash(&root_hash).map_err(|e| {
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "checkpoint root hash mismatch: {}",
+                        e
+                    ))
+                })?;
+                debug!("checkpoint root hash matches");
+
+                // Verify the checkpoint tree size matches the inclusion proof tree size
+                // This check also applies to both Rekor v1 and v2
+                debug!(
+                    "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
+                    signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                );
+                if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
+                    return Err(SignatureErrorKind::TransparencyLogError(format!(
+                        "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
+                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
+                    )))?;
+                }
+                debug!("checkpoint tree size matches");
+
                 if is_rekor_v1_sth {
                     debug!(
                         "checkpoint is Rekor v1 STH format (origin has numeric Tree ID suffix), skipping checkpoint signature verification"
                     );
                 } else {
-                    debug!("verifying Rekor v2 checkpoint");
-
-                    // Verify the checkpoint root hash matches the inclusion proof root hash
-                    debug!("verifying checkpoint root hash against inclusion proof root hash");
-                    signed_note.verify_root_hash(&root_hash).map_err(|e| {
-                        SignatureErrorKind::TransparencyLogError(format!(
-                            "checkpoint root hash mismatch: {}",
-                            e
-                        ))
-                    })?;
-                    debug!("checkpoint root hash matches");
-
-                    // Verify the checkpoint tree size matches the inclusion proof tree size
-                    debug!(
-                        "verifying checkpoint tree size ({}) matches inclusion proof tree size ({})",
-                        signed_note.checkpoint.tree_size, inclusion_proof.tree_size
-                    );
-                    if signed_note.checkpoint.tree_size != inclusion_proof.tree_size as u64 {
-                        return Err(SignatureErrorKind::TransparencyLogError(format!(
-                            "checkpoint tree size mismatch: checkpoint has {}, inclusion proof has {}",
-                            signed_note.checkpoint.tree_size, inclusion_proof.tree_size
-                        )))?;
-                    }
-                    debug!("checkpoint tree size matches");
+                    debug!("verifying Rekor v2 checkpoint signature");
 
                     // Get the log's key ID from the log entry
                     debug!("getting log key ID from log entry");
