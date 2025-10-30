@@ -147,14 +147,15 @@ pub struct CheckedBundle {
     pub(crate) dsse_envelope: Option<sigstore_protobuf_specs::io::intoto::Envelope>,
 
     tlog_entry: TransparencyLogEntry,
+    pub(crate) timestamp_verification_data: Option<sigstore_protobuf_specs::dev::sigstore::bundle::v1::TimestampVerificationData>,
 }
 
 impl TryFrom<Bundle> for CheckedBundle {
     type Error = BundleErrorKind;
 
     fn try_from(input: Bundle) -> Result<Self, Self::Error> {
-        let (content, mut tlog_entries) = match input.verification_material {
-            Some(m) => (m.content, m.tlog_entries),
+        let (content, mut tlog_entries, timestamp_verification_data) = match input.verification_material {
+            Some(m) => (m.content, m.tlog_entries, m.timestamp_verification_data),
             _ => return Err(BundleErrorKind::VerificationMaterialMissing),
         };
 
@@ -292,6 +293,7 @@ impl TryFrom<Bundle> for CheckedBundle {
             signature,
             dsse_envelope,
             tlog_entry,
+            timestamp_verification_data,
         })
     }
 }
@@ -364,9 +366,10 @@ impl CheckedBundle {
             let actual: serde_json::Value =
                 serde_json::from_slice(&self.tlog_entry.canonicalized_body).ok()?;
 
-            // Verify kind
-            if actual.get("kind")?.as_str()? != "dsse" {
-                debug!("DSSE entry has wrong kind");
+            // Verify kind (accepts both "dsse" and "intoto" which are Rekor v1 entries containing DSSE envelopes)
+            let kind = actual.get("kind")?.as_str()?;
+            if kind != "dsse" && kind != "intoto" {
+                debug!("DSSE entry has wrong kind: {}", kind);
                 return None;
             }
 
@@ -374,8 +377,70 @@ impl CheckedBundle {
             let api_version = actual.get("apiVersion")?.as_str()?;
             let spec = actual.get("spec")?;
 
-            match api_version {
-                "0.0.1" => {
+            // Handle intoto v0.0.2 format which has a different structure
+            if kind == "intoto" && api_version == "0.0.2" {
+                debug!("Validating intoto v0.0.2 entry");
+                // intoto v0.0.2 format: spec.content.envelope, spec.content.payloadHash
+                // The envelope is embedded in the transparency log entry
+                let content = spec.get("content")?;
+                let tlog_envelope = content.get("envelope")?;
+
+                // Verify payload hash matches
+                let mut payload_hasher = Sha256::new();
+                payload_hasher.update(&envelope.payload);
+                let payload_hash = hex::encode(payload_hasher.finalize());
+
+                let tlog_payload_hash = content.get("payloadHash")?.get("value")?.as_str()?;
+                if payload_hash != tlog_payload_hash {
+                    debug!(
+                        "intoto v0.0.2 payload hash mismatch: computed={}, tlog={}",
+                        payload_hash, tlog_payload_hash
+                    );
+                    return None;
+                }
+
+                // NOTE: We don't compare the raw payload bytes because the tlog may store
+                // the payload with different formatting (e.g., different whitespace in JSON).
+                // The payload hash comparison above is sufficient to verify integrity.
+
+                // Verify signature matches
+                let tlog_signatures = tlog_envelope.get("signatures")?.as_array()?;
+                if tlog_signatures.is_empty() {
+                    debug!("intoto v0.0.2 tlog entry has no signatures");
+                    return None;
+                }
+
+                // The tlog stores the signature as a double-base64-encoded string
+                // First decode gets us a base64 string, second decode gets us the raw bytes
+                let tlog_sig_b64_b64 = tlog_signatures[0].get("sig")?.as_str()?;
+                let tlog_sig_b64_bytes = base64.decode(tlog_sig_b64_b64).ok()?;
+                let tlog_sig_b64 = String::from_utf8(tlog_sig_b64_bytes).ok()?;
+                let tlog_sig_bytes = base64.decode(&tlog_sig_b64).ok()?;
+                if tlog_sig_bytes != envelope.signatures[0].sig {
+                    debug!("intoto v0.0.2 signature mismatch");
+                    return None;
+                }
+
+                // Verify public key matches
+                // The tlog stores the public key (certificate) as a base64-encoded PEM string
+                let tlog_pubkey_b64 = tlog_signatures[0].get("publicKey")?.as_str()?;
+                let tlog_pubkey_bytes = base64.decode(tlog_pubkey_b64).ok()?;
+                let tlog_pubkey_str = String::from_utf8(tlog_pubkey_bytes).ok()?;
+
+                // Convert our certificate to PEM string
+                let cert_pem_str = self.certificate.to_pem(pkcs8::LineEnding::LF).ok()?;
+
+                // Normalize both by removing all whitespace except for the BEGIN/END markers
+                // The tlog cert has no line wrapping, while our PEM has standard 64-char lines
+                let normalize = |s: &str| s.replace('\n', "").replace('\r', "");
+                if normalize(&cert_pem_str) != normalize(&tlog_pubkey_str) {
+                    debug!("intoto v0.0.2 public key (certificate) mismatch");
+                    return None;
+                }
+            } else {
+                // Handle DSSE v0.0.1 and v0.0.2 formats
+                match api_version {
+                    "0.0.1" => {
                     // v0.0.1 format: spec.payloadHash.value (hex), spec.signatures[].signature, spec.signatures[].verifier
                     // Following sigstore-python's _validate_dsse_v001_entry_body logic
 
@@ -473,38 +538,109 @@ impl CheckedBundle {
                         return None;
                     }
                 }
-                _ => {
-                    debug!("Unsupported DSSE API version: {}", api_version);
-                    return None;
+                    _ => {
+                        debug!("Unsupported DSSE API version: {}", api_version);
+                        return None;
+                    }
                 }
             }
 
             // All checks passed - the DSSE entry is valid
         } else {
-            // Regular hashedrekord entry
-            let expected_entry = rekor::Hashedrekord {
-                kind: "hashedrekord".to_owned(),
-                api_version: "0.0.1".to_owned(),
-                spec: rekor::hashedrekord::Spec {
-                    signature: rekor::hashedrekord::Signature {
-                        content: base64.encode(&self.signature),
-                        public_key: rekor::hashedrekord::PublicKey::new(base64_pem_certificate),
-                    },
-                    data: rekor::hashedrekord::Data {
-                        hash: rekor::hashedrekord::Hash {
-                            algorithm: rekor::hashedrekord::AlgorithmKind::sha256,
-                            value: hex::encode(input_digest),
-                        },
-                    },
-                },
-            };
-
+            // Regular hashedrekord entry - supports both v0.0.1 (Rekor v1) and v0.0.2 (Rekor v2)
             let actual: serde_json::Value =
                 serde_json::from_slice(&self.tlog_entry.canonicalized_body).ok()?;
-            let expected: serde_json::Value = serde_json::to_value(expected_entry).ok()?;
 
-            if actual != expected {
+            // Check kind and API version
+            let kind = actual.get("kind")?.as_str()?;
+            if kind != "hashedrekord" {
+                debug!("hashedrekord entry has wrong kind: {}", kind);
                 return None;
+            }
+
+            let api_version = actual.get("apiVersion")?.as_str()?;
+            match api_version {
+                "0.0.1" => {
+                    // Rekor v1: spec.signature.content, spec.signature.publicKey.content,
+                    // spec.data.hash.algorithm, spec.data.hash.value (hex)
+                    let expected_entry = rekor::Hashedrekord {
+                        kind: "hashedrekord".to_owned(),
+                        api_version: "0.0.1".to_owned(),
+                        spec: rekor::hashedrekord::Spec {
+                            signature: rekor::hashedrekord::Signature {
+                                content: base64.encode(&self.signature),
+                                public_key: rekor::hashedrekord::PublicKey::new(
+                                    base64_pem_certificate,
+                                ),
+                            },
+                            data: rekor::hashedrekord::Data {
+                                hash: rekor::hashedrekord::Hash {
+                                    algorithm: rekor::hashedrekord::AlgorithmKind::sha256,
+                                    value: hex::encode(input_digest),
+                                },
+                            },
+                        },
+                    };
+
+                    let expected: serde_json::Value = serde_json::to_value(expected_entry).ok()?;
+                    if actual != expected {
+                        return None;
+                    }
+                }
+                "0.0.2" => {
+                    // Rekor v2: spec.hashedRekordV002.signature.content,
+                    // spec.hashedRekordV002.signature.verifier.x509Certificate.rawBytes,
+                    // spec.hashedRekordV002.data.algorithm, spec.hashedRekordV002.data.digest (base64)
+                    let spec = actual.get("spec")?;
+                    let hashed_rekord_v002 = spec.get("hashedRekordV002")?;
+
+                    // Verify signature content matches
+                    let sig_b64 = base64.encode(&self.signature);
+                    let tlog_sig = hashed_rekord_v002
+                        .get("signature")?
+                        .get("content")?
+                        .as_str()?;
+                    if sig_b64 != tlog_sig {
+                        debug!("hashedrekord v0.0.2 signature mismatch");
+                        return None;
+                    }
+
+                    // Verify certificate matches
+                    let cert_der = self.certificate.to_der().ok()?;
+                    let cert_der_b64 = base64.encode(cert_der);
+                    let tlog_cert = hashed_rekord_v002
+                        .get("signature")?
+                        .get("verifier")?
+                        .get("x509Certificate")?
+                        .get("rawBytes")?
+                        .as_str()?;
+                    if cert_der_b64 != tlog_cert {
+                        debug!("hashedrekord v0.0.2 certificate mismatch");
+                        return None;
+                    }
+
+                    // Verify data hash matches
+                    let digest_b64 = base64.encode(input_digest);
+                    let tlog_digest = hashed_rekord_v002.get("data")?.get("digest")?.as_str()?;
+                    if digest_b64 != tlog_digest {
+                        debug!(
+                            "hashedrekord v0.0.2 digest mismatch: computed={}, tlog={}",
+                            digest_b64, tlog_digest
+                        );
+                        return None;
+                    }
+
+                    // Verify algorithm is SHA2_256
+                    let algorithm = hashed_rekord_v002.get("data")?.get("algorithm")?.as_str()?;
+                    if algorithm != "SHA2_256" {
+                        debug!("hashedrekord v0.0.2 unexpected hash algorithm: {}", algorithm);
+                        return None;
+                    }
+                }
+                _ => {
+                    debug!("Unsupported hashedrekord API version: {}", api_version);
+                    return None;
+                }
             }
         }
 

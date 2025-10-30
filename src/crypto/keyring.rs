@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
-use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
+use const_oid::{db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1}, ObjectIdentifier};
 use digest::Digest;
 use thiserror::Error;
 use x509_cert::{
@@ -23,6 +23,9 @@ use x509_cert::{
     der::{Decode, Encode},
     spki::SubjectPublicKeyInfoOwned,
 };
+
+// Ed25519 OID: 1.3.101.112
+const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
 #[derive(Error, Debug)]
 pub enum KeyringError {
@@ -48,8 +51,42 @@ struct Key {
 
 impl Key {
     /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object.
+    ///
+    /// The key ID (fingerprint) is computed as the RFC 6962-style SHA256 hash of the SPKI.
     pub fn new(spki_bytes: &[u8]) -> Result<Self> {
         let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
+
+        // Compute RFC 6962-style key ID (SHA256 hash of SPKI)
+        let fingerprint = {
+            let mut hasher = sha2::Sha256::new();
+            spki.encode(&mut hasher).expect("failed to hash key!");
+            hasher.finalize().into()
+        };
+
+        Self::new_with_id(spki_bytes, fingerprint)
+    }
+
+    /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object with an explicit key ID.
+    ///
+    /// This method should be used when the key ID is provided externally (e.g., from a trusted root),
+    /// rather than being computed from the SPKI.
+    pub fn new_with_id(spki_bytes: &[u8], fingerprint: [u8; 32]) -> Result<Self> {
+        let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
+
+        // Ed25519 keys don't have algorithm parameters
+        if spki.algorithm.oid == ID_ED25519 {
+            let raw_key_bytes = spki.subject_public_key.raw_bytes();
+            tracing::debug!("Ed25519 key: raw_bytes len = {}", raw_key_bytes.len());
+
+            return Ok(Key {
+                inner: UnparsedPublicKey::new(
+                    &aws_lc_rs_signature::ED25519,
+                    raw_key_bytes.to_owned(),
+                ),
+                fingerprint,
+            });
+        }
+
         let (algo, params) = if let Some(params) = &spki.algorithm.parameters {
             // Special-case RSA keys, which don't have SPKI parameters.
             if spki.algorithm.oid == RSA_ENCRYPTION && params == &der::Any::null() {
@@ -63,17 +100,13 @@ impl Key {
         };
 
         match (algo, params) {
-            // TODO(tnytown): should we also accept ed25519, p384, ... ?
+            // TODO(tnytown): should we also accept p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
                 inner: UnparsedPublicKey::new(
                     &aws_lc_rs_signature::ECDSA_P256_SHA256_ASN1,
                     spki.subject_public_key.raw_bytes().to_owned(),
                 ),
-                fingerprint: {
-                    let mut hasher = sha2::Sha256::new();
-                    spki.encode(&mut hasher).expect("failed to hash key!");
-                    hasher.finalize().into()
-                },
+                fingerprint,
             }),
             _ => Err(KeyringError::AlgoUnsupported),
         }
@@ -86,10 +119,57 @@ pub struct Keyring(HashMap<[u8; 32], Key>);
 
 impl Keyring {
     /// Creates a `Keyring` from DER encoded SPKI-format public keys.
+    ///
+    /// This method computes RFC 6962-style key IDs (SHA256 hash of SPKI) for each key.
+    /// For Rekor transparency logs, use `new_with_ids` instead to use the key IDs from
+    /// the trusted root.
     pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
+        let keys_vec: Vec<_> = keys.into_iter().collect();
+        tracing::debug!("Creating keyring from {} key(s)", keys_vec.len());
+
         Ok(Self(
-            keys.into_iter()
-                .flat_map(Key::new)
+            keys_vec.into_iter()
+                .flat_map(|key_bytes| {
+                    match Key::new(key_bytes) {
+                        Ok(key) => {
+                            tracing::debug!("Loaded key with fingerprint: {}", hex::encode(key.fingerprint));
+                            Some(key)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load key: {:?}", e);
+                            None
+                        }
+                    }
+                })
+                .map(|k| Ok((k.fingerprint, k)))
+                .collect::<Result<_>>()?,
+        ))
+    }
+
+    /// Creates a `Keyring` from DER encoded SPKI-format public keys with explicit key IDs.
+    ///
+    /// This method should be used for Rekor transparency logs where key IDs are provided
+    /// by the trusted root, rather than being computed from the SPKI.
+    pub fn new_with_ids<'a>(
+        keys: impl IntoIterator<Item = (&'a [u8; 32], &'a [u8])>,
+    ) -> Result<Self> {
+        let keys_vec: Vec<_> = keys.into_iter().collect();
+        tracing::debug!("Creating keyring from {} key(s) with explicit IDs", keys_vec.len());
+
+        Ok(Self(
+            keys_vec.into_iter()
+                .flat_map(|(key_id, key_bytes)| {
+                    match Key::new_with_id(key_bytes, *key_id) {
+                        Ok(key) => {
+                            tracing::debug!("Loaded key with fingerprint: {}", hex::encode(key.fingerprint));
+                            Some(key)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load key: {:?}", e);
+                            None
+                        }
+                    }
+                })
                 .map(|k| Ok((k.fingerprint, k)))
                 .collect::<Result<_>>()?,
         ))
@@ -101,7 +181,10 @@ impl Keyring {
 
         key.inner
             .verify(data, signature)
-            .or(Err(KeyringError::VerificationFailed))?;
+            .map_err(|e| {
+                tracing::debug!("Keyring verification failed: {:?}", e);
+                KeyringError::VerificationFailed
+            })?;
 
         Ok(())
     }

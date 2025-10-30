@@ -79,6 +79,8 @@ sigstore-trust-root = [
 test-registry = [] # used for testing against a test registry
 verify = [
     "cert",
+    "dep:bcder",
+    "dep:cryptographic-message-syntax",
     "dep:hex",
     "dep:json-syntax",
     "dep:sigstore_protobuf_specs",
@@ -90,6 +92,7 @@ wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
+bcder = { version = "0.7", default-features = false, optional = true }
 cached = { version = "0.56", optional = true, features = ["async"] }
 cfg-if = { version = "1.0.0", optional = true, default-features = false }
 clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], optional = true }
@@ -98,6 +101,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "serde",
 ] }
 const-oid = { version = "0.9", default-features = false, features = ["db"] }
+cryptographic-message-syntax = { version = "0.26", default-features = false, optional = true }
 crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",

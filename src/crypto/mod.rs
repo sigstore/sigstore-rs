@@ -184,6 +184,11 @@ pub mod verification_key;
 
 pub mod merkle;
 
+pub mod note;
+
+#[cfg(feature = "verify")]
+pub mod timestamp;
+
 use self::signing_key::{
     ecdsa::ec::{EcdsaKeys, EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},
