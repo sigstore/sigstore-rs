@@ -51,10 +51,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-conformance-
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
+          enable-cache: true
 
       - name: Checkout sigstore-conformance
         run: |
@@ -64,13 +64,6 @@ jobs:
           else
             echo "sigstore-conformance already exists"
           fi
-
-      - name: Install conformance suite dependencies
-        run: |
-          cd sigstore-conformance
-          pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-subtests
 
       - name: Build conformance test binary
         run: |
@@ -86,7 +79,7 @@ jobs:
           ENTRYPOINT="$(pwd)/../tests/conformance/target/release/sigstore"
 
           echo "Running conformance tests with entrypoint: $ENTRYPOINT"
-          pytest test/test_bundle.py::test_verify \
+          uv run pytest test/test_bundle.py::test_verify \
             --entrypoint="$ENTRYPOINT" \
             --skip-signing \
             -v 2>&1 | tee ../conformance-output.txt
