@@ -20,6 +20,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+use elliptic_curve::rand_core;
 use hex;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};
@@ -117,8 +118,7 @@ impl<'ctx> SigningSession<'ctx> {
                     ].try_into()?
                 ].into();
 
-        let mut rng = rand::thread_rng();
-        let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rng));
+        let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rand_core::OsRng));
         let mut builder = CertRequestBuilder::new(subject, &private_key)?;
         builder.add_extension(&x509_ext::BasicConstraints {
             ca: false,
