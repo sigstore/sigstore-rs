@@ -89,17 +89,24 @@ impl<'ctx> SigningSession<'ctx> {
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
+        // Use email if available, otherwise use sub (for GitHub Actions OIDC tokens)
+        let identity = token.unverified_claims().email.as_ref()
+            .or(token.unverified_claims().sub.as_ref())
+            .ok_or_else(|| SigstoreError::IdentityTokenError(
+                "Token must have either 'email' or 'sub' claim".to_string()
+            ))?;
+
         let subject =
                 // SEQUENCE OF RelativeDistinguishedName
                 vec![
                     // SET OF AttributeTypeAndValue
                     vec![
-                        // AttributeTypeAndValue, `emailAddress=...`
+                        // AttributeTypeAndValue, `emailAddress=...` (or sub for GitHub Actions)
                         AttributeTypeAndValue {
                             oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
                             value: AttributeValue::new(
                                 pkcs8::der::Tag::Utf8String,
-                                token.unverified_claims().email.as_ref(),
+                                identity.as_ref(),
                             )?,
                         }
                     ].try_into()?
