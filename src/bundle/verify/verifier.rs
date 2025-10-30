@@ -133,7 +133,9 @@ impl Verifier {
         P: VerificationPolicy,
     {
         let input_digest = input_digest.finalize();
-        return self.verify_digest_bytes(&input_digest.into(), bundle, policy, offline).await;
+        return self
+            .verify_digest_bytes(&input_digest.into(), bundle, policy, offline)
+            .await;
     }
 
     /// Verifies a pre-computed SHA256 digest against the given Sigstore Bundle, ensuring
@@ -300,7 +302,10 @@ impl Verifier {
                             i, cert_not_before, cert_not_after, timestamp_unix
                         )))?;
                     }
-                    debug!("RFC 3161 timestamp {} is within signing certificate validity period", i);
+                    debug!(
+                        "RFC 3161 timestamp {} is within signing certificate validity period",
+                        i
+                    );
                 }
             }
         }

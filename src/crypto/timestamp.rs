@@ -357,12 +357,12 @@ pub fn verify_timestamp_response(
 
         let not_before = DateTime::from_timestamp(not_before_unix, 0).ok_or_else(|| {
             TimestampError::SignatureVerificationError(
-                "invalid notBefore timestamp in TSA certificate".to_string()
+                "invalid notBefore timestamp in TSA certificate".to_string(),
             )
         })?;
         let not_after = DateTime::from_timestamp(not_after_unix, 0).ok_or_else(|| {
             TimestampError::SignatureVerificationError(
-                "invalid notAfter timestamp in TSA certificate".to_string()
+                "invalid notAfter timestamp in TSA certificate".to_string(),
             )
         })?;
 
@@ -402,22 +402,28 @@ pub fn verify_timestamp_response(
                     ))
                 })?;
 
-                let trusted_cert = Certificate::from_der(trusted_tsa_cert.as_ref()).map_err(|e| {
-                    TimestampError::SignatureVerificationError(format!(
-                        "failed to parse trusted TSA certificate: {}",
-                        e
-                    ))
-                })?;
+                let trusted_cert =
+                    Certificate::from_der(trusted_tsa_cert.as_ref()).map_err(|e| {
+                        TimestampError::SignatureVerificationError(format!(
+                            "failed to parse trusted TSA certificate: {}",
+                            e
+                        ))
+                    })?;
 
                 // Compare subject, issuer, and serial number to determine if they're the same cert
-                let same_subject = embedded_cert.tbs_certificate.subject == trusted_cert.tbs_certificate.subject;
-                let same_issuer = embedded_cert.tbs_certificate.issuer == trusted_cert.tbs_certificate.issuer;
-                let same_serial = embedded_cert.tbs_certificate.serial_number == trusted_cert.tbs_certificate.serial_number;
+                let same_subject =
+                    embedded_cert.tbs_certificate.subject == trusted_cert.tbs_certificate.subject;
+                let same_issuer =
+                    embedded_cert.tbs_certificate.issuer == trusted_cert.tbs_certificate.issuer;
+                let same_serial = embedded_cert.tbs_certificate.serial_number
+                    == trusted_cert.tbs_certificate.serial_number;
 
                 let is_trusted = same_subject && same_issuer && same_serial;
 
                 if !is_trusted {
-                    tracing::error!("Embedded TSA certificate does not match trusted TSA certificate");
+                    tracing::error!(
+                        "Embedded TSA certificate does not match trusted TSA certificate"
+                    );
                     tracing::debug!(
                         "Embedded: subject={:?}, issuer={:?}, serial={:?}",
                         embedded_cert.tbs_certificate.subject,
@@ -431,7 +437,7 @@ pub fn verify_timestamp_response(
                         trusted_cert.tbs_certificate.serial_number
                     );
                     return Err(TimestampError::SignatureVerificationError(
-                        "embedded TSA certificate is not from the trusted TSA".to_string()
+                        "embedded TSA certificate is not from the trusted TSA".to_string(),
                     ));
                 }
 
@@ -452,7 +458,10 @@ pub fn verify_timestamp_response(
     // but appears in some certificates. Full chain validation would provide additional
     // security by verifying the entire certificate chain to a root CA.
     if false && has_embedded_certs && !opts.roots.is_empty() {
-        tracing::debug!("Starting TSA certificate chain validation with {} trusted roots", opts.roots.len());
+        tracing::debug!(
+            "Starting TSA certificate chain validation with {} trusted roots",
+            opts.roots.len()
+        );
 
         // Log information about the trusted roots
         for (i, root) in opts.roots.iter().enumerate() {
@@ -481,7 +490,10 @@ pub fn verify_timestamp_response(
                 vec![]
             };
 
-            tracing::debug!("Collected {} certificates from SignedData for chain building", all_certs.len());
+            tracing::debug!(
+                "Collected {} certificates from SignedData for chain building",
+                all_certs.len()
+            );
 
             // The intermediates should be everything except the leaf (first cert)
             let intermediates: Vec<CertificateDer> = if all_certs.len() > 1 {
@@ -511,7 +523,10 @@ pub fn verify_timestamp_response(
 
             let trust_anchors = trust_anchors?;
 
-            tracing::debug!("Created {} trust anchors for TSA validation", trust_anchors.len());
+            tracing::debug!(
+                "Created {} trust anchors for TSA validation",
+                trust_anchors.len()
+            );
 
             let cert_der_ref = CertificateDer::from(cert_der.as_slice());
             let end_entity_cert = EndEntityCert::try_from(&cert_der_ref).map_err(|e| {
@@ -522,9 +537,9 @@ pub fn verify_timestamp_response(
             })?;
 
             // Verify the certificate chains to a trusted root with TimeStamping EKU
-            let verification_time = UnixTime::since_unix_epoch(
-                std::time::Duration::from_secs(timestamp.timestamp() as u64),
-            );
+            let verification_time = UnixTime::since_unix_epoch(std::time::Duration::from_secs(
+                timestamp.timestamp() as u64,
+            ));
 
             // Verify the certificate chains to a trusted TSA root
             // We use required_if_present for TimeStamping EKU: if the certificate has EKUs,

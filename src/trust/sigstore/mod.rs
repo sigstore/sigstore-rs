@@ -259,12 +259,22 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// Returns tuples of (certificate, valid_from, valid_to) for each timestamp authority.
     fn tsa_certs_with_validity(
         &self,
-    ) -> Result<Vec<(CertificateDer<'_>, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>)>> {
+    ) -> Result<
+        Vec<(
+            CertificateDer<'_>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        )>,
+    > {
         use sigstore_protobuf_specs::dev::sigstore::common::v1::TimeRange;
 
-        tracing::debug!("Extracting TSA certificates with validity from {} timestamp authorities", self.trusted_root.timestamp_authorities.len());
+        tracing::debug!(
+            "Extracting TSA certificates with validity from {} timestamp authorities",
+            self.trusted_root.timestamp_authorities.len()
+        );
 
-        let result: Vec<_> = self.trusted_root
+        let result: Vec<_> = self
+            .trusted_root
             .timestamp_authorities
             .iter()
             .filter_map(|ca| {
@@ -277,15 +287,29 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
                     tracing::debug!("TSA has valid_for, start={:?}, end={:?}", start, end);
                     let valid_from = start.as_ref().and_then(|ts| {
                         let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
-                        tracing::debug!("TSA valid_from: ts.seconds={}, ts.nanos={}, result={:?}", ts.seconds, ts.nanos, dt);
+                        tracing::debug!(
+                            "TSA valid_from: ts.seconds={}, ts.nanos={}, result={:?}",
+                            ts.seconds,
+                            ts.nanos,
+                            dt
+                        );
                         dt
                     });
                     let valid_to = end.as_ref().and_then(|ts| {
                         let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
-                        tracing::debug!("TSA valid_to: ts.seconds={}, ts.nanos={}, result={:?}", ts.seconds, ts.nanos, dt);
+                        tracing::debug!(
+                            "TSA valid_to: ts.seconds={}, ts.nanos={}, result={:?}",
+                            ts.seconds,
+                            ts.nanos,
+                            dt
+                        );
                         dt
                     });
-                    tracing::debug!("TSA validity period: from={:?}, to={:?}", valid_from, valid_to);
+                    tracing::debug!(
+                        "TSA validity period: from={:?}, to={:?}",
+                        valid_from,
+                        valid_to
+                    );
                     (valid_from, valid_to)
                 } else {
                     tracing::warn!("No valid_for in TSA certificate authority");

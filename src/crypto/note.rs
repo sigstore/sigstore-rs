@@ -465,6 +465,7 @@ mod tests {
         let full_text = format!("{}\n\n— log.example.com AQIDBAUAAAAA", checkpoint_text);
         let note = SignedNote::from_text(&full_text).unwrap();
 
-        assert_eq!(note.checkpoint_text, checkpoint_text);
+        // The checkpoint_text includes a trailing newline according to golang.org/x/mod/sumdb/note spec
+        assert_eq!(note.checkpoint_text, format!("{}\n", checkpoint_text));
     }
 }
