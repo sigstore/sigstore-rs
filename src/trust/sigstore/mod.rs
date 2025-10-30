@@ -253,6 +253,53 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
 
         Ok(certs)
     }
+
+    /// Get TSA certificates with their validity periods from the trusted root.
+    ///
+    /// Returns tuples of (certificate, valid_from, valid_to) for each timestamp authority.
+    fn tsa_certs_with_validity(
+        &self,
+    ) -> Result<Vec<(CertificateDer<'_>, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>)>> {
+        use sigstore_protobuf_specs::dev::sigstore::common::v1::TimeRange;
+
+        tracing::debug!("Extracting TSA certificates with validity from {} timestamp authorities", self.trusted_root.timestamp_authorities.len());
+
+        let result: Vec<_> = self.trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter_map(|ca| {
+                // Get the leaf certificate
+                let cert = ca.cert_chain.as_ref()?.certificates.first()?;
+                let cert_der = CertificateDer::from(cert.raw_bytes.as_slice()).into_owned();
+
+                // Get the validity period
+                let (valid_from, valid_to) = if let Some(TimeRange { start, end }) = &ca.valid_for {
+                    tracing::debug!("TSA has valid_for, start={:?}, end={:?}", start, end);
+                    let valid_from = start.as_ref().and_then(|ts| {
+                        let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
+                        tracing::debug!("TSA valid_from: ts.seconds={}, ts.nanos={}, result={:?}", ts.seconds, ts.nanos, dt);
+                        dt
+                    });
+                    let valid_to = end.as_ref().and_then(|ts| {
+                        let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
+                        tracing::debug!("TSA valid_to: ts.seconds={}, ts.nanos={}, result={:?}", ts.seconds, ts.nanos, dt);
+                        dt
+                    });
+                    tracing::debug!("TSA validity period: from={:?}, to={:?}", valid_from, valid_to);
+                    (valid_from, valid_to)
+                } else {
+                    tracing::warn!("No valid_for in TSA certificate authority");
+                    (None, None)
+                };
+
+                Some((cert_der, valid_from, valid_to))
+            })
+            .collect();
+
+        tracing::debug!("Extracted {} TSA certificates with validity", result.len());
+
+        Ok(result)
+    }
 }
 
 /// Given a `range`, checks that the the current time is not before `start`. If

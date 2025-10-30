@@ -117,4 +117,14 @@ impl CertificatePool {
             None,
         )
     }
+
+    /// Get a reference to the trusted root anchors
+    pub(crate) fn trusted_roots(&self) -> &[TrustAnchor<'static>] {
+        &self.trusted_roots
+    }
+
+    /// Get a reference to the intermediate certificates
+    pub(crate) fn intermediates(&self) -> &[CertificateDer<'static>] {
+        &self.intermediates
+    }
 }

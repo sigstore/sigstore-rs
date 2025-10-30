@@ -38,6 +38,13 @@ use crate::{
 };
 use serde::Serialize;
 
+/// TSA certificate with its validity period from the trusted root
+struct TsaCertificate {
+    cert: CertificateDer<'static>,
+    valid_from: Option<DateTime<Utc>>,
+    valid_to: Option<DateTime<Utc>>,
+}
+
 #[cfg(feature = "sigstore-trust-root")]
 use crate::trust::sigstore::SigstoreTrustRoot;
 
@@ -56,7 +63,7 @@ pub struct Verifier {
     cert_pool: CertificatePool,
     ctfe_keyring: Keyring,
     rekor_keyring: Keyring,
-    tsa_certs: Vec<CertificateDer<'static>>,
+    tsa_certs: Vec<TsaCertificate>,
 }
 
 impl Verifier {
@@ -84,10 +91,15 @@ impl Verifier {
         let rekor_keyring =
             Keyring::new_with_ids(rekor_keys.iter().map(|(id, bytes)| (id, *bytes)))?;
 
-        let tsa_certs: Vec<CertificateDer<'static>> = trust_repo
-            .tsa_certs()?
+        debug!("Fetching TSA certificates with validity periods from trust root");
+        let tsa_certs: Vec<TsaCertificate> = trust_repo
+            .tsa_certs_with_validity()?
             .into_iter()
-            .map(|c| c.into_owned())
+            .map(|(cert, valid_from, valid_to)| TsaCertificate {
+                cert: cert.into_owned(),
+                valid_from,
+                valid_to,
+            })
             .collect();
 
         Ok(Self {
@@ -191,13 +203,27 @@ impl Verifier {
 
                 for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
                     // Verify the RFC 3161 timestamp against the signature bytes
+                    let (tsa_cert, tsa_valid_for) = if let Some(tsa) = self.tsa_certs.first() {
+                        let valid_for = match (tsa.valid_from, tsa.valid_to) {
+                            (Some(from), Some(to)) => Some((from, to)),
+                            _ => None,
+                        };
+                        (Some(tsa.cert.clone()), valid_for)
+                    } else {
+                        (None, None)
+                    };
+
+                    // Collect TSA root certificates for chain validation
+                    let tsa_roots: Vec<_> = self.tsa_certs.iter().map(|tsa| tsa.cert.clone()).collect();
+
                     let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
                         &ts.signed_timestamp,
                         &materials.signature,
                         crate::crypto::timestamp::VerifyOpts {
-                            roots: vec![],
+                            roots: tsa_roots,
                             intermediates: vec![],
-                            tsa_certificate: self.tsa_certs.first().cloned(),
+                            tsa_certificate: tsa_cert,
+                            tsa_valid_for,
                         },
                     )
                     .map_err(|e| {
@@ -626,13 +652,27 @@ impl Verifier {
 
                 for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
                     // Verify the RFC 3161 timestamp against the signature bytes
+                    let (tsa_cert, tsa_valid_for) = if let Some(tsa) = self.tsa_certs.first() {
+                        let valid_for = match (tsa.valid_from, tsa.valid_to) {
+                            (Some(from), Some(to)) => Some((from, to)),
+                            _ => None,
+                        };
+                        (Some(tsa.cert.clone()), valid_for)
+                    } else {
+                        (None, None)
+                    };
+
+                    // Collect TSA root certificates for chain validation
+                    let tsa_roots: Vec<_> = self.tsa_certs.iter().map(|tsa| tsa.cert.clone()).collect();
+
                     let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
                         &ts.signed_timestamp,
                         &materials.signature,
                         crate::crypto::timestamp::VerifyOpts {
-                            roots: vec![],
+                            roots: tsa_roots,
                             intermediates: vec![],
-                            tsa_certificate: self.tsa_certs.first().cloned(),
+                            tsa_certificate: tsa_cert,
+                            tsa_valid_for,
                         },
                     )
                     .map_err(|e| {

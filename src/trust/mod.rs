@@ -27,6 +27,23 @@ pub trait TrustRoot {
     fn rekor_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
     fn ctfe_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
     fn tsa_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
+
+    /// Get TSA certificates with their validity periods.
+    /// Returns tuples of (certificate, valid_from, valid_to).
+    /// Default implementation returns None for validity periods.
+    fn tsa_certs_with_validity(
+        &self,
+    ) -> crate::errors::Result<
+        Vec<(
+            CertificateDer<'_>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        )>,
+    > {
+        // Default implementation: just return certs without validity info
+        let certs = self.tsa_certs()?;
+        Ok(certs.into_iter().map(|c| (c, None, None)).collect())
+    }
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.

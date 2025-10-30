@@ -16,8 +16,11 @@
 
 use chrono::{DateTime, Utc};
 use cryptographic_message_syntax::asn1::rfc3161::{PkiStatus, TimeStampResp, TstInfo};
-use pki_types::CertificateDer;
+use pki_types::{CertificateDer, UnixTime};
 use sha2::{Digest, Sha256};
+
+// TimeStamping Extended Key Usage OID (1.3.6.1.5.5.7.3.8)
+const ID_KP_TIME_STAMPING: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08];
 
 /// Wrapper around TimeStampResp that provides convenience methods.
 struct TimeStampResponse(TimeStampResp);
@@ -124,6 +127,10 @@ pub struct VerifyOpts<'a> {
 
     /// TSA certificate (optional if embedded in timestamp)
     pub tsa_certificate: Option<CertificateDer<'a>>,
+
+    /// Validity period for the TSA certificate in the trusted root
+    /// If provided, the timestamp must fall within this period
+    pub tsa_valid_for: Option<(DateTime<Utc>, DateTime<Utc>)>,
 }
 
 /// Result of timestamp verification.
@@ -197,6 +204,25 @@ pub fn verify_timestamp_response(
     // The gen_time field is a GeneralizedTime which has a From impl for DateTime<Utc>
     let timestamp: DateTime<Utc> = tst_info.gen_time.into();
 
+    // Check that the timestamp is within the TSA validity period in the trusted root
+    if let Some((start, end)) = opts.tsa_valid_for {
+        if timestamp < start || timestamp > end {
+            tracing::error!(
+                "Timestamp {} is outside TSA validity period ({} to {})",
+                timestamp,
+                start,
+                end
+            );
+            return Err(TimestampError::OutsideValidityPeriod);
+        }
+        tracing::debug!(
+            "Timestamp {} is within TSA validity period ({} to {})",
+            timestamp,
+            start,
+            end
+        );
+    }
+
     // Verify the CMS signature on the SignedData
     // Parse the SignedData into the high-level type that has verification methods
     let parsed_signed_data = cryptographic_message_syntax::SignedData::try_from(&signed_data)
@@ -209,7 +235,7 @@ pub fn verify_timestamp_response(
 
     // If no embedded certificates, we need to use the TSA certificate from opts
     let external_tsa_cert = if !has_embedded_certs {
-        if let Some(tsa_cert) = opts.tsa_certificate {
+        if let Some(ref tsa_cert) = opts.tsa_certificate {
             use x509_certificate::CapturedX509Certificate;
             Some(
                 CapturedX509Certificate::from_der(tsa_cert.as_ref()).map_err(|e| {
@@ -288,10 +314,144 @@ pub fn verify_timestamp_response(
         }
     }
 
-    // TODO: Additional verification that could be added:
-    // - Checking TSA certificate has TimeStamping EKU
-    // - Validating TSA certificate chains to trusted root (in opts.roots)
-    // - Checking timestamp is within TSA cert validity period
+    // Additional verification: Check timestamp is within TSA certificate's validity period
+    // Extract the TSA certificate (either embedded or external)
+    let tsa_cert_der = if has_embedded_certs {
+        // Get the first certificate from the SignedData
+        parsed_signed_data.certificates().next().map(|cert| {
+            // CapturedX509Certificate has encoded_der() method to get the raw bytes
+            cert.constructed_data().to_vec()
+        })
+    } else {
+        opts.tsa_certificate.as_ref().map(|c| c.as_ref().to_vec())
+    };
+
+    if let Some(ref cert_der) = tsa_cert_der {
+        // Parse the certificate to check validity
+        use x509_cert::{Certificate, der::Decode};
+        let cert = Certificate::from_der(cert_der).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!(
+                "failed to parse TSA certificate: {}",
+                e
+            ))
+        })?;
+
+        // Get the certificate validity period
+        let validity = &cert.tbs_certificate.validity;
+        let not_before_unix = validity.not_before.to_unix_duration().as_secs() as i64;
+        let not_after_unix = validity.not_after.to_unix_duration().as_secs() as i64;
+
+        let not_before = DateTime::from_timestamp(not_before_unix, 0).ok_or_else(|| {
+            TimestampError::SignatureVerificationError(
+                "invalid notBefore timestamp in TSA certificate".to_string()
+            )
+        })?;
+        let not_after = DateTime::from_timestamp(not_after_unix, 0).ok_or_else(|| {
+            TimestampError::SignatureVerificationError(
+                "invalid notAfter timestamp in TSA certificate".to_string()
+            )
+        })?;
+
+        // Check that the timestamp is within the certificate's validity period
+        if timestamp < not_before || timestamp > not_after {
+            tracing::error!(
+                "Timestamp {} is outside TSA certificate validity period ({} to {})",
+                timestamp,
+                not_before,
+                not_after
+            );
+            return Err(TimestampError::OutsideValidityPeriod);
+        }
+        tracing::debug!(
+            "Timestamp {} is within TSA certificate validity period ({} to {})",
+            timestamp,
+            not_before,
+            not_after
+        );
+    }
+
+    // TODO: Additional verification: Validate TSA certificate chain
+    // This is complex and requires careful handling of certificate chain building.
+    // The challenge is that webpki needs the exact root certificate that signed the chain,
+    // but matching the TSA root from the trusted root to the certificate chain is non-trivial.
+    // For now, we rely on the CMS signature verification which validates the cryptographic
+    // signature is correct (though not that it's from a trusted TSA).
+    //
+    // Uncomment below to enable TSA certificate chain validation (currently incomplete):
+    if false && !opts.roots.is_empty() {
+        if let Some(ref cert_der) = tsa_cert_der {
+            // Collect all certificates from SignedData except the root as intermediates
+            // The leaf certificate will be validated separately
+            let mut all_certs: Vec<_> = if has_embedded_certs {
+                parsed_signed_data
+                    .certificates()
+                    .map(|cert| CertificateDer::from(cert.constructed_data().to_vec()))
+                    .collect()
+            } else {
+                vec![]
+            };
+
+            // The intermediates should be everything except the leaf (first cert)
+            let intermediates: Vec<CertificateDer> = if all_certs.len() > 1 {
+                all_certs.drain(1..).collect()
+            } else {
+                vec![]
+            };
+
+            // Validate the certificate chain using CertificatePool
+            use crate::crypto::CertificatePool;
+            use webpki::{EndEntityCert, KeyUsage};
+
+            let cert_pool = CertificatePool::from_certificates(
+                opts.roots.iter().cloned(),
+                intermediates,
+            )
+            .map_err(|e| {
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to create certificate pool: {}",
+                    e
+                ))
+            })?;
+
+            let cert_der_ref = CertificateDer::from(cert_der.as_slice());
+            let end_entity_cert = EndEntityCert::try_from(&cert_der_ref).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to parse TSA certificate: {}",
+                    e
+                ))
+            })?;
+
+            // Verify the certificate chains to a trusted root with TimeStamping EKU
+            let verification_time = UnixTime::since_unix_epoch(
+                std::time::Duration::from_secs(timestamp.timestamp() as u64),
+            );
+
+            // Verify the certificate chains to a trusted TSA root
+            // We use required_if_present for TimeStamping EKU: if the certificate has EKUs,
+            // then TimeStamping must be present. Otherwise, we allow certificates without EKUs.
+            let signing_algs = webpki::ALL_VERIFICATION_ALGS;
+
+            end_entity_cert
+                .verify_for_usage(
+                    signing_algs,
+                    cert_pool.trusted_roots(),
+                    cert_pool.intermediates(),
+                    verification_time,
+                    KeyUsage::required_if_present(ID_KP_TIME_STAMPING),
+                    None,
+                    None,
+                )
+                .map_err(|e| {
+                    tracing::error!("TSA certificate chain validation failed: {}", e);
+                    TimestampError::SignatureVerificationError(format!(
+                        "TSA certificate chain validation failed: {}",
+                        e
+                    ))
+                })?;
+
+            tracing::debug!("TSA certificate chain validated successfully");
+        }
+    }
 
     Ok(TimestampResult { time: timestamp })
 }
