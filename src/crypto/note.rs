@@ -199,6 +199,33 @@ impl LogCheckpoint {
             metadata,
         })
     }
+
+    /// Serialize a checkpoint to text format.
+    ///
+    /// The output format is:
+    /// ```text
+    /// <origin>
+    /// <tree_size>
+    /// <root_hash_base64>
+    /// <metadata_line_1>
+    /// <metadata_line_2>
+    /// ...
+    /// ```
+    ///
+    /// This is the inverse of `from_text()` and can be used for round-trip
+    /// serialization or for creating checkpoint text to sign.
+    pub fn to_text(&self) -> String {
+        let root_hash_b64 = base64.encode(&self.root_hash);
+        let mut output = format!("{}\n{}\n{}\n", self.origin, self.tree_size, root_hash_b64);
+
+        // Add metadata lines
+        for line in &self.metadata {
+            output.push_str(line);
+            output.push('\n');
+        }
+
+        output
+    }
 }
 
 impl NoteSignature {
@@ -242,6 +269,23 @@ impl NoteSignature {
             key_id,
             signature,
         })
+    }
+
+    /// Serialize a signature to text format.
+    ///
+    /// The output format is: `— <name> <base64_signature>`
+    /// where the base64_signature encodes the 4-byte key ID followed by the signature bytes.
+    pub fn to_line(&self) -> String {
+        // Combine key_id (4 bytes) and signature bytes
+        let mut sig_bytes = Vec::with_capacity(4 + self.signature.len());
+        sig_bytes.extend_from_slice(&self.key_id);
+        sig_bytes.extend_from_slice(&self.signature);
+
+        // Encode to base64
+        let sig_base64 = base64.encode(&sig_bytes);
+
+        // Format with em dash
+        format!("— {} {}", self.name, sig_base64)
     }
 }
 
@@ -310,6 +354,36 @@ impl SignedNote {
             });
         }
         Ok(())
+    }
+
+    /// Serialize a signed note to text format.
+    ///
+    /// The output format is:
+    /// ```text
+    /// <checkpoint_text>
+    ///
+    /// — <signer1_name> <signature1_base64>
+    /// — <signer2_name> <signature2_base64>
+    /// ```
+    ///
+    /// This is the inverse of `from_text()` and can be used for round-trip
+    /// serialization.
+    pub fn to_text(&self) -> String {
+        let mut output = String::new();
+
+        // Add checkpoint text (already includes trailing newline)
+        output.push_str(&self.checkpoint_text);
+
+        // Add blank line separator
+        output.push('\n');
+
+        // Add signature lines
+        for sig in &self.signatures {
+            output.push_str(&sig.to_line());
+            output.push('\n');
+        }
+
+        output
     }
 }
 
@@ -472,5 +546,155 @@ mod tests {
 
         // The checkpoint_text includes a trailing newline according to golang.org/x/mod/sumdb/note spec
         assert_eq!(note.checkpoint_text, format!("{}\n", checkpoint_text));
+    }
+
+    #[test]
+    fn test_checkpoint_to_text() {
+        let checkpoint = LogCheckpoint {
+            origin: "log.example.com".to_string(),
+            tree_size: 12345,
+            root_hash: vec![0x01, 0x02, 0x03, 0x04],
+            metadata: vec![],
+        };
+
+        let text = checkpoint.to_text();
+
+        // Should have origin, tree size, and base64-encoded hash
+        assert!(text.contains("log.example.com"));
+        assert!(text.contains("12345"));
+        assert!(text.contains("AQIDBA==")); // base64 of [0x01, 0x02, 0x03, 0x04]
+    }
+
+    #[test]
+    fn test_checkpoint_to_text_with_metadata() {
+        let checkpoint = LogCheckpoint {
+            origin: "log.example.com".to_string(),
+            tree_size: 100,
+            root_hash: vec![0xde, 0xad, 0xbe, 0xef],
+            metadata: vec!["Timestamp: 1234567890".to_string(), "Extra: data".to_string()],
+        };
+
+        let text = checkpoint.to_text();
+
+        // Should include metadata
+        assert!(text.contains("Timestamp: 1234567890"));
+        assert!(text.contains("Extra: data"));
+    }
+
+    #[test]
+    fn test_checkpoint_roundtrip() {
+        let original = LogCheckpoint {
+            origin: "rekor.sigstore.dev".to_string(),
+            tree_size: 999,
+            root_hash: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            metadata: vec!["Info: test".to_string()],
+        };
+
+        // Serialize to text
+        let text = original.to_text();
+
+        // Parse back
+        let parsed = LogCheckpoint::from_text(&text).unwrap();
+
+        // Should match
+        assert_eq!(parsed.origin, original.origin);
+        assert_eq!(parsed.tree_size, original.tree_size);
+        assert_eq!(parsed.root_hash, original.root_hash);
+        assert_eq!(parsed.metadata, original.metadata);
+    }
+
+    #[test]
+    fn test_signature_to_line() {
+        let sig = NoteSignature {
+            name: "log.example.com".to_string(),
+            key_id: [0x01, 0x02, 0x03, 0x04],
+            signature: vec![0x05, 0x06, 0x07, 0x08],
+        };
+
+        let line = sig.to_line();
+
+        // Should start with em dash
+        assert!(line.starts_with("— "));
+        // Should contain the name
+        assert!(line.contains("log.example.com"));
+        // Should contain base64-encoded (key_id + signature)
+        assert!(line.contains("AQIDBAUGBwg=")); // base64 of [0x01..0x08]
+    }
+
+    #[test]
+    fn test_signature_roundtrip() {
+        let original = NoteSignature {
+            name: "witness.example.com".to_string(),
+            key_id: [0xaa, 0xbb, 0xcc, 0xdd],
+            signature: vec![0x11, 0x22, 0x33, 0x44, 0x55],
+        };
+
+        // Serialize to line
+        let line = original.to_line();
+
+        // Parse back
+        let parsed = NoteSignature::from_line(&line).unwrap();
+
+        // Should match
+        assert_eq!(parsed.name, original.name);
+        assert_eq!(parsed.key_id, original.key_id);
+        assert_eq!(parsed.signature, original.signature);
+    }
+
+    #[test]
+    fn test_signed_note_roundtrip() {
+        let text = "log.example.com\n100\naGVsbG8=\n\n— log.example.com AQIDBAUAAAAA\n— witness AQIDBAYHCAk=\n";
+
+        // Parse
+        let parsed = SignedNote::from_text(text).unwrap();
+
+        // Serialize back
+        let serialized = parsed.to_text();
+
+        // Parse again
+        let reparsed = SignedNote::from_text(&serialized).unwrap();
+
+        // Should match original
+        assert_eq!(reparsed.checkpoint.origin, parsed.checkpoint.origin);
+        assert_eq!(reparsed.checkpoint.tree_size, parsed.checkpoint.tree_size);
+        assert_eq!(reparsed.checkpoint.root_hash, parsed.checkpoint.root_hash);
+        assert_eq!(reparsed.signatures.len(), parsed.signatures.len());
+    }
+
+    #[test]
+    fn test_signed_note_to_text_format() {
+        let checkpoint = LogCheckpoint {
+            origin: "test.log".to_string(),
+            tree_size: 42,
+            root_hash: vec![0xaa, 0xbb],
+            metadata: vec![],
+        };
+
+        let checkpoint_text = checkpoint.to_text();
+
+        let sig = NoteSignature {
+            name: "signer".to_string(),
+            key_id: [1, 2, 3, 4],
+            signature: vec![5, 6],
+        };
+
+        let signed = SignedNote {
+            checkpoint,
+            checkpoint_text,
+            signatures: vec![sig],
+        };
+
+        let text = signed.to_text();
+
+        // Should have checkpoint section
+        assert!(text.contains("test.log"));
+        assert!(text.contains("42"));
+
+        // Should have blank line
+        let parts: Vec<&str> = text.split("\n\n").collect();
+        assert_eq!(parts.len(), 2);
+
+        // Should have signature section
+        assert!(text.contains("— signer"));
     }
 }
