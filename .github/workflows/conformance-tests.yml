@@ -53,8 +53,6 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
 
       - name: Checkout sigstore-conformance
         run: |
@@ -78,109 +76,102 @@ jobs:
           cd sigstore-conformance
           ENTRYPOINT="$(pwd)/../tests/conformance/target/release/sigstore"
 
+          $ENTRYPOINT --help
+
           echo "Running conformance tests with entrypoint: $ENTRYPOINT"
           uv run pytest test/test_bundle.py::test_verify \
             --entrypoint="$ENTRYPOINT" \
             --skip-signing \
-            -v 2>&1 | tee ../conformance-output.txt
+            -v
 
-          # Extract test results
-          cd ..
-          if grep -q "passed" conformance-output.txt; then
-            PASSED=$(grep -oP '\d+(?= passed)' conformance-output.txt | tail -1)
-            FAILED=$(grep -oP '\d+(?= failed)' conformance-output.txt | tail -1 || echo "0")
-            echo "passed=$PASSED" >> $GITHUB_OUTPUT
-            echo "failed=$FAILED" >> $GITHUB_OUTPUT
-          fi
+      # - name: Check test results
+      #   if: always()
+      #   run: |
+      #     if [ -f conformance-output.txt ]; then
+      #       echo "=== Conformance Test Summary ==="
+      #       tail -20 conformance-output.txt
 
-      - name: Check test results
-        if: always()
-        run: |
-          if [ -f conformance-output.txt ]; then
-            echo "=== Conformance Test Summary ==="
-            tail -20 conformance-output.txt
+      #       if grep -q "FAILED" conformance-output.txt; then
+      #         echo ""
+      #         echo "❌ Some conformance tests failed!"
+      #         echo "=== Failed Tests ==="
+      #         grep "FAILED" conformance-output.txt || true
+      #         exit 1
+      #       else
+      #         echo ""
+      #         echo "✅ All conformance tests passed!"
+      #       fi
+      #     fi
 
-            if grep -q "FAILED" conformance-output.txt; then
-              echo ""
-              echo "❌ Some conformance tests failed!"
-              echo "=== Failed Tests ==="
-              grep "FAILED" conformance-output.txt || true
-              exit 1
-            else
-              echo ""
-              echo "✅ All conformance tests passed!"
-            fi
-          fi
+      # - name: Upload conformance test output
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: conformance-test-results
+      #     path: |
+      #       conformance-output.txt
+      #       tests/conformance/target/release/sigstore
+      #     retention-days: 7
 
-      - name: Upload conformance test output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance-test-results
-          path: |
-            conformance-output.txt
-            tests/conformance/target/release/sigstore
-          retention-days: 7
+      # - name: Comment test results on PR
+      #   if: github.event_name == 'pull_request' && always()
+      #   uses: actions/github-script@v7
+      #   with:
+      #     script: |
+      #       const fs = require('fs');
+      #       let output = '';
 
-      - name: Comment test results on PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let output = '';
+      #       try {
+      #         output = fs.readFileSync('conformance-output.txt', 'utf8');
+      #       } catch (err) {
+      #         output = 'Failed to read conformance test output';
+      #       }
 
-            try {
-              output = fs.readFileSync('conformance-output.txt', 'utf8');
-            } catch (err) {
-              output = 'Failed to read conformance test output';
-            }
+      #       // Extract summary
+      #       const lines = output.split('\n');
+      #       const summaryLine = lines.find(l => l.includes('passed'));
 
-            // Extract summary
-            const lines = output.split('\n');
-            const summaryLine = lines.find(l => l.includes('passed'));
+      #       let body = '## 🔍 Conformance Test Results\n\n';
 
-            let body = '## 🔍 Conformance Test Results\n\n';
+      #       if (summaryLine) {
+      #         const passed = summaryLine.match(/(\d+) passed/)?.[1] || '0';
+      #         const failed = summaryLine.match(/(\d+) failed/)?.[1] || '0';
 
-            if (summaryLine) {
-              const passed = summaryLine.match(/(\d+) passed/)?.[1] || '0';
-              const failed = summaryLine.match(/(\d+) failed/)?.[1] || '0';
+      #         if (failed === '0') {
+      #           body += `✅ **All ${passed} conformance tests passed!**\n\n`;
+      #         } else {
+      #           body += `❌ **${failed} test(s) failed, ${passed} passed**\n\n`;
 
-              if (failed === '0') {
-                body += `✅ **All ${passed} conformance tests passed!**\n\n`;
-              } else {
-                body += `❌ **${failed} test(s) failed, ${passed} passed**\n\n`;
+      #           // Add failed test details
+      #           const failedTests = lines.filter(l => l.includes('FAILED'));
+      #           if (failedTests.length > 0) {
+      #             body += '### Failed Tests:\n```\n';
+      #             body += failedTests.slice(0, 10).join('\n');
+      #             if (failedTests.length > 10) {
+      #               body += `\n... and ${failedTests.length - 10} more`;
+      #             }
+      #             body += '\n```\n';
+      #           }
+      #         }
+      #       } else {
+      #         body += '⚠️ Could not parse test results\n';
+      #       }
 
-                // Add failed test details
-                const failedTests = lines.filter(l => l.includes('FAILED'));
-                if (failedTests.length > 0) {
-                  body += '### Failed Tests:\n```\n';
-                  body += failedTests.slice(0, 10).join('\n');
-                  if (failedTests.length > 10) {
-                    body += `\n... and ${failedTests.length - 10} more`;
-                  }
-                  body += '\n```\n';
-                }
-              }
-            } else {
-              body += '⚠️ Could not parse test results\n';
-            }
+      #       body += '\n<details>\n<summary>Full output (last 50 lines)</summary>\n\n```\n';
+      #       body += lines.slice(-50).join('\n');
+      #       body += '\n```\n</details>';
 
-            body += '\n<details>\n<summary>Full output (last 50 lines)</summary>\n\n```\n';
-            body += lines.slice(-50).join('\n');
-            body += '\n```\n</details>';
+      #       github.rest.issues.createComment({
+      #         issue_number: context.issue.number,
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         body: body
+      #       });
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-
-      - name: Test summary
-        if: success()
-        run: |
-          echo "✅ Conformance Test Summary:"
-          echo "  - All conformance tests passed"
-          echo "  - Binary: tests/conformance/target/release/sigstore"
-          echo "  - Test suite: sigstore-conformance"
+      # - name: Test summary
+      #   if: success()
+      #   run: |
+      #     echo "✅ Conformance Test Summary:"
+      #     echo "  - All conformance tests passed"
+      #     echo "  - Binary: tests/conformance/target/release/sigstore"
+      #     echo "  - Test suite: sigstore-conformance"
