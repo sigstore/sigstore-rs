@@ -73,12 +73,14 @@ jobs:
       - name: Run conformance tests
         id: conformance
         run: |
-          cd sigstore-conformance
-          ENTRYPOINT="$(pwd)/../tests/conformance/target/release/sigstore"
+          export ENTRYPOINT=$(pwd)/tests/conformance/target/release/sigstore
 
-          $ENTRYPOINT --help
+          cd sigstore-conformance
 
           echo "Running conformance tests with entrypoint: $ENTRYPOINT"
+
+          $ENTRYPOINT help
+
           uv run pytest test/test_bundle.py::test_verify \
             --entrypoint="$ENTRYPOINT" \
             --skip-signing \
