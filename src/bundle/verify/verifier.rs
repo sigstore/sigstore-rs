@@ -333,7 +333,7 @@ impl Verifier {
                 inclusion_proof.log_index as u64,
                 inclusion_proof.tree_size as u64,
                 &leaf_hash,
-                &proof_hashes,
+                roof_hashes,
                 &root_hash,
             )
             .map_err(|e| SignatureErrorKind::TransparencyLogError(e.to_string()))?;
@@ -367,7 +367,7 @@ impl Verifier {
                 // Verify the checkpoint root hash matches the inclusion proof root hash
                 // This check applies to both Rekor v1 and v2
                 debug!("verifying checkpoint root hash against inclusion proof root hash");
-                signed_note.verify_root_hash(&root_hash).map_err(|e| {
+                signed_note.verify_root_hash(root_hash).map_err(|e| {
                     SignatureErrorKind::TransparencyLogError(format!(
                         "checkpoint root hash mismatch: {}",
                         e

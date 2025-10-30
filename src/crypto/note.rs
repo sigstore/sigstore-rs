@@ -149,7 +149,7 @@ impl LogCheckpoint {
     /// 1. Origin
     /// 2. Tree size (integer)
     /// 3. Root hash (base64)
-    /// 4+ Optional metadata
+    /// 4. .. and following lines: More optional metadata
     pub fn from_text(text: &str) -> Result<Self, NoteError> {
         let lines: Vec<&str> = text.lines().collect();
 

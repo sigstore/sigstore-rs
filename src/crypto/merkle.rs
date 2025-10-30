@@ -39,7 +39,7 @@ use crate::errors::{Result, SigstoreError};
 /// ```
 pub fn leaf_hash(data: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
-    hasher.update(&[0x00]); // Leaf prefix
+    hasher.update([0x00]); // Leaf prefix
     hasher.update(data);
     hasher.finalize().to_vec()
 }
@@ -61,7 +61,7 @@ pub fn leaf_hash(data: &[u8]) -> Vec<u8> {
 /// ```
 pub fn node_hash(left: &[u8], right: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
-    hasher.update(&[0x01]); // Node prefix
+    hasher.update([0x01]); // Node prefix
     hasher.update(left);
     hasher.update(right);
     hasher.finalize().to_vec()
