@@ -38,6 +38,11 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use thiserror::Error;
 
+/// Simple hex encoding helper (to avoid dependency on hex crate)
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 /// Errors that can occur when parsing or verifying notes.
 #[derive(Error, Debug)]
 pub enum NoteError {
@@ -300,8 +305,8 @@ impl SignedNote {
     pub fn verify_root_hash(&self, expected_root_hash: &[u8]) -> Result<(), NoteError> {
         if self.checkpoint.root_hash != expected_root_hash {
             return Err(NoteError::RootHashMismatch {
-                expected: hex::encode(expected_root_hash),
-                actual: hex::encode(&self.checkpoint.root_hash),
+                expected: encode_hex(expected_root_hash),
+                actual: encode_hex(&self.checkpoint.root_hash),
             });
         }
         Ok(())
