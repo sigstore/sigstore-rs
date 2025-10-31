@@ -84,6 +84,7 @@ verify = [
     "dep:hex",
     "dep:json-syntax",
     "dep:sigstore_protobuf_specs",
+    "dep:olpc-cjson",
     "fulcio",
     "rekor",
 ]
