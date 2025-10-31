@@ -320,6 +320,16 @@ impl CheckedBundle {
         self.dsse_envelope.is_some()
     }
 
+    /// Returns a reference to the signing certificate.
+    pub fn certificate(&self) -> &Certificate {
+        &self.certificate
+    }
+
+    /// Returns a reference to the DSSE envelope, if present.
+    pub fn dsse_envelope(&self) -> Option<&sigstore_protobuf_specs::io::intoto::Envelope> {
+        self.dsse_envelope.as_ref()
+    }
+
     /// Retrieves and checks consistency of the bundle's [TransparencyLogEntry].
     ///
     /// # Arguments

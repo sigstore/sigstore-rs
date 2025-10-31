@@ -128,7 +128,7 @@ impl Verifier {
         bundle: Bundle,
         policy: &P,
         offline: bool,
-    ) -> VerificationResult
+    ) -> Result<CheckedBundle, VerificationError>
     where
         P: VerificationPolicy,
     {
@@ -174,7 +174,7 @@ impl Verifier {
         bundle: Bundle,
         policy: &P,
         offline: bool,
-    ) -> VerificationResult
+    ) -> Result<CheckedBundle, VerificationError>
     where
         P: VerificationPolicy,
     {
@@ -605,7 +605,7 @@ impl Verifier {
         debug!("data signed during validity period");
 
         debug!("successfully verified!");
-        Ok(())
+        Ok(materials)
     }
 
     /// Verifies an input against the given Sigstore Bundle, ensuring conformance to the provided
@@ -616,7 +616,7 @@ impl Verifier {
         bundle: Bundle,
         policy: &P,
         offline: bool,
-    ) -> VerificationResult
+    ) -> Result<CheckedBundle, VerificationError>
     where
         R: AsyncRead + Unpin + Send,
         P: VerificationPolicy,
@@ -684,7 +684,7 @@ pub mod blocking {
             bundle: Bundle,
             policy: &P,
             offline: bool,
-        ) -> VerificationResult
+        ) -> Result<CheckedBundle, VerificationError>
         where
             P: VerificationPolicy,
         {
@@ -705,7 +705,7 @@ pub mod blocking {
             bundle: Bundle,
             policy: &P,
             offline: bool,
-        ) -> VerificationResult
+        ) -> Result<CheckedBundle, VerificationError>
         where
             P: VerificationPolicy,
         {
@@ -723,7 +723,7 @@ pub mod blocking {
             bundle: Bundle,
             policy: &P,
             offline: bool,
-        ) -> VerificationResult
+        ) -> Result<CheckedBundle, VerificationError>
         where
             R: Read,
             P: VerificationPolicy,
