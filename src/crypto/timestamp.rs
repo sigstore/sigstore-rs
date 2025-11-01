@@ -446,18 +446,18 @@ pub fn verify_timestamp_response(
         }
     }
 
-    // Full chain validation using webpki (disabled due to compatibility issues)
+    // Full chain validation using webpki
     //
-    // NOTE: We now validate embedded TSA certificates by comparing their identity
-    // (subject, issuer, serial number) with the trusted TSA certificate above.
-    // This prevents accepting timestamps from untrusted TSAs.
+    // FIXED: The cryptographic-message-syntax crate has been updated to preserve original
+    // certificate bytes during extraction from CMS SignedData. This fixes the issue where
+    // certificates were being re-encoded with added NULL parameters in signature algorithms,
+    // which caused webpki to reject them. With this fix, webpki can now properly validate
+    // the certificate chains.
     //
-    // TODO: Re-enable full chain validation once webpki signature algorithm compatibility
-    // issues are resolved. The current issue is that webpki rejects ECDSA certificates
-    // with NULL parameters in the signature algorithm OID, which is technically non-standard
-    // but appears in some certificates. Full chain validation would provide additional
-    // security by verifying the entire certificate chain to a root CA.
-    if false && has_embedded_certs && !opts.roots.is_empty() {
+    // The fix uses bcder's capture() API to preserve the original DER bytes instead of
+    // re-encoding certificates during extraction. See:
+    // https://github.com/wolfv/cryptography-rs/tree/fix-certificate-corruption
+    if has_embedded_certs && !opts.roots.is_empty() {
         tracing::debug!(
             "Starting TSA certificate chain validation with {} trusted roots",
             opts.roots.len()

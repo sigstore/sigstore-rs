@@ -114,7 +114,7 @@ crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",
 ] }
-cryptographic-message-syntax = { version = "0.28", default-features = false, optional = true }
+cryptographic-message-syntax = { git = "https://github.com/wolfv/cryptography-rs", branch = "fix-certificate-corruption", default-features = false, optional = true }
 digest = { version = "0.10", default-features = false }
 ecdsa = { version = "0.16", default-features = false, features = [
     "der",
@@ -217,7 +217,7 @@ x509-cert = { version = "0.2", default-features = false, features = [
     "sct",
     "std",
 ] }
-x509-certificate = "0.25.0"
+x509-certificate = { git = "https://github.com/wolfv/cryptography-rs", branch = "fix-certificate-corruption" }
 zeroize = { version = "1.8", default-features = false }
 
 [dev-dependencies]
