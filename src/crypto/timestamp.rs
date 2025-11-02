@@ -17,7 +17,7 @@
 use chrono::{DateTime, Utc};
 use cmpv2::status::PkiStatus;
 use cms::cert::CertificateChoices;
-use cms::signed_data::{SignedData, SignerIdentifier, SignerInfo};
+use cms::signed_data::{SignedData, SignerIdentifier};
 use pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 use x509_cert::der::{Decode, Encode};
@@ -252,7 +252,7 @@ pub fn verify_timestamp_response(
         .value();  // Get the value bytes from the Any (OCTET STRING content)
 
     tracing::debug!("Starting CMS signature verification");
-    verify_cms_signature(&signed_data, tst_info_der)?;
+    verify_cms_signature(&signed_data, tst_info_der, timestamp_response_bytes)?;
     tracing::debug!("CMS signature verification completed successfully");
 
     // TODO: Validate certificate chain using webpki
@@ -527,10 +527,222 @@ fn verify_ecdsa_signature(
     Ok(())
 }
 
+/// Extract the raw signed_attrs bytes from the timestamp DER encoding.
+/// This function manually parses the DER structure to get the original bytes
+/// without re-encoding, which is critical for signature verification.
+///
+/// The signed_attrs field is stored with context-specific tag 0xA0 in the SignerInfo,
+/// but for signature verification it needs to be replaced with SET tag 0x31.
+fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, TimestampError> {
+    use x509_cert::der::{SliceReader, Reader};
+
+    // TimeStampResp is a SEQUENCE
+    let mut reader = SliceReader::new(timestamp_der).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to create reader: {}", e))
+    })?;
+
+    // Parse outer TimeStampResp structure to find the ContentInfo (time_stamp_token)
+    // We need to manually navigate through:
+    // TimeStampResp ::= SEQUENCE {
+    //   status PKIStatusInfo,
+    //   timeStampToken TimeStampToken OPTIONAL }
+    // where TimeStampToken ::= ContentInfo
+
+    // Read the SEQUENCE header
+    let _header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode header: {}", e))
+    })?;
+
+    // First field is PKIStatusInfo (SEQUENCE)
+    let status_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode status header: {}", e))
+    })?;
+
+    // Skip the status bytes
+    reader.read_slice(status_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip status: {}", e))
+    })?;
+
+    // Now we should be at the ContentInfo (SignedData wrapper)
+    // ContentInfo ::= SEQUENCE {
+    //   contentType OBJECT IDENTIFIER,
+    //   content [0] EXPLICIT ANY DEFINED BY contentType }
+
+    let content_info_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode ContentInfo header: {}", e))
+    })?;
+
+    // Read the OID
+    let oid_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode OID header: {}", e))
+    })?;
+    reader.read_slice(oid_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip OID: {}", e))
+    })?;
+
+    // Read the [0] EXPLICIT tag
+    let explicit_tag_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode explicit tag: {}", e))
+    })?;
+
+    // Now we're at the SignedData SEQUENCE
+    let _signed_data_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode SignedData header: {}", e))
+    })?;
+
+    // SignedData ::= SEQUENCE {
+    //   version CMSVersion,
+    //   digestAlgorithms SET OF DigestAlgorithmIdentifier,
+    //   encapContentInfo EncapsulatedContentInfo,
+    //   certificates [0] IMPLICIT CertificateSet OPTIONAL,
+    //   crls [1] IMPLICIT RevocationInfoChoices OPTIONAL,
+    //   signerInfos SignerInfos }
+
+    // Skip version (INTEGER)
+    let version_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode version: {}", e))
+    })?;
+    reader.read_slice(version_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip version: {}", e))
+    })?;
+
+    // Skip digestAlgorithms (SET OF)
+    let digest_algs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode digestAlgorithms: {}", e))
+    })?;
+    reader.read_slice(digest_algs_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip digestAlgorithms: {}", e))
+    })?;
+
+    // Skip encapContentInfo (SEQUENCE)
+    let encap_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode encapContentInfo: {}", e))
+    })?;
+    reader.read_slice(encap_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip encapContentInfo: {}", e))
+    })?;
+
+    // Check for optional certificates [0]
+    if let Some(byte) = reader.peek_byte() {
+        if byte == 0xA0 {
+            let cert_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!("failed to decode certificates: {}", e))
+            })?;
+            reader.read_slice(cert_header.length).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!("failed to skip certificates: {}", e))
+            })?;
+        }
+    }
+
+    // Check for optional crls [1]
+    if let Some(byte) = reader.peek_byte() {
+        if byte == 0xA1 {
+            let crl_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!("failed to decode CRLs: {}", e))
+            })?;
+            reader.read_slice(crl_header.length).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!("failed to skip CRLs: {}", e))
+            })?;
+        }
+    }
+
+    // Now we're at signerInfos (SET OF SignerInfo)
+    let _signer_infos_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode signerInfos: {}", e))
+    })?;
+
+    // Read the first SignerInfo SEQUENCE
+    let _signer_info_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode SignerInfo: {}", e))
+    })?;
+
+    // SignerInfo ::= SEQUENCE {
+    //   version CMSVersion,
+    //   sid SignerIdentifier,
+    //   digestAlgorithm DigestAlgorithmIdentifier,
+    //   signedAttrs [0] IMPLICIT SignedAttributes OPTIONAL,
+    //   ...
+
+    // Skip version
+    let si_version_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode SignerInfo version: {}", e))
+    })?;
+    reader.read_slice(si_version_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip SignerInfo version: {}", e))
+    })?;
+
+    // Skip sid (SignerIdentifier - either SEQUENCE or [0] IMPLICIT)
+    let sid_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode sid: {}", e))
+    })?;
+    reader.read_slice(sid_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip sid: {}", e))
+    })?;
+
+    // Skip digestAlgorithm (SEQUENCE)
+    let digest_alg_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to decode digestAlgorithm: {}", e))
+    })?;
+    reader.read_slice(digest_alg_header.length).map_err(|e| {
+        TimestampError::SignatureVerificationError(format!("failed to skip digestAlgorithm: {}", e))
+    })?;
+
+    // Now we should be at signedAttrs [0] IMPLICIT
+    if let Some(byte) = reader.peek_byte() {
+        if byte == 0xA0 {
+            // Found signed_attrs!
+            // We need to capture this INCLUDING the tag and length, but then replace 0xA0 with 0x31
+            let start_offset_len = reader.position();
+            let start_offset: u32 = start_offset_len.into();
+            let start_offset = start_offset as usize;
+
+            let signed_attrs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!("failed to decode signedAttrs: {}", e))
+            })?;
+
+            // Calculate total length including tag and length bytes
+            let current_pos_len = reader.position();
+            let current_pos: u32 = current_pos_len.into();
+            let current_pos = current_pos as usize;
+            let header_len = current_pos - start_offset;
+
+            // Convert Length to usize for indexing
+            let content_len: u32 = signed_attrs_header.length.into();
+            let content_len = content_len as usize;
+
+            // Get the actual signed_attrs bytes directly from the timestamp_der slice
+            // We know the start_offset and the total length (header + content)
+            let total_len = header_len + content_len;
+
+            if start_offset + total_len > timestamp_der.len() {
+                return Err(TimestampError::SignatureVerificationError(
+                    "signed_attrs extends beyond timestamp data".to_string(),
+                ));
+            }
+
+            // Extract the signed_attrs bytes directly from the slice
+            let mut signed_attrs_bytes = timestamp_der[start_offset..start_offset + total_len].to_vec();
+
+            // Replace the context-specific tag 0xA0 with SET tag 0x31
+            // RFC 5652 Section 5.4: For signature verification, use SET tag
+            if !signed_attrs_bytes.is_empty() && signed_attrs_bytes[0] == 0xA0 {
+                signed_attrs_bytes[0] = 0x31;
+            }
+
+            return Ok(signed_attrs_bytes);
+        }
+    }
+
+    Err(TimestampError::SignatureVerificationError(
+        "signed_attrs not found in SignerInfo".to_string(),
+    ))
+}
+
 /// Verify the CMS signature in the SignedData.
 fn verify_cms_signature(
     signed_data: &SignedData,
     tst_info_der: &[u8],
+    timestamp_der: &[u8],
 ) -> Result<(), TimestampError> {
     // Extract certificates from the SignedData
     let certificates = extract_certificates(signed_data)?;
@@ -570,27 +782,16 @@ fn verify_cms_signature(
         // Verify the message-digest attribute matches the TSTInfo content
         verify_message_digest_attribute(signed_attrs, tst_info_der)?;
 
-        // The signature is over the DER encoding of signed_attrs with tag 0x31 (SET OF)
-        // When encoding for signature verification, we need to use SET OF tag
-        let mut signed_attrs_der = signed_attrs.to_der().map_err(|e| {
-            TimestampError::SignatureVerificationError(format!(
-                "failed to encode signed_attrs: {}",
-                e
-            ))
-        })?;
+        // CRITICAL: We need to use the ORIGINAL bytes from the SignedData structure,
+        // not re-encode the parsed structure. Re-encoding can introduce subtle differences.
+        // We need to extract the raw signed_attrs bytes from the original DER encoding.
 
-        tracing::debug!("signed_attrs DER length: {}, first bytes: {}",
+        // Parse the SignedData structure manually to extract raw signed_attrs bytes
+        let signed_attrs_der = extract_signed_attrs_bytes(timestamp_der)?;
+
+        tracing::debug!("Extracted signed_attrs DER length: {}, first bytes: {}",
             signed_attrs_der.len(),
             hex::encode(&signed_attrs_der[..signed_attrs_der.len().min(32)]));
-
-        // RFC 5652 Section 5.4: The message digest is computed on the DER encoding of the
-        // signedAttrs field, including the tag and length octets. For the purpose of computing
-        // the digest, the DER encoding uses the tag value 0x31 (SET OF) rather than the
-        // context-specific tag (0xA0) that appears in the actual encoding.
-        if !signed_attrs_der.is_empty() && signed_attrs_der[0] == 0xa0 {
-            tracing::debug!("Replacing tag 0xA0 with 0x31 for signature verification");
-            signed_attrs_der[0] = 0x31;
-        }
 
         // Determine hash algorithm from digest_alg
         let digest_alg_oid = signer_info.digest_alg.oid.to_string();
