@@ -176,6 +176,7 @@ pub(crate) mod certificate;
 #[cfg(feature = "cert")]
 pub(crate) mod certificate_pool;
 #[cfg(feature = "cert")]
+#[allow(unused_imports)]
 pub(crate) use certificate_pool::CertificatePool;
 #[cfg(feature = "cert")]
 pub(crate) mod keyring;

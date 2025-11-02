@@ -21,11 +21,13 @@ use crate::errors::{Result as SigstoreResult, SigstoreError};
 
 /// A collection of trusted root certificates.
 #[derive(Default, Debug)]
+#[allow(dead_code)]
 pub(crate) struct CertificatePool {
     trusted_roots: Vec<TrustAnchor<'static>>,
     intermediates: Vec<CertificateDer<'static>>,
 }
 
+#[allow(dead_code)]
 impl CertificatePool {
     /// Builds a `CertificatePool` instance using the provided list of [`Certificate`].
     pub(crate) fn from_certificates<'r, 'i, R, I>(

@@ -16,7 +16,7 @@ default = ["full", "native-tls"]
 
 bundle = ["sign", "verify"]
 cached-client = ["dep:cached"]
-cert = ["dep:aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+cert = ["dep:aws-lc-rs", "dep:hex", "rustls-webpki/aws-lc-rs"]
 cosign = [
     "cert",
     "dep:async-trait",

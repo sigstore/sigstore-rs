@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Keyring is used by multiple features (sign, verify, etc.)
+// Allow dead code when only 'cert' feature is enabled
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};

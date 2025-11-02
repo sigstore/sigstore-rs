@@ -13,6 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Certificate functions are used by multiple features (cosign, verify, etc.)
+// Allow dead code when only 'cert' feature is enabled
+#![allow(dead_code)]
+
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 use x509_cert::{
