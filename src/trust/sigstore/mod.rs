@@ -346,6 +346,34 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
 
         Ok(root_certs)
     }
+
+    fn tsa_intermediate_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get intermediate certificates (all certs except first and last) from timestamp authorities
+        let intermediate_certs: Vec<_> = self
+            .trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter(|ca| is_timerange_valid(ca.valid_for.as_ref(), true))
+            .filter_map(|ca| {
+                let cert_chain = ca.cert_chain.as_ref()?;
+                if cert_chain.certificates.len() <= 2 {
+                    // No intermediates if chain has 2 or fewer certs (leaf + root)
+                    return None;
+                }
+                // Get all certs except first (leaf) and last (root)
+                Some(cert_chain.certificates[1..cert_chain.certificates.len() - 1].iter())
+            })
+            .flatten()
+            .map(|cert| CertificateDer::from(cert.raw_bytes.as_slice()).into_owned())
+            .collect();
+
+        tracing::debug!(
+            "Extracted {} TSA intermediate certificates for chain validation",
+            intermediate_certs.len()
+        );
+
+        Ok(intermediate_certs)
+    }
 }
 
 /// Given a `range`, checks that the the current time is not before `start`. If

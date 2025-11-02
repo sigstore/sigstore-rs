@@ -20,8 +20,8 @@ use cms::cert::CertificateChoices;
 use cms::signed_data::{SignedData, SignerIdentifier};
 use pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
-use x509_cert::der::{Decode, Encode};
 use x509_cert::Certificate;
+use x509_cert::der::{Decode, Encode};
 use x509_tsp::{TimeStampResp, TstInfo};
 
 // TimeStamping Extended Key Usage OID (1.3.6.1.5.5.7.3.8)
@@ -69,14 +69,13 @@ impl<'a> TimeStampResponse<'a> {
 
     /// Extract the TSTInfo from the SignedData.
     fn tst_info(&self) -> Result<Option<TstInfo>, String> {
-        use x509_cert::der::{Decode};
+        use x509_cert::der::Decode;
 
         // OID for id-ct-TSTInfo (1.2.840.113549.1.9.16.1.4)
         const OID_CONTENT_TYPE_TST_INFO: &str = "1.2.840.113549.1.9.16.1.4";
 
         if let Some(signed_data) = self.signed_data()? {
-            if signed_data.encap_content_info.econtent_type.to_string()
-                == OID_CONTENT_TYPE_TST_INFO
+            if signed_data.encap_content_info.econtent_type.to_string() == OID_CONTENT_TYPE_TST_INFO
             {
                 if let Some(content) = signed_data.encap_content_info.econtent {
                     // The content is an Any wrapping an OCTET STRING that contains the TSTInfo
@@ -131,6 +130,9 @@ pub enum TimestampError {
 
     #[error("timestamp is outside validity period")]
     OutsideValidityPeriod,
+
+    #[error("TSA certificate validation failed: {0}")]
+    CertificateValidationError(String),
 }
 
 /// Verification options for RFC 3161 timestamps.
@@ -184,8 +186,9 @@ pub fn verify_timestamp_response(
     const OID_CONTENT_TYPE_TST_INFO: &str = "1.2.840.113549.1.9.16.1.4";
 
     // Parse the TimeStampResponse using der
-    let tsr = TimeStampResp::from_der(timestamp_response_bytes)
-        .map_err(|e| TimestampError::ParseError(format!("failed to decode TimeStampResp: {}", e)))?;
+    let tsr = TimeStampResp::from_der(timestamp_response_bytes).map_err(|e| {
+        TimestampError::ParseError(format!("failed to decode TimeStampResp: {}", e))
+    })?;
 
     let response = TimeStampResponse::from(tsr);
 
@@ -219,8 +222,11 @@ pub fn verify_timestamp_response(
     // Extract the timestamp from TSTInfo
     // The gen_time field is a GeneralizedTimeNanos - convert to DateTime<Utc>
     let unix_duration = tst_info.gen_time.to_unix_duration();
-    let timestamp = DateTime::from_timestamp(unix_duration.as_secs() as i64, unix_duration.subsec_nanos())
-        .ok_or(TimestampError::ParseError("invalid timestamp in TSTInfo".to_string()))?;
+    let timestamp =
+        DateTime::from_timestamp(unix_duration.as_secs() as i64, unix_duration.subsec_nanos())
+            .ok_or(TimestampError::ParseError(
+                "invalid timestamp in TSTInfo".to_string(),
+            ))?;
 
     // Check that the timestamp is within the TSA validity period in the trusted root
     if let Some((start, end)) = opts.tsa_valid_for {
@@ -249,20 +255,137 @@ pub fn verify_timestamp_response(
         .econtent
         .as_ref()
         .ok_or(TimestampError::NoTstInfo)?
-        .value();  // Get the value bytes from the Any (OCTET STRING content)
+        .value(); // Get the value bytes from the Any (OCTET STRING content)
 
     tracing::debug!("Starting CMS signature verification");
-    verify_cms_signature(&signed_data, tst_info_der, timestamp_response_bytes, &opts)?;
+    let signer_cert =
+        verify_cms_signature(&signed_data, tst_info_der, timestamp_response_bytes, &opts)?;
     tracing::debug!("CMS signature verification completed successfully");
 
-    // TODO: Validate certificate chain using webpki
-    // This will require:
-    // 1. Building a certificate chain from the signer cert to a trusted root
-    // 2. Verifying the chain is valid at the timestamp
-    // 3. Checking the TimeStamping EKU (1.3.6.1.5.5.7.3.8) is present
-    tracing::debug!("Certificate chain validation not yet implemented");
+    // Extract intermediate certificates from the SignedData for chain validation
+    let embedded_certs = extract_certificates(&signed_data);
+
+    // Validate certificate chain using webpki
+    tracing::debug!("Starting TSA certificate chain validation");
+    validate_tsa_certificate_chain(&signer_cert, timestamp, &opts, &embedded_certs)?;
+    tracing::debug!("TSA certificate chain validation completed successfully");
 
     Ok(TimestampResult { time: timestamp })
+}
+
+/// Validate the TSA certificate chain.
+/// Verifies that:
+/// 1. The certificate chains to a trusted root
+/// 2. The certificate was valid at the timestamp time
+/// 3. The certificate has the TimeStamping Extended Key Usage
+fn validate_tsa_certificate_chain(
+    signer_cert: &Certificate,
+    timestamp: DateTime<Utc>,
+    opts: &VerifyOpts,
+    embedded_certs: &[Certificate],
+) -> Result<(), TimestampError> {
+    use pki_types::{CertificateDer, UnixTime};
+    use webpki::{EndEntityCert, KeyUsage};
+
+    // If no roots are provided, skip certificate chain validation
+    if opts.roots.is_empty() {
+        tracing::debug!("No trusted roots provided, skipping certificate chain validation");
+        return Ok(());
+    }
+
+    // Convert the signer certificate to DER format for webpki
+    let signer_cert_der = signer_cert.to_der().map_err(|e| {
+        TimestampError::CertificateValidationError(format!(
+            "failed to encode signer certificate to DER: {}",
+            e
+        ))
+    })?;
+
+    let signer_cert_der = CertificateDer::from(signer_cert_der);
+    let end_entity_cert = EndEntityCert::try_from(&signer_cert_der).map_err(|e| {
+        TimestampError::CertificateValidationError(format!(
+            "failed to parse end-entity certificate: {}",
+            e
+        ))
+    })?;
+
+    // Build trust anchors from the provided roots
+    let trust_anchors: Vec<_> = opts
+        .roots
+        .iter()
+        .map(|cert| {
+            webpki::anchor_from_trusted_cert(cert)
+                .map(|anchor| anchor.to_owned())
+                .map_err(|e| {
+                    TimestampError::CertificateValidationError(format!(
+                        "failed to create trust anchor: {}",
+                        e
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Convert embedded certificates to DER format for use as intermediates
+    // Filter out the signer cert itself - we only want intermediate CAs
+    let mut intermediate_ders: Vec<CertificateDer<'static>> = Vec::new();
+
+    for cert in embedded_certs {
+        // Skip the signer certificate itself
+        if cert == signer_cert {
+            continue;
+        }
+
+        let cert_der = cert.to_der().map_err(|e| {
+            TimestampError::CertificateValidationError(format!(
+                "failed to encode embedded certificate to DER: {}",
+                e
+            ))
+        })?;
+        intermediate_ders.push(CertificateDer::from(cert_der).into_owned());
+    }
+
+    // Add intermediates from opts
+    intermediate_ders.extend(opts.intermediates.iter().map(|c| c.clone().into_owned()));
+
+    tracing::debug!(
+        "Using {} embedded intermediate cert(s) + {} provided intermediate cert(s)",
+        embedded_certs.len().saturating_sub(1), // -1 for signer cert
+        opts.intermediates.len()
+    );
+
+    // Convert timestamp to UnixTime for webpki
+    let verification_time =
+        UnixTime::since_unix_epoch(std::time::Duration::from_secs(timestamp.timestamp() as u64));
+
+    tracing::debug!(
+        "Verifying certificate chain at timestamp: {} (unix: {})",
+        timestamp,
+        timestamp.timestamp()
+    );
+
+    // Verify the certificate chain with TimeStamping EKU
+    let signing_algs = webpki::ALL_VERIFICATION_ALGS;
+
+    end_entity_cert
+        .verify_for_usage(
+            signing_algs,
+            &trust_anchors,
+            &intermediate_ders,
+            verification_time,
+            KeyUsage::required(ID_KP_TIME_STAMPING),
+            None,
+            None,
+        )
+        .map_err(|e| {
+            TimestampError::CertificateValidationError(format!(
+                "TSA certificate chain validation failed: {}",
+                e
+            ))
+        })?;
+
+    tracing::debug!("TSA certificate chain validated successfully");
+
+    Ok(())
 }
 
 /// Extract certificates from SignedData.
@@ -317,7 +440,11 @@ fn find_signer_certificate<'a>(
                         // OID for SubjectKeyIdentifier: 2.5.29.14
                         if ext.extn_id.to_string() == "2.5.29.14" {
                             // Decode the extension value as SubjectKeyIdentifier
-                            if let Ok(cert_ski) = x509_cert::ext::pkix::SubjectKeyIdentifier::from_der(ext.extn_value.as_bytes()) {
+                            if let Ok(cert_ski) =
+                                x509_cert::ext::pkix::SubjectKeyIdentifier::from_der(
+                                    ext.extn_value.as_bytes(),
+                                )
+                            {
                                 if &cert_ski == ski {
                                     return Ok(cert);
                                 }
@@ -372,8 +499,7 @@ fn verify_message_digest_attribute(
             e
         ))
     })?;
-    let message_digest_octets = OctetStringRef::from_der(&message_digest_der)
-    .map_err(|e| {
+    let message_digest_octets = OctetStringRef::from_der(&message_digest_der).map_err(|e| {
         TimestampError::SignatureVerificationError(format!(
             "failed to decode message-digest as OCTET STRING: {}",
             e
@@ -448,7 +574,9 @@ fn verify_ecdsa_signature(
                             Ok(s) => s,
                             Err(_) => {
                                 // If DER parsing fails, try raw signature bytes (64 bytes for P-256)
-                                tracing::debug!("DER signature parsing failed, trying raw signature format");
+                                tracing::debug!(
+                                    "DER signature parsing failed, trying raw signature format"
+                                );
                                 P256Signature::from_bytes(signature.into()).map_err(|e| {
                                     TimestampError::SignatureVerificationError(format!(
                                         "failed to parse P-256 signature (raw): {}",
@@ -468,12 +596,14 @@ fn verify_ecdsa_signature(
                         let mut field_bytes = p256::FieldBytes::default();
                         field_bytes.copy_from_slice(message);
 
-                        verifying_key.verify_prehash(&field_bytes, &sig).map_err(|e| {
-                            TimestampError::SignatureVerificationError(format!(
-                                "P-256 signature verification failed: {}",
-                                e
-                            ))
-                        })?;
+                        verifying_key
+                            .verify_prehash(&field_bytes, &sig)
+                            .map_err(|e| {
+                                TimestampError::SignatureVerificationError(format!(
+                                    "P-256 signature verification failed: {}",
+                                    e
+                                ))
+                            })?;
                     }
                     "1.3.132.0.34" => {
                         // secp384r1 (P-384)
@@ -491,7 +621,9 @@ fn verify_ecdsa_signature(
                             Ok(s) => s,
                             Err(_) => {
                                 // If DER parsing fails, try raw signature bytes (96 bytes for P-384)
-                                tracing::debug!("DER signature parsing failed, trying raw signature format");
+                                tracing::debug!(
+                                    "DER signature parsing failed, trying raw signature format"
+                                );
                                 P384Signature::from_bytes(signature.into()).map_err(|e| {
                                     TimestampError::SignatureVerificationError(format!(
                                         "failed to parse P-384 signature (raw): {}",
@@ -515,12 +647,14 @@ fn verify_ecdsa_signature(
                             )));
                         }
 
-                        verifying_key.verify_prehash(&field_bytes, &sig).map_err(|e| {
-                            TimestampError::SignatureVerificationError(format!(
-                                "P-384 signature verification failed: {}",
-                                e
-                            ))
-                        })?;
+                        verifying_key
+                            .verify_prehash(&field_bytes, &sig)
+                            .map_err(|e| {
+                                TimestampError::SignatureVerificationError(format!(
+                                    "P-384 signature verification failed: {}",
+                                    e
+                                ))
+                            })?;
                     }
                     _ => {
                         return Err(TimestampError::SignatureVerificationError(format!(
@@ -553,7 +687,7 @@ fn verify_ecdsa_signature(
 /// The signed_attrs field is stored with context-specific tag 0xA0 in the SignerInfo,
 /// but for signature verification it needs to be replaced with SET tag 0x31.
 fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, TimestampError> {
-    use x509_cert::der::{SliceReader, Reader};
+    use x509_cert::der::{Reader, SliceReader};
 
     // TimeStampResp is a SEQUENCE
     let mut reader = SliceReader::new(timestamp_der).map_err(|e| {
@@ -588,7 +722,10 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
     //   content [0] EXPLICIT ANY DEFINED BY contentType }
 
     let content_info_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode ContentInfo header: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode ContentInfo header: {}",
+            e
+        ))
     })?;
 
     // Read the OID
@@ -606,7 +743,10 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
 
     // Now we're at the SignedData SEQUENCE
     let _signed_data_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode SignedData header: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode SignedData header: {}",
+            e
+        ))
     })?;
 
     // SignedData ::= SEQUENCE {
@@ -627,28 +767,46 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
 
     // Skip digestAlgorithms (SET OF)
     let digest_algs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode digestAlgorithms: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode digestAlgorithms: {}",
+            e
+        ))
     })?;
     reader.read_slice(digest_algs_header.length).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to skip digestAlgorithms: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to skip digestAlgorithms: {}",
+            e
+        ))
     })?;
 
     // Skip encapContentInfo (SEQUENCE)
     let encap_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode encapContentInfo: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode encapContentInfo: {}",
+            e
+        ))
     })?;
     reader.read_slice(encap_header.length).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to skip encapContentInfo: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to skip encapContentInfo: {}",
+            e
+        ))
     })?;
 
     // Check for optional certificates [0]
     if let Some(byte) = reader.peek_byte() {
         if byte == 0xA0 {
             let cert_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!("failed to decode certificates: {}", e))
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to decode certificates: {}",
+                    e
+                ))
             })?;
             reader.read_slice(cert_header.length).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!("failed to skip certificates: {}", e))
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to skip certificates: {}",
+                    e
+                ))
             })?;
         }
     }
@@ -684,10 +842,16 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
 
     // Skip version
     let si_version_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode SignerInfo version: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode SignerInfo version: {}",
+            e
+        ))
     })?;
     reader.read_slice(si_version_header.length).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to skip SignerInfo version: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to skip SignerInfo version: {}",
+            e
+        ))
     })?;
 
     // Skip sid (SignerIdentifier - either SEQUENCE or [0] IMPLICIT)
@@ -700,7 +864,10 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
 
     // Skip digestAlgorithm (SEQUENCE)
     let digest_alg_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-        TimestampError::SignatureVerificationError(format!("failed to decode digestAlgorithm: {}", e))
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode digestAlgorithm: {}",
+            e
+        ))
     })?;
     reader.read_slice(digest_alg_header.length).map_err(|e| {
         TimestampError::SignatureVerificationError(format!("failed to skip digestAlgorithm: {}", e))
@@ -716,7 +883,10 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
             let start_offset = start_offset as usize;
 
             let signed_attrs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!("failed to decode signedAttrs: {}", e))
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to decode signedAttrs: {}",
+                    e
+                ))
             })?;
 
             // Calculate total length including tag and length bytes
@@ -740,7 +910,8 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
             }
 
             // Extract the signed_attrs bytes directly from the slice
-            let mut signed_attrs_bytes = timestamp_der[start_offset..start_offset + total_len].to_vec();
+            let mut signed_attrs_bytes =
+                timestamp_der[start_offset..start_offset + total_len].to_vec();
 
             // Replace the context-specific tag 0xA0 with SET tag 0x31
             // RFC 5652 Section 5.4: For signature verification, use SET tag
@@ -758,19 +929,22 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
 }
 
 /// Verify the CMS signature in the SignedData.
+/// Returns the signer certificate for further validation.
 fn verify_cms_signature(
     signed_data: &SignedData,
     tst_info_der: &[u8],
     timestamp_der: &[u8],
     opts: &VerifyOpts,
-) -> Result<(), TimestampError> {
+) -> Result<Certificate, TimestampError> {
     // Extract certificates from the SignedData
     let mut certificates = extract_certificates(signed_data);
 
     // If no certificates are embedded and a TSA certificate is provided, use it
     if certificates.is_empty() {
         if let Some(tsa_cert) = &opts.tsa_certificate {
-            tracing::debug!("No certificates embedded in SignedData, using TSA certificate from VerifyOpts");
+            tracing::debug!(
+                "No certificates embedded in SignedData, using TSA certificate from VerifyOpts"
+            );
             // Convert CertificateDer to Certificate
             let cert = Certificate::from_der(tsa_cert.as_ref()).map_err(|e| {
                 TimestampError::SignatureVerificationError(format!(
@@ -781,12 +955,16 @@ fn verify_cms_signature(
             certificates.push(cert);
         } else {
             return Err(TimestampError::SignatureVerificationError(
-                "no certificates found in SignedData and no TSA certificate provided in VerifyOpts".to_string(),
+                "no certificates found in SignedData and no TSA certificate provided in VerifyOpts"
+                    .to_string(),
             ));
         }
     }
 
-    tracing::debug!("Using {} certificate(s) for verification", certificates.len());
+    tracing::debug!(
+        "Using {} certificate(s) for verification",
+        certificates.len()
+    );
 
     // Get the first (and should be only) SignerInfo
     if signed_data.signer_infos.0.is_empty() {
@@ -803,9 +981,7 @@ fn verify_cms_signature(
     }
 
     let signer_info = signed_data.signer_infos.0.get(0).ok_or_else(|| {
-        TimestampError::SignatureVerificationError(
-            "failed to get first SignerInfo".to_string(),
-        )
+        TimestampError::SignatureVerificationError("failed to get first SignerInfo".to_string())
     })?;
 
     // Find the certificate that matches the SignerIdentifier
@@ -828,9 +1004,11 @@ fn verify_cms_signature(
         // Parse the SignedData structure manually to extract raw signed_attrs bytes
         let signed_attrs_der = extract_signed_attrs_bytes(timestamp_der)?;
 
-        tracing::debug!("Extracted signed_attrs DER length: {}, first bytes: {}",
+        tracing::debug!(
+            "Extracted signed_attrs DER length: {}, first bytes: {}",
             signed_attrs_der.len(),
-            hex::encode(&signed_attrs_der[..signed_attrs_der.len().min(32)]));
+            hex::encode(&signed_attrs_der[..signed_attrs_der.len().min(32)])
+        );
 
         // Determine hash algorithm from digest_alg
         let digest_alg_oid = signer_info.digest_alg.oid.to_string();
@@ -882,7 +1060,7 @@ fn verify_cms_signature(
 
     tracing::debug!("CMS signature verification succeeded");
 
-    Ok(())
+    Ok(signer_cert.clone())
 }
 
 /// Verify that the message imprint in TSTInfo matches the hash of the signature.
@@ -896,10 +1074,7 @@ fn verify_message_imprint(
     let signature_hash = hasher.finalize();
 
     // Get the hash from the message imprint
-    let imprint_hash = tst_info
-        .message_imprint
-        .hashed_message
-        .as_bytes();
+    let imprint_hash = tst_info.message_imprint.hashed_message.as_bytes();
 
     // Compare the hashes
     if &signature_hash[..] != imprint_hash {

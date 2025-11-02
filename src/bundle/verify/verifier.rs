@@ -65,6 +65,7 @@ pub struct Verifier {
     rekor_keyring: Keyring,
     tsa_certs: Vec<TsaCertificate>,
     tsa_root_certs: Vec<CertificateDer<'static>>,
+    tsa_intermediate_certs: Vec<CertificateDer<'static>>,
 }
 
 impl Verifier {
@@ -110,6 +111,13 @@ impl Verifier {
             .map(|cert| cert.into_owned())
             .collect();
 
+        debug!("Fetching TSA intermediate certificates for chain validation");
+        let tsa_intermediate_certs: Vec<CertificateDer<'static>> = trust_repo
+            .tsa_intermediate_certs()?
+            .into_iter()
+            .map(|cert| cert.into_owned())
+            .collect();
+
         Ok(Self {
             rekor_config,
             cert_pool,
@@ -117,6 +125,7 @@ impl Verifier {
             rekor_keyring,
             tsa_certs,
             tsa_root_certs,
+            tsa_intermediate_certs,
         })
     }
 
@@ -261,7 +270,7 @@ impl Verifier {
                         &materials.signature,
                         crate::crypto::timestamp::VerifyOpts {
                             roots: self.tsa_root_certs.clone(),
-                            intermediates: vec![],
+                            intermediates: self.tsa_intermediate_certs.clone(),
                             tsa_certificate: tsa_cert,
                             tsa_valid_for,
                         },

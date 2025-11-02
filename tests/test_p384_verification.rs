@@ -1,6 +1,8 @@
 // Standalone test to verify P-384 ECDSA signature verification
 
-use p384::ecdsa::{Signature as P384Signature, VerifyingKey as P384VerifyingKey, signature::Verifier};
+use p384::ecdsa::{
+    Signature as P384Signature, VerifyingKey as P384VerifyingKey, signature::Verifier,
+};
 
 #[test]
 fn test_p384_signature_verification_standalone() {
@@ -27,8 +29,8 @@ fn test_p384_signature_verification_standalone() {
     println!("Successfully parsed P-384 verifying key");
 
     // Parse the signature
-    let signature = P384Signature::from_der(&signature_bytes)
-        .expect("Failed to parse P-384 signature");
+    let signature =
+        P384Signature::from_der(&signature_bytes).expect("Failed to parse P-384 signature");
 
     println!("Successfully parsed P-384 signature");
 

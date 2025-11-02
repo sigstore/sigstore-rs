@@ -52,6 +52,13 @@ pub trait TrustRoot {
     fn tsa_root_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
         Ok(vec![])
     }
+
+    /// Get TSA intermediate certificates (all certs between leaf and root).
+    /// These should be passed as untrusted intermediates when validating TSA certificate chains.
+    /// Default implementation returns empty vector.
+    fn tsa_intermediate_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
+        Ok(vec![])
+    }
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.

@@ -14,15 +14,15 @@
 
 //! Test for RFC 3161 timestamp verification with real test data.
 
-use sigstore::crypto::timestamp::{verify_timestamp_response, VerifyOpts};
-use std::fs;
 use base64::prelude::*;
+use sigstore::crypto::timestamp::{VerifyOpts, verify_timestamp_response};
+use std::fs;
 
 #[test]
 fn test_timestamp_cms_signature_verification() {
     // Load the timestamp response
-    let timestamp_der = fs::read("tests/data/sigstore_timestamp.der")
-        .expect("Failed to read timestamp file");
+    let timestamp_der =
+        fs::read("tests/data/sigstore_timestamp.der").expect("Failed to read timestamp file");
 
     // The timestamp was created for a signature with this message imprint (from the timestamp):
     // 6ddf31609e2a6c814f8266aab75204b7a1f5e96d1bc07dde6ff39add8408cda2
@@ -45,7 +45,7 @@ fn test_timestamp_cms_signature_verification() {
         roots: vec![], // Empty for now - we'll add if needed
         intermediates: vec![],
         tsa_certificate: None, // Should be embedded in the timestamp
-        tsa_valid_for: None, // Don't check TSA validity period for this test
+        tsa_valid_for: None,   // Don't check TSA validity period for this test
     };
 
     // Verify the timestamp

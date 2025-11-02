@@ -58,7 +58,10 @@ pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
 
     // code signing - use string comparison to avoid const-oid version conflicts
-    let has_code_signing = key_ext_usage.0.iter().any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
+    let has_code_signing = key_ext_usage
+        .0
+        .iter()
+        .any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
     if !has_code_signing {
         return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
@@ -220,7 +223,10 @@ pub(crate) fn is_leaf(
     };
 
     // Check for code signing using string comparison to avoid const-oid version conflicts
-    let has_code_signing = extended_key_usage.0.iter().any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
+    let has_code_signing = extended_key_usage
+        .0
+        .iter()
+        .any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
     if !has_code_signing {
         Err(ExtensionErrorKind::BitUnset(
             "ExtendedKeyUsage.digitalSignature",
