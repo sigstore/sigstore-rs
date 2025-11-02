@@ -252,7 +252,7 @@ pub fn verify_timestamp_response(
         .value();  // Get the value bytes from the Any (OCTET STRING content)
 
     tracing::debug!("Starting CMS signature verification");
-    verify_cms_signature(&signed_data, tst_info_der, timestamp_response_bytes)?;
+    verify_cms_signature(&signed_data, tst_info_der, timestamp_response_bytes, &opts)?;
     tracing::debug!("CMS signature verification completed successfully");
 
     // TODO: Validate certificate chain using webpki
@@ -266,7 +266,8 @@ pub fn verify_timestamp_response(
 }
 
 /// Extract certificates from SignedData.
-fn extract_certificates(signed_data: &SignedData) -> Result<Vec<Certificate>, TimestampError> {
+/// Returns an empty Vec if no certificates are embedded (caller should handle this).
+fn extract_certificates(signed_data: &SignedData) -> Vec<Certificate> {
     let mut certificates = Vec::new();
 
     if let Some(cert_set) = &signed_data.certificates {
@@ -284,13 +285,7 @@ fn extract_certificates(signed_data: &SignedData) -> Result<Vec<Certificate>, Ti
         }
     }
 
-    if certificates.is_empty() {
-        return Err(TimestampError::SignatureVerificationError(
-            "no certificates found in SignedData".to_string(),
-        ));
-    }
-
-    Ok(certificates)
+    certificates
 }
 
 /// Find the signer certificate that matches the SignerIdentifier.
@@ -767,11 +762,31 @@ fn verify_cms_signature(
     signed_data: &SignedData,
     tst_info_der: &[u8],
     timestamp_der: &[u8],
+    opts: &VerifyOpts,
 ) -> Result<(), TimestampError> {
     // Extract certificates from the SignedData
-    let certificates = extract_certificates(signed_data)?;
+    let mut certificates = extract_certificates(signed_data);
 
-    tracing::debug!("Extracted {} certificate(s) from SignedData", certificates.len());
+    // If no certificates are embedded and a TSA certificate is provided, use it
+    if certificates.is_empty() {
+        if let Some(tsa_cert) = &opts.tsa_certificate {
+            tracing::debug!("No certificates embedded in SignedData, using TSA certificate from VerifyOpts");
+            // Convert CertificateDer to Certificate
+            let cert = Certificate::from_der(tsa_cert.as_ref()).map_err(|e| {
+                TimestampError::SignatureVerificationError(format!(
+                    "failed to parse TSA certificate: {}",
+                    e
+                ))
+            })?;
+            certificates.push(cert);
+        } else {
+            return Err(TimestampError::SignatureVerificationError(
+                "no certificates found in SignedData and no TSA certificate provided in VerifyOpts".to_string(),
+            ));
+        }
+    }
+
+    tracing::debug!("Using {} certificate(s) for verification", certificates.len());
 
     // Get the first (and should be only) SignerInfo
     if signed_data.signer_infos.0.is_empty() {
