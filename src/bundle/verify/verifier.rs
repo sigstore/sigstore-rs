@@ -49,7 +49,7 @@ struct TsaCertificate {
 use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{
-    VerificationError, VerificationResult,
+    VerificationError,
     models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
     policy::VerificationPolicy,
 };

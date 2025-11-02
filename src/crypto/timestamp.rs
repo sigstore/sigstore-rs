@@ -164,7 +164,8 @@ pub struct TimestampResult {
 /// 1. Parses the timestamp response (DER encoded)
 /// 2. Extracts the TSTInfo to get the timestamp
 /// 3. Verifies the message imprint (hash) matches the signature bytes
-/// 4. TODO: Verifies the CMS signature using the certificate chain
+/// 4. Verifies the CMS signature using the embedded or provided TSA certificate
+/// 5. Validates the TSA certificate chain to a trusted root
 ///
 /// # Arguments
 ///
@@ -416,8 +417,6 @@ fn find_signer_certificate<'a>(
     signer_id: &SignerIdentifier,
     certificates: &'a [Certificate],
 ) -> Result<&'a Certificate, TimestampError> {
-    use cms::cert::IssuerAndSerialNumber;
-
     match signer_id {
         SignerIdentifier::IssuerAndSerialNumber(issuer_serial) => {
             // Match by issuer and serial number
@@ -721,7 +720,7 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
     //   contentType OBJECT IDENTIFIER,
     //   content [0] EXPLICIT ANY DEFINED BY contentType }
 
-    let content_info_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+    let _content_info_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
         TimestampError::SignatureVerificationError(format!(
             "failed to decode ContentInfo header: {}",
             e
@@ -737,7 +736,7 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
     })?;
 
     // Read the [0] EXPLICIT tag
-    let explicit_tag_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+    let _explicit_tag_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
         TimestampError::SignatureVerificationError(format!("failed to decode explicit tag: {}", e))
     })?;
 
