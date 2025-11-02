@@ -14,7 +14,7 @@
 
 //! Test for RFC 3161 timestamp verification with real test data.
 
-use sigstore::crypto::timestamp::{verify_timestamp_response, VerifyOpts};
+use sigstore::crypto::timestamp::{VerifyOpts, verify_timestamp_response};
 use std::fs;
 
 #[test]
