@@ -255,6 +255,7 @@ impl Verifier {
                         (None, None)
                     };
 
+                    debug!("Calling verify_timestamp_response for timestamp {}", i);
                     let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
                         &ts.signed_timestamp,
                         &materials.signature,
@@ -266,6 +267,7 @@ impl Verifier {
                         },
                     )
                     .map_err(|e| {
+                        debug!("RFC 3161 timestamp {} verification failed: {}", i, e);
                         SignatureErrorKind::TransparencyLogError(format!(
                             "failed to verify RFC 3161 timestamp {}: {}",
                             i, e

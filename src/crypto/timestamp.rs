@@ -16,9 +16,12 @@
 
 use chrono::{DateTime, Utc};
 use cmpv2::status::PkiStatus;
-use cms::signed_data::SignedData;
+use cms::cert::CertificateChoices;
+use cms::signed_data::{SignedData, SignerIdentifier, SignerInfo};
 use pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
+use x509_cert::der::{Decode, Encode};
+use x509_cert::Certificate;
 use x509_tsp::{TimeStampResp, TstInfo};
 
 // TimeStamping Extended Key Usage OID (1.3.6.1.5.5.7.3.8)
@@ -66,7 +69,7 @@ impl<'a> TimeStampResponse<'a> {
 
     /// Extract the TSTInfo from the SignedData.
     fn tst_info(&self) -> Result<Option<TstInfo>, String> {
-        use x509_cert::der::{Decode, Encode};
+        use x509_cert::der::{Decode};
 
         // OID for id-ct-TSTInfo (1.2.840.113549.1.9.16.1.4)
         const OID_CONTENT_TYPE_TST_INFO: &str = "1.2.840.113549.1.9.16.1.4";
@@ -76,12 +79,11 @@ impl<'a> TimeStampResponse<'a> {
                 == OID_CONTENT_TYPE_TST_INFO
             {
                 if let Some(content) = signed_data.encap_content_info.econtent {
-                    // Content is wrapped in Any - decode it to get the TSTInfo bytes
-                    let tst_info_der = content
-                        .to_der()
-                        .map_err(|e| format!("failed to encode TSTInfo content: {}", e))?;
+                    // The content is an Any wrapping an OCTET STRING that contains the TSTInfo
+                    // We need to get the value bytes from the Any, which gives us the OCTET STRING content
+                    let tst_info_bytes = content.value();
 
-                    let tst_info = TstInfo::from_der(&tst_info_der)
+                    let tst_info = TstInfo::from_der(tst_info_bytes)
                         .map_err(|e| format!("failed to decode TSTInfo: {}", e))?;
 
                     Ok(Some(tst_info))
@@ -239,25 +241,408 @@ pub fn verify_timestamp_response(
         );
     }
 
-    // TODO: Implement CMS signature verification using RustCrypto primitives
-    // For now, we skip signature verification to get the migration compiling
-    // The signature verification needs to:
-    // 1. Extract signer info from SignedData
-    // 2. Extract TSA certificate (from SignedData or opts.tsa_certificate)
-    // 3. Verify message digest
-    // 4. Verify signature using certificate's public key
-    // 5. Validate certificate chain
-    // 6. Check certificate validity period
-    tracing::warn!("CMS signature verification not yet implemented with RustCrypto");
+    // Verify the CMS signature
+    // We need the DER-encoded TSTInfo for signature verification
+    // The econtent is an Any wrapping an OCTET STRING that contains the TSTInfo bytes
+    let tst_info_der = signed_data
+        .encap_content_info
+        .econtent
+        .as_ref()
+        .ok_or(TimestampError::NoTstInfo)?
+        .value();  // Get the value bytes from the Any (OCTET STRING content)
 
-    // Check if we have embedded certificates
-    let has_embedded_certs = signed_data.certificates.is_some();
-    if has_embedded_certs {
-        let cert_count = signed_data.certificates.as_ref().unwrap().0.len();
-        tracing::debug!("SignedData contains {} embedded certificate(s)", cert_count);
-    }
+    tracing::debug!("Starting CMS signature verification");
+    verify_cms_signature(&signed_data, tst_info_der)?;
+    tracing::debug!("CMS signature verification completed successfully");
+
+    // TODO: Validate certificate chain using webpki
+    // This will require:
+    // 1. Building a certificate chain from the signer cert to a trusted root
+    // 2. Verifying the chain is valid at the timestamp
+    // 3. Checking the TimeStamping EKU (1.3.6.1.5.5.7.3.8) is present
+    tracing::debug!("Certificate chain validation not yet implemented");
 
     Ok(TimestampResult { time: timestamp })
+}
+
+/// Extract certificates from SignedData.
+fn extract_certificates(signed_data: &SignedData) -> Result<Vec<Certificate>, TimestampError> {
+    let mut certificates = Vec::new();
+
+    if let Some(cert_set) = &signed_data.certificates {
+        for cert_choice in cert_set.0.iter() {
+            // Each element is already a CertificateChoices - just match on it
+            match cert_choice {
+                CertificateChoices::Certificate(cert) => {
+                    certificates.push(cert.clone());
+                }
+                CertificateChoices::Other(_) => {
+                    // Skip other certificate formats
+                    tracing::debug!("Skipping non-standard certificate format");
+                }
+            }
+        }
+    }
+
+    if certificates.is_empty() {
+        return Err(TimestampError::SignatureVerificationError(
+            "no certificates found in SignedData".to_string(),
+        ));
+    }
+
+    Ok(certificates)
+}
+
+/// Find the signer certificate that matches the SignerIdentifier.
+fn find_signer_certificate<'a>(
+    signer_id: &SignerIdentifier,
+    certificates: &'a [Certificate],
+) -> Result<&'a Certificate, TimestampError> {
+    use cms::cert::IssuerAndSerialNumber;
+
+    match signer_id {
+        SignerIdentifier::IssuerAndSerialNumber(issuer_serial) => {
+            // Match by issuer and serial number
+            for cert in certificates {
+                if cert.tbs_certificate.issuer == issuer_serial.issuer
+                    && cert.tbs_certificate.serial_number == issuer_serial.serial_number
+                {
+                    return Ok(cert);
+                }
+            }
+            Err(TimestampError::SignatureVerificationError(
+                "no certificate matches issuer and serial number".to_string(),
+            ))
+        }
+        SignerIdentifier::SubjectKeyIdentifier(ski) => {
+            // Match by subject key identifier extension
+            for cert in certificates {
+                if let Some(extensions) = &cert.tbs_certificate.extensions {
+                    for ext in extensions.iter() {
+                        // OID for SubjectKeyIdentifier: 2.5.29.14
+                        if ext.extn_id.to_string() == "2.5.29.14" {
+                            // Decode the extension value as SubjectKeyIdentifier
+                            if let Ok(cert_ski) = x509_cert::ext::pkix::SubjectKeyIdentifier::from_der(ext.extn_value.as_bytes()) {
+                                if &cert_ski == ski {
+                                    return Ok(cert);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(TimestampError::SignatureVerificationError(
+                "no certificate matches subject key identifier".to_string(),
+            ))
+        }
+    }
+}
+
+/// Verify the message-digest attribute in signed_attrs matches the TSTInfo content.
+fn verify_message_digest_attribute(
+    signed_attrs: &x509_cert::attr::Attributes,
+    tst_info_der: &[u8],
+) -> Result<(), TimestampError> {
+    use x509_cert::der::asn1::OctetStringRef;
+
+    // OID for message-digest attribute: 1.2.840.113549.1.9.4
+    const OID_MESSAGE_DIGEST: &str = "1.2.840.113549.1.9.4";
+
+    // Find the message-digest attribute
+    let message_digest_attr = signed_attrs
+        .iter()
+        .find(|attr| attr.oid.to_string() == OID_MESSAGE_DIGEST)
+        .ok_or_else(|| {
+            TimestampError::SignatureVerificationError(
+                "message-digest attribute not found in signed_attrs".to_string(),
+            )
+        })?;
+
+    // The attribute values should contain exactly one OCTET STRING
+    if message_digest_attr.values.len() != 1 {
+        return Err(TimestampError::SignatureVerificationError(
+            "message-digest attribute should have exactly one value".to_string(),
+        ));
+    }
+
+    // Decode the attribute value as OCTET STRING
+    let message_digest_any = message_digest_attr.values.get(0).ok_or_else(|| {
+        TimestampError::SignatureVerificationError(
+            "failed to get message-digest attribute value".to_string(),
+        )
+    })?;
+    let message_digest_der = message_digest_any.to_der().map_err(|e| {
+        TimestampError::SignatureVerificationError(format!(
+            "failed to encode message-digest attribute value: {}",
+            e
+        ))
+    })?;
+    let message_digest_octets = OctetStringRef::from_der(&message_digest_der)
+    .map_err(|e| {
+        TimestampError::SignatureVerificationError(format!(
+            "failed to decode message-digest as OCTET STRING: {}",
+            e
+        ))
+    })?;
+
+    let message_digest = message_digest_octets.as_bytes();
+
+    // Hash the TSTInfo content
+    let mut hasher = Sha256::new();
+    hasher.update(tst_info_der);
+    let content_hash = hasher.finalize();
+
+    // Compare the hashes
+    if &content_hash[..] != message_digest {
+        return Err(TimestampError::HashMismatch {
+            expected: hex::encode(message_digest),
+            actual: hex::encode(&content_hash[..]),
+        });
+    }
+
+    Ok(())
+}
+
+/// Verify ECDSA signature using the certificate's public key.
+fn verify_ecdsa_signature(
+    signature: &[u8],
+    message: &[u8],
+    certificate: &Certificate,
+) -> Result<(), TimestampError> {
+    use p256::ecdsa::{Signature as P256Signature, VerifyingKey as P256VerifyingKey};
+    use p384::ecdsa::{Signature as P384Signature, VerifyingKey as P384VerifyingKey};
+    use signature::Verifier;
+
+    // Get the public key from the certificate
+    let spki = &certificate.tbs_certificate.subject_public_key_info;
+    let public_key_bytes = spki.subject_public_key.as_bytes().ok_or_else(|| {
+        TimestampError::SignatureVerificationError("invalid public key encoding".to_string())
+    })?;
+
+    // Determine the algorithm from the AlgorithmIdentifier
+    let alg_oid = spki.algorithm.oid.to_string();
+
+    match alg_oid.as_str() {
+        "1.2.840.10045.2.1" => {
+            // id-ecPublicKey - need to check the curve parameter
+            if let Some(params) = &spki.algorithm.parameters {
+                use x509_cert::der::asn1::ObjectIdentifier;
+                // For EC public keys, the parameter is an OID identifying the curve
+                // Decode the Any as an ObjectIdentifier
+                let curve_oid = params.decode_as::<ObjectIdentifier>().map_err(|e| {
+                    TimestampError::SignatureVerificationError(format!(
+                        "failed to decode curve OID: {}",
+                        e
+                    ))
+                })?;
+
+                match curve_oid.to_string().as_str() {
+                    "1.2.840.10045.3.1.7" => {
+                        // secp256r1 (P-256)
+                        let verifying_key = P256VerifyingKey::from_sec1_bytes(public_key_bytes)
+                            .map_err(|e| {
+                                TimestampError::SignatureVerificationError(format!(
+                                    "failed to parse P-256 public key: {}",
+                                    e
+                                ))
+                            })?;
+
+                        // Try DER-encoded signature first
+                        let sig_result = P256Signature::from_der(signature);
+                        let sig = match sig_result {
+                            Ok(s) => s,
+                            Err(_) => {
+                                // If DER parsing fails, try raw signature bytes (64 bytes for P-256)
+                                tracing::debug!("DER signature parsing failed, trying raw signature format");
+                                P256Signature::from_bytes(signature.into()).map_err(|e| {
+                                    TimestampError::SignatureVerificationError(format!(
+                                        "failed to parse P-256 signature (raw): {}",
+                                        e
+                                    ))
+                                })?
+                            }
+                        };
+
+                        verifying_key.verify(message, &sig).map_err(|e| {
+                            TimestampError::SignatureVerificationError(format!(
+                                "P-256 signature verification failed: {}",
+                                e
+                            ))
+                        })?;
+                    }
+                    "1.3.132.0.34" => {
+                        // secp384r1 (P-384)
+                        let verifying_key = P384VerifyingKey::from_sec1_bytes(public_key_bytes)
+                            .map_err(|e| {
+                                TimestampError::SignatureVerificationError(format!(
+                                    "failed to parse P-384 public key: {}",
+                                    e
+                                ))
+                            })?;
+
+                        // Try DER-encoded signature first
+                        let sig_result = P384Signature::from_der(signature);
+                        let sig = match sig_result {
+                            Ok(s) => s,
+                            Err(_) => {
+                                // If DER parsing fails, try raw signature bytes (96 bytes for P-384)
+                                tracing::debug!("DER signature parsing failed, trying raw signature format");
+                                P384Signature::from_bytes(signature.into()).map_err(|e| {
+                                    TimestampError::SignatureVerificationError(format!(
+                                        "failed to parse P-384 signature (raw): {}",
+                                        e
+                                    ))
+                                })?
+                            }
+                        };
+
+                        verifying_key.verify(message, &sig).map_err(|e| {
+                            TimestampError::SignatureVerificationError(format!(
+                                "P-384 signature verification failed: {}",
+                                e
+                            ))
+                        })?;
+                    }
+                    _ => {
+                        return Err(TimestampError::SignatureVerificationError(format!(
+                            "unsupported elliptic curve: {}",
+                            curve_oid
+                        )));
+                    }
+                }
+            } else {
+                return Err(TimestampError::SignatureVerificationError(
+                    "missing curve parameters for EC public key".to_string(),
+                ));
+            }
+        }
+        _ => {
+            return Err(TimestampError::SignatureVerificationError(format!(
+                "unsupported signature algorithm: {}",
+                alg_oid
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify the CMS signature in the SignedData.
+fn verify_cms_signature(
+    signed_data: &SignedData,
+    tst_info_der: &[u8],
+) -> Result<(), TimestampError> {
+    // Extract certificates from the SignedData
+    let certificates = extract_certificates(signed_data)?;
+
+    tracing::debug!("Extracted {} certificate(s) from SignedData", certificates.len());
+
+    // Get the first (and should be only) SignerInfo
+    if signed_data.signer_infos.0.is_empty() {
+        return Err(TimestampError::SignatureVerificationError(
+            "no SignerInfo found in SignedData".to_string(),
+        ));
+    }
+
+    if signed_data.signer_infos.0.len() > 1 {
+        tracing::warn!(
+            "Multiple SignerInfo entries found ({}), using the first one",
+            signed_data.signer_infos.0.len()
+        );
+    }
+
+    let signer_info = signed_data.signer_infos.0.get(0).ok_or_else(|| {
+        TimestampError::SignatureVerificationError(
+            "failed to get first SignerInfo".to_string(),
+        )
+    })?;
+
+    // Find the certificate that matches the SignerIdentifier
+    let signer_cert = find_signer_certificate(&signer_info.sid, &certificates)?;
+
+    tracing::debug!("Found signer certificate matching SignerIdentifier");
+
+    // Verify the signature based on whether signed_attrs are present
+    if let Some(signed_attrs) = &signer_info.signed_attrs {
+        // With signed_attrs: signature is over DER-encoded signed_attrs
+        tracing::debug!("Verifying signature with signed_attrs");
+
+        // Verify the message-digest attribute matches the TSTInfo content
+        verify_message_digest_attribute(signed_attrs, tst_info_der)?;
+
+        // The signature is over the DER encoding of signed_attrs with tag 0x31 (SET OF)
+        // When encoding for signature verification, we need to use SET OF tag
+        let mut signed_attrs_der = signed_attrs.to_der().map_err(|e| {
+            TimestampError::SignatureVerificationError(format!(
+                "failed to encode signed_attrs: {}",
+                e
+            ))
+        })?;
+
+        tracing::debug!("signed_attrs DER length: {}, first bytes: {}",
+            signed_attrs_der.len(),
+            hex::encode(&signed_attrs_der[..signed_attrs_der.len().min(32)]));
+
+        // RFC 5652 Section 5.4: The message digest is computed on the DER encoding of the
+        // signedAttrs field, including the tag and length octets. For the purpose of computing
+        // the digest, the DER encoding uses the tag value 0x31 (SET OF) rather than the
+        // context-specific tag (0xA0) that appears in the actual encoding.
+        if !signed_attrs_der.is_empty() && signed_attrs_der[0] == 0xa0 {
+            tracing::debug!("Replacing tag 0xA0 with 0x31 for signature verification");
+            signed_attrs_der[0] = 0x31;
+        }
+
+        // Determine hash algorithm from digest_alg
+        let digest_alg_oid = signer_info.digest_alg.oid.to_string();
+        tracing::debug!("Digest algorithm OID: {}", digest_alg_oid);
+
+        // Hash the signed_attrs using the appropriate algorithm
+        let signed_attrs_hash = match digest_alg_oid.as_str() {
+            "2.16.840.1.101.3.4.2.1" => {
+                // SHA-256
+                tracing::debug!("Using SHA-256 for signed_attrs hash");
+                let mut hasher = Sha256::new();
+                hasher.update(&signed_attrs_der);
+                hasher.finalize().to_vec()
+            }
+            "2.16.840.1.101.3.4.2.2" => {
+                // SHA-384
+                tracing::debug!("Using SHA-384 for signed_attrs hash");
+                use sha2::Sha384;
+                let mut hasher = Sha384::new();
+                hasher.update(&signed_attrs_der);
+                hasher.finalize().to_vec()
+            }
+            _ => {
+                return Err(TimestampError::SignatureVerificationError(format!(
+                    "unsupported digest algorithm: {}",
+                    digest_alg_oid
+                )));
+            }
+        };
+
+        // Verify the signature
+        verify_ecdsa_signature(
+            signer_info.signature.as_bytes(),
+            &signed_attrs_hash,
+            signer_cert,
+        )?;
+    } else {
+        // Without signed_attrs: signature is directly over content hash
+        tracing::debug!("Verifying signature without signed_attrs (direct content)");
+
+        // Hash the content
+        let mut hasher = Sha256::new();
+        hasher.update(tst_info_der);
+        let content_hash = hasher.finalize();
+
+        // Verify the signature
+        verify_ecdsa_signature(signer_info.signature.as_bytes(), &content_hash, signer_cert)?;
+    }
+
+    tracing::debug!("CMS signature verification succeeded");
+
+    Ok(())
 }
 
 /// Verify that the message imprint in TSTInfo matches the hash of the signature.
