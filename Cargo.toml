@@ -79,12 +79,13 @@ sigstore-trust-root = [
 test-registry = [] # used for testing against a test registry
 verify = [
     "cert",
-    "dep:bcder",
-    "dep:cryptographic-message-syntax",
+    "dep:cmpv2",
+    "dep:cms",
     "dep:hex",
     "dep:json-syntax",
     "dep:sigstore_protobuf_specs",
     "dep:olpc-cjson",
+    "dep:x509-tsp",
     "fulcio",
     "rekor",
 ]
@@ -93,7 +94,6 @@ wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
-bcder = { version = "0.7", default-features = false, optional = true }
 cached = { version = "0.56", optional = true, features = ["async"] }
 cfg-if = { version = "1.0.0", optional = true, default-features = false }
 chrono = { version = "0.4", default-features = false, features = [
@@ -109,12 +109,13 @@ clap = { version = "4.5", default-features = false, features = [
     "suggestions",
     "usage",
 ], optional = true }
+cmpv2 = { version = "0.2.0", optional = true, default-features = false }
+cms = { version = "0.2.3", optional = true, default-features = false }
 const-oid = { version = "0.9", default-features = false, features = ["db"] }
 crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",
 ] }
-cryptographic-message-syntax = { git = "https://github.com/wolfv/cryptography-rs", branch = "fix-certificate-corruption", default-features = false, optional = true }
 digest = { version = "0.10", default-features = false }
 ecdsa = { version = "0.16", default-features = false, features = [
     "der",
@@ -217,7 +218,7 @@ x509-cert = { version = "0.2", default-features = false, features = [
     "sct",
     "std",
 ] }
-x509-certificate = { git = "https://github.com/wolfv/cryptography-rs", branch = "fix-certificate-corruption" }
+x509-tsp = { version = "0.1.0", optional = true, default-features = false }
 zeroize = { version = "1.8", default-features = false }
 
 [dev-dependencies]
@@ -339,3 +340,4 @@ path = "examples/fulcio/cert/main.rs"
 name = "sigstore-cli"
 path = "src/bin/sigstore-cli.rs"
 required-features = ["clap", "full", "sign", "sigstore-trust-root"]
+

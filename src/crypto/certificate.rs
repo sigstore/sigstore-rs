@@ -14,12 +14,14 @@
 // limitations under the License.
 
 use chrono::{DateTime, Utc};
-use const_oid::db::rfc5912::ID_KP_CODE_SIGNING;
 use thiserror::Error;
 use x509_cert::{
     Certificate,
     ext::pkix::{ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName, constraints},
 };
+
+// Code Signing OID: 1.3.6.1.5.5.7.3.3
+const ID_KP_CODE_SIGNING_STR: &str = "1.3.6.1.5.5.7.3.3";
 
 use crate::errors::{Result, SigstoreError};
 
@@ -55,8 +57,9 @@ pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
         .map_err(|_| SigstoreError::CertificateWithoutCodeSigningKeyUsage)?
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
 
-    // code signing
-    if !key_ext_usage.0.contains(&ID_KP_CODE_SIGNING) {
+    // code signing - use string comparison to avoid const-oid version conflicts
+    let has_code_signing = key_ext_usage.0.iter().any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
+    if !has_code_signing {
         return Err(SigstoreError::CertificateWithoutCodeSigningKeyUsage);
     }
 
@@ -216,7 +219,9 @@ pub(crate) fn is_leaf(
         Some((_, extended_key_usage)) => extended_key_usage,
     };
 
-    if !extended_key_usage.0.contains(&ID_KP_CODE_SIGNING) {
+    // Check for code signing using string comparison to avoid const-oid version conflicts
+    let has_code_signing = extended_key_usage.0.iter().any(|oid| oid.to_string() == ID_KP_CODE_SIGNING_STR);
+    if !has_code_signing {
         Err(ExtensionErrorKind::BitUnset(
             "ExtendedKeyUsage.digitalSignature",
         ))?;
