@@ -14,8 +14,7 @@
 
 //! Test for RFC 3161 timestamp verification with real test data.
 
-use base64::prelude::*;
-use sigstore::crypto::timestamp::{VerifyOpts, verify_timestamp_response};
+use sigstore::crypto::timestamp::{verify_timestamp_response, VerifyOpts};
 use std::fs;
 
 #[test]
@@ -30,14 +29,13 @@ fn test_timestamp_cms_signature_verification() {
 
     // For now, let's create dummy signature bytes that will hash to the expected value
     // This tests the CMS signature verification independent of the message imprint verification
-    let expected_hash_hex = "6ddf31609e2a6c814f8266aab75204b7a1f5e96d1bc07dde6ff39add8408cda2";
-    let expected_hash = hex::decode(expected_hash_hex).expect("Failed to decode expected hash");
+    let _expected_hash_hex = "6ddf31609e2a6c814f8266aab75204b7a1f5e96d1bc07dde6ff39add8408cda2";
 
     // Create dummy signature bytes (we just need something to pass in)
     // The actual verification will fail on message imprint, but we can test CMS signature verification
     let dummy_signature = vec![0u8; 72]; // Dummy 72-byte signature
 
-    println!("Expected message imprint: {}", expected_hash_hex);
+    println!("Expected message imprint: {}", _expected_hash_hex);
     println!("Using dummy signature for testing");
 
     // Set up verification options

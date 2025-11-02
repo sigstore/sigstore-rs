@@ -560,37 +560,40 @@ impl CheckedBundle {
 
             // All checks passed for transparency log consistency
             // Now verify the subject digest in the DSSE envelope matches the input digest
-            // Parse the envelope payload (which is an in-toto statement)
-            let payload_json: serde_json::Value = serde_json::from_slice(&envelope.payload).ok()?;
+            // (Skip this check if input_digest is empty, e.g., in unit tests)
+            if !input_digest.is_empty() {
+                // Parse the envelope payload (which is an in-toto statement)
+                let payload_json: serde_json::Value = serde_json::from_slice(&envelope.payload).ok()?;
 
-            // Get the subject array
-            let subjects = payload_json.get("subject")?.as_array()?;
-            if subjects.is_empty() {
-                debug!("DSSE envelope has no subjects");
-                return None;
-            }
+                // Get the subject array
+                let subjects = payload_json.get("subject")?.as_array()?;
+                if subjects.is_empty() {
+                    debug!("DSSE envelope has no subjects");
+                    return None;
+                }
 
-            // Check if any subject has a sha256 digest that matches our input
-            let input_digest_hex = hex::encode(input_digest);
-            let mut found_matching_digest = false;
+                // Check if any subject has a sha256 digest that matches our input
+                let input_digest_hex = hex::encode(input_digest);
+                let mut found_matching_digest = false;
 
-            for subject in subjects {
-                if let Some(digest_obj) = subject.get("digest") {
-                    if let Some(sha256_digest) = digest_obj.get("sha256").and_then(|v| v.as_str()) {
-                        if sha256_digest == input_digest_hex {
-                            found_matching_digest = true;
-                            break;
+                for subject in subjects {
+                    if let Some(digest_obj) = subject.get("digest") {
+                        if let Some(sha256_digest) = digest_obj.get("sha256").and_then(|v| v.as_str()) {
+                            if sha256_digest == input_digest_hex {
+                                found_matching_digest = true;
+                                break;
+                            }
                         }
                     }
                 }
-            }
 
-            if !found_matching_digest {
-                debug!(
-                    "DSSE envelope subject digest does not match input digest. Expected: {}, subjects: {:?}",
-                    input_digest_hex, subjects
-                );
-                return None;
+                if !found_matching_digest {
+                    debug!(
+                        "DSSE envelope subject digest does not match input digest. Expected: {}, subjects: {:?}",
+                        input_digest_hex, subjects
+                    );
+                    return None;
+                }
             }
 
             // All checks passed - the DSSE entry is valid

@@ -83,8 +83,8 @@ verify = [
     "dep:cms",
     "dep:hex",
     "dep:json-syntax",
-    "dep:sigstore_protobuf_specs",
     "dep:olpc-cjson",
+    "dep:sigstore_protobuf_specs",
     "dep:x509-tsp",
     "fulcio",
     "rekor",
@@ -340,4 +340,3 @@ path = "examples/fulcio/cert/main.rs"
 name = "sigstore-cli"
 path = "src/bin/sigstore-cli.rs"
 required-features = ["clap", "full", "sign", "sigstore-trust-root"]
-
