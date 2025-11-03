@@ -14,27 +14,32 @@
 
 //! In-toto attestation statement support for creating DSSE bundles.
 //!
-//! This module provides a builder API for creating in-toto Statement v0.1 attestations
+//! This module provides a builder API for creating in-toto Statement attestations
 //! that can be signed and wrapped in DSSE envelopes.
 //!
-//! Note: This implements the v0.1 specification, which is currently used by cosign and Rekor.
-//! See: <https://github.com/in-toto/attestation/blob/main/spec/v0.1.0/statement.md>
+//! Supports both v0.1 and v1 statement formats:
+//! - v0.1: <https://github.com/in-toto/attestation/blob/main/spec/v0.1.0/statement.md>
+//! - v1: <https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md>
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The in-toto Statement v0.1 type identifier.
-/// Note: v0.1 is the currently used version by cosign and Rekor, not v1.
-pub const STATEMENT_TYPE_V1: &str = "https://in-toto.io/Statement/v0.1";
+/// Used by older Sigstore implementations and some legacy bundles.
+pub const STATEMENT_TYPE_V0_1: &str = "https://in-toto.io/Statement/v0.1";
 
-/// An in-toto Statement v0.1 attestation.
+/// The in-toto Statement v1 type identifier.
+/// Used by current Sigstore implementations including GitHub Actions.
+pub const STATEMENT_TYPE_V1: &str = "https://in-toto.io/Statement/v1";
+
+/// An in-toto Statement attestation.
 ///
 /// This represents a verifiable claim about one or more software artifacts.
-/// Note: This uses the v0.1 specification which is currently used by cosign and Rekor.
+/// Supports both v0.1 and v1 statement formats.
 /// Field order matches the canonical JSON serialization used by cosign.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Statement {
-    /// The statement type (always "<https://in-toto.io/Statement/v0.1>")
+    /// The statement type (either "<https://in-toto.io/Statement/v0.1>" or "<https://in-toto.io/Statement/v1>")
     #[serde(rename = "_type")]
     pub statement_type: String,
 
@@ -145,10 +150,24 @@ impl StatementBuilder {
         self
     }
 
-    /// Builds the statement.
+    /// Builds the statement using the v1 format.
     ///
     /// Returns an error if required fields are missing.
     pub fn build(self) -> Result<Statement, &'static str> {
+        self.build_with_version(STATEMENT_TYPE_V1)
+    }
+
+    /// Builds the statement using the v0.1 format (for backward compatibility).
+    ///
+    /// Returns an error if required fields are missing.
+    pub fn build_v0_1(self) -> Result<Statement, &'static str> {
+        self.build_with_version(STATEMENT_TYPE_V0_1)
+    }
+
+    /// Builds the statement with a specific version.
+    ///
+    /// Returns an error if required fields are missing.
+    fn build_with_version(self, version: &str) -> Result<Statement, &'static str> {
         if self.subjects.is_empty() {
             return Err("Statement must have at least one subject");
         }
@@ -160,7 +179,7 @@ impl StatementBuilder {
         let predicate = self.predicate.ok_or("Statement must have a predicate")?;
 
         Ok(Statement {
-            statement_type: STATEMENT_TYPE_V1.to_string(),
+            statement_type: version.to_string(),
             predicate_type,
             subject: self.subjects,
             predicate,
@@ -255,5 +274,50 @@ mod tests {
 
         assert_eq!(parsed.statement_type, STATEMENT_TYPE_V1);
         assert_eq!(parsed.subject[0].name, "test.tar.gz");
+    }
+
+    #[test]
+    fn test_statement_v0_1_compatibility() {
+        // Test that we can create and parse v0.1 statements
+        let statement = StatementBuilder::new()
+            .subject(Subject::new("test.tar.gz", "sha256", "abc123"))
+            .predicate_type("https://slsa.dev/provenance/v0.2")
+            .predicate(json!({
+                "buildType": "test"
+            }))
+            .build_v0_1()
+            .unwrap();
+
+        assert_eq!(statement.statement_type, STATEMENT_TYPE_V0_1);
+
+        // Test that we can round-trip v0.1 statements
+        let json = serde_json::to_string(&statement).unwrap();
+        let parsed: Statement = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.statement_type, STATEMENT_TYPE_V0_1);
+        assert_eq!(parsed.subject[0].name, "test.tar.gz");
+    }
+
+    #[test]
+    fn test_statement_accepts_both_versions() {
+        // Test parsing a v0.1 statement
+        let v0_1_json = r#"{
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "subject": [{"name": "test", "digest": {"sha256": "abc123"}}],
+            "predicateType": "https://example.com/test",
+            "predicate": {}
+        }"#;
+        let v0_1: Statement = serde_json::from_str(v0_1_json).unwrap();
+        assert_eq!(v0_1.statement_type, STATEMENT_TYPE_V0_1);
+
+        // Test parsing a v1 statement
+        let v1_json = r#"{
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [{"name": "test", "digest": {"sha256": "abc123"}}],
+            "predicateType": "https://example.com/test",
+            "predicate": {}
+        }"#;
+        let v1: Statement = serde_json::from_str(v1_json).unwrap();
+        assert_eq!(v1.statement_type, STATEMENT_TYPE_V1);
     }
 }
