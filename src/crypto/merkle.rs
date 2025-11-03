@@ -21,12 +21,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::errors::{Result, SigstoreError};
-
-/// Simple hex encoding helper (to avoid dependency on hex crate)
-fn encode_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
-}
+use crate::errors::{MerkleTreeError, Result};
 
 /// Compute RFC 6962 leaf hash: SHA256(0x00 || data)
 ///
@@ -113,10 +108,46 @@ pub fn verify_inclusion(
     root_hash: &[u8],
 ) -> Result<()> {
     if leaf_index >= tree_size {
-        return Err(SigstoreError::UnexpectedError(format!(
-            "Merkle tree verification: leaf index {} >= tree size {}",
-            leaf_index, tree_size
-        )));
+        return Err(MerkleTreeError::LeafIndexOutOfBounds {
+            index: leaf_index,
+            tree_size,
+        }
+        .into());
+    }
+
+    // Validate hash sizes (SHA-256 produces 32-byte hashes)
+    if leaf_hash.len() != 32 {
+        return Err(MerkleTreeError::InvalidLeafHashSize {
+            got: leaf_hash.len(),
+        }
+        .into());
+    }
+    if root_hash.len() != 32 {
+        return Err(MerkleTreeError::InvalidRootHashSize {
+            got: root_hash.len(),
+        }
+        .into());
+    }
+    for (i, hash) in proof_hashes.iter().enumerate() {
+        if hash.len() != 32 {
+            return Err(MerkleTreeError::InvalidProofHashSize {
+                index: i,
+                got: hash.len(),
+            }
+            .into());
+        }
+    }
+
+    // Validate proof length matches expected path length for this tree structure
+    let (inner, border) = decomp_inclusion_proof(leaf_index, tree_size);
+    let expected_proof_len = inner + border;
+
+    if proof_hashes.len() != expected_proof_len {
+        return Err(MerkleTreeError::WrongInclusionProofSize {
+            got: proof_hashes.len(),
+            expected: expected_proof_len,
+        }
+        .into());
     }
 
     // Compute the root hash from the leaf and proof
@@ -124,10 +155,7 @@ pub fn verify_inclusion(
 
     // Compare with expected root hash
     if computed_root != root_hash {
-        return Err(SigstoreError::UnexpectedError(
-            "Merkle tree inclusion proof verification failed: computed root hash does not match expected root"
-                .into(),
-        ));
+        return Err(MerkleTreeError::InclusionProofVerificationFailed.into());
     }
 
     Ok(())
@@ -224,43 +252,35 @@ pub fn verify_consistency(
 ) -> Result<()> {
     // Tree cannot shrink
     if new_size < old_size {
-        return Err(SigstoreError::UnexpectedError(format!(
-            "Merkle consistency proof: new tree size {} < old tree size {}",
-            new_size, old_size
-        )));
+        return Err(MerkleTreeError::TreeCannotShrink { old_size, new_size }.into());
     }
 
     // If sizes are equal, roots must match and proof must be empty
     if old_size == new_size {
         if !proof_hashes.is_empty() {
-            return Err(SigstoreError::UnexpectedError(
-                "Merkle consistency proof: proof must be empty when tree sizes are equal".into(),
-            ));
+            return Err(MerkleTreeError::ProofMustBeEmptyForEqualSizes.into());
         }
         if old_root != new_root {
-            return Err(SigstoreError::UnexpectedError(
-                "Merkle consistency proof: roots must match when tree sizes are equal".into(),
-            ));
+            return Err(MerkleTreeError::RootsMustMatchForEqualSizes.into());
         }
         return Ok(());
     }
 
-    // If old tree is empty
+    // If old tree is empty, new tree must also be empty
+    // An empty tree (size 0) cannot be consistent with a non-empty tree
     if old_size == 0 {
-        if !proof_hashes.is_empty() {
-            return Err(SigstoreError::UnexpectedError(
-                "Merkle consistency proof: proof must be empty when old tree is empty".into(),
-            ));
+        if new_size != 0 {
+            return Err(MerkleTreeError::EmptyTreeInconsistentWithNonEmpty.into());
         }
-        // Empty tree has a specific empty root - we just accept any old_root here
+        if !proof_hashes.is_empty() {
+            return Err(MerkleTreeError::ProofMustBeEmptyForEmptyTree.into());
+        }
         return Ok(());
     }
 
     // Normal case: old_size > 0 and new_size > old_size
     if proof_hashes.is_empty() {
-        return Err(SigstoreError::UnexpectedError(
-            "Merkle consistency proof: proof cannot be empty for non-trivial consistency".into(),
-        ));
+        return Err(MerkleTreeError::ProofCannotBeEmpty.into());
     }
 
     // Find the largest power of 2 less than or equal to old_size
@@ -274,20 +294,18 @@ pub fn verify_consistency(
         (old_root, 0)
     } else {
         if proof_hashes.is_empty() {
-            return Err(SigstoreError::UnexpectedError(
-                "Merkle consistency proof: insufficient proof hashes".into(),
-            ));
+            return Err(MerkleTreeError::InsufficientProofHashes.into());
         }
         (&proof_hashes[0][..], 1)
     };
 
     let expected_proof_len = start + inner + border;
     if proof_hashes.len() != expected_proof_len {
-        return Err(SigstoreError::UnexpectedError(format!(
-            "Merkle consistency proof: wrong proof size (got {}, expected {})",
-            proof_hashes.len(),
-            expected_proof_len
-        )));
+        return Err(MerkleTreeError::WrongConsistencyProofSize {
+            got: proof_hashes.len(),
+            expected: expected_proof_len,
+        }
+        .into());
     }
 
     let proof = &proof_hashes[start..];
@@ -297,22 +315,22 @@ pub fn verify_consistency(
     let hash1 = chain_inner_right(seed, &proof[..inner], mask);
     let hash1 = chain_border_right(&hash1, &proof[inner..]);
     if hash1 != old_root {
-        return Err(SigstoreError::UnexpectedError(format!(
-            "Merkle consistency proof: old root mismatch (expected {}, got {})",
-            encode_hex(old_root),
-            encode_hex(&hash1)
-        )));
+        return Err(MerkleTreeError::OldRootMismatch {
+            expected: old_root.to_vec(),
+            got: hash1,
+        }
+        .into());
     }
 
     // Verify the new root is correct
     let hash2 = chain_inner(seed, &proof[..inner], mask);
     let hash2 = chain_border_right(&hash2, &proof[inner..]);
     if hash2 != new_root {
-        return Err(SigstoreError::UnexpectedError(format!(
-            "Merkle consistency proof: new root mismatch (expected {}, got {})",
-            encode_hex(new_root),
-            encode_hex(&hash2)
-        )));
+        return Err(MerkleTreeError::NewRootMismatch {
+            expected: new_root.to_vec(),
+            got: hash2,
+        }
+        .into());
     }
 
     Ok(())
@@ -558,17 +576,28 @@ mod tests {
 
     #[test]
     fn test_verify_consistency_empty_old_tree() {
-        // When old tree is empty, proof must be empty
+        // When old tree is empty (size 0), new tree must also be empty
+        // An empty tree cannot be consistent with a non-empty tree
         let old_root = vec![0u8; 32];
         let new_root = vec![1u8; 32];
 
-        // Empty old tree, empty proof - should succeed
+        // Empty old tree with non-empty new tree - should fail
         let result = verify_consistency(0, 5, &[], &old_root, &new_root);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("empty tree (size 0) cannot be consistent with non-empty tree")
+        );
+
+        // Empty old tree with empty new tree - should succeed
+        let result = verify_consistency(0, 0, &[], &old_root, &old_root);
         assert!(result.is_ok());
 
-        // Empty old tree, non-empty proof - should fail
+        // Empty old tree with non-empty proof - should fail
         let proof = vec![vec![2u8; 32]];
-        let result = verify_consistency(0, 5, &proof, &old_root, &new_root);
+        let result = verify_consistency(0, 0, &proof, &old_root, &old_root);
         assert!(result.is_err());
         assert!(
             result
