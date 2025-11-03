@@ -34,7 +34,7 @@ pub const STATEMENT_TYPE_V1: &str = "https://in-toto.io/Statement/v0.1";
 /// Field order matches the canonical JSON serialization used by cosign.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Statement {
-    /// The statement type (always "https://in-toto.io/Statement/v0.1")
+    /// The statement type (always "<https://in-toto.io/Statement/v0.1>")
     #[serde(rename = "_type")]
     pub statement_type: String,
 

@@ -59,7 +59,7 @@ impl DsseEnvelope {
     /// Creates a new DSSE envelope from an in-toto statement.
     ///
     /// The statement is serialized to JSON as the payload.
-    /// The envelope is returned without signatures - use [`add_signature`] to add signatures.
+    /// The envelope is returned without signatures - use [`Self::add_signature`] to add signatures.
     pub fn from_statement(statement: &Statement) -> Result<Self, serde_json::Error> {
         let payload_json = serde_json::to_vec(statement)?;
 
@@ -108,7 +108,7 @@ impl DsseEnvelope {
     /// Adds a signature to this envelope.
     ///
     /// The signature should be computed over the PAE (Pre-Authentication Encoding) of the envelope.
-    /// Use [`pae`] to compute the PAE that should be signed.
+    /// Use [`Self::pae`] to compute the PAE that should be signed.
     pub fn add_signature(&mut self, signature: Vec<u8>, keyid: String) {
         self.0.signatures.push(DsseSignature {
             keyid,
