@@ -59,7 +59,7 @@ impl DsseEnvelope {
     /// Creates a new DSSE envelope from an in-toto statement.
     ///
     /// The statement is serialized to JSON as the payload.
-    /// The envelope is returned without signatures - use [`add_signature`] to add signatures.
+    /// The envelope is returned without signatures - use [`Self::add_signature`] to add signatures.
     pub fn from_statement(statement: &Statement) -> Result<Self, serde_json::Error> {
         let payload_json = serde_json::to_vec(statement)?;
 
@@ -108,7 +108,7 @@ impl DsseEnvelope {
     /// Adds a signature to this envelope.
     ///
     /// The signature should be computed over the PAE (Pre-Authentication Encoding) of the envelope.
-    /// Use [`pae`] to compute the PAE that should be signed.
+    /// Use [`Self::pae`] to compute the PAE that should be signed.
     pub fn add_signature(&mut self, signature: Vec<u8>, keyid: String) {
         self.0.signatures.push(DsseSignature {
             keyid,
@@ -144,6 +144,17 @@ impl DsseEnvelope {
     /// Returns the signatures in this envelope.
     pub fn signatures(&self) -> &[DsseSignature] {
         &self.0.signatures
+    }
+
+    /// Decodes and parses the payload as an in-toto Statement.
+    ///
+    /// This is a convenience method for DSSE envelopes containing in-toto attestations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload is not valid UTF-8 or cannot be parsed as a Statement.
+    pub fn decode_statement(&self) -> Result<Statement, serde_json::Error> {
+        serde_json::from_slice(&self.0.payload)
     }
 }
 
@@ -277,5 +288,58 @@ mod tests {
         // Test into_inner
         let inner = envelope.into_inner();
         assert_eq!(inner.payload_type, "test");
+    }
+
+    #[test]
+    fn test_decode_statement() {
+        let original_statement = StatementBuilder::new()
+            .subject(Subject::new("myapp.tar.gz", "sha256", "deadbeef"))
+            .predicate_type("https://slsa.dev/provenance/v1")
+            .predicate(json!({
+                "buildType": "https://example.com/build",
+                "builder": {"id": "https://example.com/builder"}
+            }))
+            .build()
+            .unwrap();
+
+        let envelope = DsseEnvelope::from_statement(&original_statement).unwrap();
+
+        // Decode the statement back
+        let decoded_statement = envelope.decode_statement().unwrap();
+
+        // Verify it matches the original
+        assert_eq!(
+            decoded_statement.statement_type,
+            original_statement.statement_type
+        );
+        assert_eq!(
+            decoded_statement.predicate_type,
+            original_statement.predicate_type
+        );
+        assert_eq!(decoded_statement.subject.len(), 1);
+        assert_eq!(decoded_statement.subject[0].name, "myapp.tar.gz");
+        assert_eq!(
+            decoded_statement.subject[0].digest.get("sha256"),
+            Some(&"deadbeef".to_string())
+        );
+    }
+
+    #[test]
+    fn test_decode_statement_v0_1() {
+        // Test that we can decode v0.1 statements
+        let v0_1_statement = StatementBuilder::new()
+            .subject(Subject::new("test.tar.gz", "sha256", "abc123"))
+            .predicate_type("https://slsa.dev/provenance/v0.2")
+            .predicate(json!({"buildType": "test"}))
+            .build_v0_1()
+            .unwrap();
+
+        let envelope = DsseEnvelope::from_statement(&v0_1_statement).unwrap();
+        let decoded = envelope.decode_statement().unwrap();
+
+        assert_eq!(
+            decoded.statement_type,
+            crate::bundle::intoto::STATEMENT_TYPE_V0_1
+        );
     }
 }
