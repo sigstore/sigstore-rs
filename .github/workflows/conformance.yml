@@ -1,4 +1,12 @@
-on: [workflow_dispatch]
+on:
+  push:
+    branches:
+      - main
+      - experiments
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 name: Conformance Suite
 
