@@ -31,6 +31,7 @@ pub trait TrustRoot {
     /// Get TSA certificates with their validity periods.
     /// Returns tuples of (certificate, valid_from, valid_to).
     /// Default implementation returns None for validity periods.
+    #[allow(clippy::type_complexity)] // TODO fix return type
     fn tsa_certs_with_validity(
         &self,
     ) -> crate::errors::Result<

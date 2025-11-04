@@ -437,17 +437,15 @@ fn find_signer_certificate<'a>(
                 if let Some(extensions) = &cert.tbs_certificate.extensions {
                     for ext in extensions.iter() {
                         // OID for SubjectKeyIdentifier: 2.5.29.14
-                        if ext.extn_id.to_string() == "2.5.29.14" {
-                            // Decode the extension value as SubjectKeyIdentifier
-                            if let Ok(cert_ski) =
+                        // Decode the extension value as SubjectKeyIdentifier
+                        if ext.extn_id.to_string() == "2.5.29.14"
+                            && let Ok(cert_ski) =
                                 x509_cert::ext::pkix::SubjectKeyIdentifier::from_der(
                                     ext.extn_value.as_bytes(),
                                 )
-                            {
-                                if &cert_ski == ski {
-                                    return Ok(cert);
-                                }
-                            }
+                            && &cert_ski == ski
+                        {
+                            return Ok(cert);
                         }
                     }
                 }
@@ -793,33 +791,33 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
     })?;
 
     // Check for optional certificates [0]
-    if let Some(byte) = reader.peek_byte() {
-        if byte == 0xA0 {
-            let cert_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!(
-                    "failed to decode certificates: {}",
-                    e
-                ))
-            })?;
-            reader.read_slice(cert_header.length).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!(
-                    "failed to skip certificates: {}",
-                    e
-                ))
-            })?;
-        }
+    if let Some(byte) = reader.peek_byte()
+        && byte == 0xA0
+    {
+        let cert_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!(
+                "failed to decode certificates: {}",
+                e
+            ))
+        })?;
+        reader.read_slice(cert_header.length).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!(
+                "failed to skip certificates: {}",
+                e
+            ))
+        })?;
     }
 
     // Check for optional crls [1]
-    if let Some(byte) = reader.peek_byte() {
-        if byte == 0xA1 {
-            let crl_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!("failed to decode CRLs: {}", e))
-            })?;
-            reader.read_slice(crl_header.length).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!("failed to skip CRLs: {}", e))
-            })?;
-        }
+    if let Some(byte) = reader.peek_byte()
+        && byte == 0xA1
+    {
+        let crl_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!("failed to decode CRLs: {}", e))
+        })?;
+        reader.read_slice(crl_header.length).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!("failed to skip CRLs: {}", e))
+        })?;
     }
 
     // Now we're at signerInfos (SET OF SignerInfo)
@@ -873,53 +871,52 @@ fn extract_signed_attrs_bytes(timestamp_der: &[u8]) -> Result<Vec<u8>, Timestamp
     })?;
 
     // Now we should be at signedAttrs [0] IMPLICIT
-    if let Some(byte) = reader.peek_byte() {
-        if byte == 0xA0 {
-            // Found signed_attrs!
-            // We need to capture this INCLUDING the tag and length, but then replace 0xA0 with 0x31
-            let start_offset_len = reader.position();
-            let start_offset: u32 = start_offset_len.into();
-            let start_offset = start_offset as usize;
+    if let Some(byte) = reader.peek_byte()
+        && byte == 0xA0
+    {
+        // Found signed_attrs!
+        // We need to capture this INCLUDING the tag and length, but then replace 0xA0 with 0x31
+        let start_offset_len = reader.position();
+        let start_offset: u32 = start_offset_len.into();
+        let start_offset = start_offset as usize;
 
-            let signed_attrs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
-                TimestampError::SignatureVerificationError(format!(
-                    "failed to decode signedAttrs: {}",
-                    e
-                ))
-            })?;
+        let signed_attrs_header = x509_cert::der::Header::decode(&mut reader).map_err(|e| {
+            TimestampError::SignatureVerificationError(format!(
+                "failed to decode signedAttrs: {}",
+                e
+            ))
+        })?;
 
-            // Calculate total length including tag and length bytes
-            let current_pos_len = reader.position();
-            let current_pos: u32 = current_pos_len.into();
-            let current_pos = current_pos as usize;
-            let header_len = current_pos - start_offset;
+        // Calculate total length including tag and length bytes
+        let current_pos_len = reader.position();
+        let current_pos: u32 = current_pos_len.into();
+        let current_pos = current_pos as usize;
+        let header_len = current_pos - start_offset;
 
-            // Convert Length to usize for indexing
-            let content_len: u32 = signed_attrs_header.length.into();
-            let content_len = content_len as usize;
+        // Convert Length to usize for indexing
+        let content_len: u32 = signed_attrs_header.length.into();
+        let content_len = content_len as usize;
 
-            // Get the actual signed_attrs bytes directly from the timestamp_der slice
-            // We know the start_offset and the total length (header + content)
-            let total_len = header_len + content_len;
+        // Get the actual signed_attrs bytes directly from the timestamp_der slice
+        // We know the start_offset and the total length (header + content)
+        let total_len = header_len + content_len;
 
-            if start_offset + total_len > timestamp_der.len() {
-                return Err(TimestampError::SignatureVerificationError(
-                    "signed_attrs extends beyond timestamp data".to_string(),
-                ));
-            }
-
-            // Extract the signed_attrs bytes directly from the slice
-            let mut signed_attrs_bytes =
-                timestamp_der[start_offset..start_offset + total_len].to_vec();
-
-            // Replace the context-specific tag 0xA0 with SET tag 0x31
-            // RFC 5652 Section 5.4: For signature verification, use SET tag
-            if !signed_attrs_bytes.is_empty() && signed_attrs_bytes[0] == 0xA0 {
-                signed_attrs_bytes[0] = 0x31;
-            }
-
-            return Ok(signed_attrs_bytes);
+        if start_offset + total_len > timestamp_der.len() {
+            return Err(TimestampError::SignatureVerificationError(
+                "signed_attrs extends beyond timestamp data".to_string(),
+            ));
         }
+
+        // Extract the signed_attrs bytes directly from the slice
+        let mut signed_attrs_bytes = timestamp_der[start_offset..start_offset + total_len].to_vec();
+
+        // Replace the context-specific tag 0xA0 with SET tag 0x31
+        // RFC 5652 Section 5.4: For signature verification, use SET tag
+        if !signed_attrs_bytes.is_empty() && signed_attrs_bytes[0] == 0xA0 {
+            signed_attrs_bytes[0] = 0x31;
+        }
+
+        return Ok(signed_attrs_bytes);
     }
 
     Err(TimestampError::SignatureVerificationError(

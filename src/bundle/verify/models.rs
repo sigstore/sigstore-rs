@@ -575,13 +575,12 @@ impl CheckedBundle {
             let mut found_matching_digest = false;
 
             for subject in subjects {
-                if let Some(digest_obj) = subject.get("digest") {
-                    if let Some(sha256_digest) = digest_obj.get("sha256").and_then(|v| v.as_str()) {
-                        if sha256_digest == input_digest_hex {
-                            found_matching_digest = true;
-                            break;
-                        }
-                    }
+                if let Some(digest_obj) = subject.get("digest")
+                    && let Some(sha256_digest) = digest_obj.get("sha256").and_then(|v| v.as_str())
+                    && sha256_digest == input_digest_hex
+                {
+                    found_matching_digest = true;
+                    break;
                 }
             }
 

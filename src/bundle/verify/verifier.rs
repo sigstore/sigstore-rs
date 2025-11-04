@@ -245,77 +245,77 @@ impl Verifier {
 
         // 3.5) Verify TSA timestamps if present (RFC 3161)
         let mut tsa_timestamp: Option<DateTime<Utc>> = None;
-        if let Some(timestamp_data) = &materials.timestamp_verification_data {
-            if !timestamp_data.rfc3161_timestamps.is_empty() {
+        if let Some(timestamp_data) = &materials.timestamp_verification_data
+            && !timestamp_data.rfc3161_timestamps.is_empty()
+        {
+            debug!(
+                "verifying {} RFC 3161 timestamp(s)",
+                timestamp_data.rfc3161_timestamps.len()
+            );
+
+            for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
+                // Verify the RFC 3161 timestamp against the signature bytes
+                let (tsa_cert, tsa_valid_for) = if let Some(tsa) = self.tsa_certs.first() {
+                    let valid_for = match (tsa.valid_from, tsa.valid_to) {
+                        (Some(from), Some(to)) => Some((from, to)),
+                        _ => None,
+                    };
+                    (Some(tsa.cert.clone()), valid_for)
+                } else {
+                    (None, None)
+                };
+
+                debug!("Calling verify_timestamp_response for timestamp {}", i);
+                let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
+                    &ts.signed_timestamp,
+                    &materials.signature,
+                    crate::crypto::timestamp::VerifyOpts {
+                        roots: self.tsa_root_certs.clone(),
+                        intermediates: self.tsa_intermediate_certs.clone(),
+                        tsa_certificate: tsa_cert,
+                        tsa_valid_for,
+                    },
+                )
+                .map_err(|e| {
+                    debug!("RFC 3161 timestamp {} verification failed: {}", i, e);
+                    SignatureErrorKind::TransparencyLogError(format!(
+                        "failed to verify RFC 3161 timestamp {}: {}",
+                        i, e
+                    ))
+                })?;
+
                 debug!(
-                    "verifying {} RFC 3161 timestamp(s)",
-                    timestamp_data.rfc3161_timestamps.len()
+                    "RFC 3161 timestamp {} verified successfully: {}",
+                    i, timestamp_result.time
                 );
 
-                for (i, ts) in timestamp_data.rfc3161_timestamps.iter().enumerate() {
-                    // Verify the RFC 3161 timestamp against the signature bytes
-                    let (tsa_cert, tsa_valid_for) = if let Some(tsa) = self.tsa_certs.first() {
-                        let valid_for = match (tsa.valid_from, tsa.valid_to) {
-                            (Some(from), Some(to)) => Some((from, to)),
-                            _ => None,
-                        };
-                        (Some(tsa.cert.clone()), valid_for)
-                    } else {
-                        (None, None)
-                    };
-
-                    debug!("Calling verify_timestamp_response for timestamp {}", i);
-                    let timestamp_result = crate::crypto::timestamp::verify_timestamp_response(
-                        &ts.signed_timestamp,
-                        &materials.signature,
-                        crate::crypto::timestamp::VerifyOpts {
-                            roots: self.tsa_root_certs.clone(),
-                            intermediates: self.tsa_intermediate_certs.clone(),
-                            tsa_certificate: tsa_cert,
-                            tsa_valid_for,
-                        },
-                    )
-                    .map_err(|e| {
-                        debug!("RFC 3161 timestamp {} verification failed: {}", i, e);
-                        SignatureErrorKind::TransparencyLogError(format!(
-                            "failed to verify RFC 3161 timestamp {}: {}",
-                            i, e
-                        ))
-                    })?;
-
-                    debug!(
-                        "RFC 3161 timestamp {} verified successfully: {}",
-                        i, timestamp_result.time
-                    );
-
-                    // Store the first timestamp for certificate validity checking
-                    if tsa_timestamp.is_none() {
-                        tsa_timestamp = Some(timestamp_result.time);
-                    }
-
-                    // Verify that the timestamp is within the signing certificate's validity period
-                    let timestamp_unix = timestamp_result.time.timestamp() as u64;
-                    let cert_not_before = tbs_certificate
-                        .validity
-                        .not_before
-                        .to_unix_duration()
-                        .as_secs();
-                    let cert_not_after = tbs_certificate
-                        .validity
-                        .not_after
-                        .to_unix_duration()
-                        .as_secs();
-                    if timestamp_unix < cert_not_before || timestamp_unix > cert_not_after {
-                        return Err(SignatureErrorKind::TransparencyLogError(format!(
-                            "RFC 3161 timestamp {} is outside signing certificate validity period (cert valid from {} to {}, timestamp is {})",
-                            i, cert_not_before, cert_not_after, timestamp_unix
-                        )))?;
-                    }
-                    debug!(
-                        "RFC 3161 timestamp {} is within signing certificate validity period",
-                        i
-                    );
+                // Store the first timestamp for certificate validity checking
+                if tsa_timestamp.is_none() {
+                    tsa_timestamp = Some(timestamp_result.time);
                 }
+
+                // Verify that the timestamp is within the signing certificate's validity period
+                let timestamp_unix = timestamp_result.time.timestamp() as u64;
+                let cert_not_before = tbs_certificate
+                    .validity
+                    .not_before
+                    .to_unix_duration()
+                    .as_secs();
+                let cert_not_after = tbs_certificate
+                    .validity
+                    .not_after
+                    .to_unix_duration()
+                    .as_secs();
+                if timestamp_unix < cert_not_before || timestamp_unix > cert_not_after {
+                    return Err(SignatureErrorKind::TransparencyLogError(format!(
+                        "RFC 3161 timestamp {} is outside signing certificate validity period (cert valid from {} to {}, timestamp is {})",
+                        i, cert_not_before, cert_not_after, timestamp_unix
+                    )))?;
+                }
+                debug!(
+                    "RFC 3161 timestamp {} is within signing certificate validity period",
+                    i
+                );
             }
         }
 
