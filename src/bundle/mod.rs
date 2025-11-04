@@ -20,9 +20,6 @@ pub mod dsse;
 pub mod intoto;
 mod models;
 
-pub mod dsse;
-pub mod intoto;
-
 #[cfg_attr(docsrs, doc(cfg(feature = "sign")))]
 #[cfg(feature = "sign")]
 pub mod sign;
