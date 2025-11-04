@@ -261,7 +261,8 @@ impl NoteSignature {
         }
 
         // Extract 4-byte key ID and signature bytes
-        let key_id: [u8; 4] = sig_bytes[0..4].try_into().unwrap();
+        // SAFETY: We've verified above that sig_bytes has at least 5 bytes
+        let key_id: [u8; 4] = [sig_bytes[0], sig_bytes[1], sig_bytes[2], sig_bytes[3]];
         let signature = sig_bytes[4..].to_vec();
 
         Ok(NoteSignature {

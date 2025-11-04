@@ -201,6 +201,9 @@ pub mod signing_key;
 #[cfg(any(feature = "sign", feature = "verify"))]
 pub(crate) mod transparency;
 
+pub mod merkle;
+pub mod note;
+
 #[cfg(test)]
 pub(crate) mod tests {
     use chrono::{DateTime, TimeDelta, Utc};
