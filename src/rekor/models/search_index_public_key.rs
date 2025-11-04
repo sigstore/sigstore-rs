@@ -31,9 +31,12 @@ impl SearchIndexPublicKey {
 }
 
 ///  The supported pluggable types to sign and upload data
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Default, Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+)]
 pub enum Format {
     #[serde(rename = "pgp")]
+    #[default]
     Pgp,
     #[serde(rename = "x509")]
     X509,
@@ -43,10 +46,4 @@ pub enum Format {
     Ssh,
     #[serde(rename = "tuf")]
     Tuf,
-}
-
-impl Default for Format {
-    fn default() -> Format {
-        Self::Pgp
-    }
 }
