@@ -60,7 +60,28 @@ impl Key {
     /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object.
     ///
     /// The key ID (fingerprint) is computed as the RFC 6962-style SHA256 hash of the SPKI.
+    ///
+    /// Note: This also handles PKCS#1 RSA keys (which are not in SPKI format) by detecting them
+    /// before attempting SPKI parsing. This is needed for compatibility with some TUF roots
+    /// (like the staging instance) that incorrectly provide PKCS#1 keys instead of SPKI keys.
     pub fn new(spki_bytes: &[u8]) -> Result<Self> {
+        // Check for PKCS#1 format FIRST (before SPKI parsing fails)
+        // PKCS#1 RSA keys start with SEQUENCE { INTEGER (modulus), INTEGER (exponent) }
+        // We can detect this by checking: byte[0] = 0x30 (SEQUENCE) and byte[4] = 0x02 (INTEGER)
+        if spki_bytes.len() >= 4 && spki_bytes[0] == 0x30 && spki_bytes[4] == 0x02 {
+            tracing::debug!(
+                "Detected PKCS#1 RSA key format (deprecated, used in staging) in Key::new()"
+            );
+            // For PKCS#1 keys, compute fingerprint from the raw bytes
+            let fingerprint = {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(spki_bytes);
+                hasher.finalize().into()
+            };
+            return Self::new_with_id(spki_bytes, fingerprint);
+        }
+
+        // Normal SPKI path
         let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
 
         // Compute RFC 6962-style key ID (SHA256 hash of SPKI)
@@ -99,7 +120,7 @@ impl Key {
                 // If successful, create an RSA key directly without SPKI wrapper
                 if spki_bytes.len() >= 4 && spki_bytes[0] == 0x30 && spki_bytes[4] == 0x02 {
                     // This looks like PKCS#1: SEQUENCE { INTEGER ... }
-                    tracing::debug!("Detected PKCS#1 RSA key format (deprecated, used in staging)");
+                    tracing::debug!("Detected deprecated PKCS#1 RSA key format");
                     return Ok(Key {
                         inner: UnparsedPublicKey::new(
                             &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
@@ -346,13 +367,34 @@ mod tests {
             "Staging trusted root should have 3 CTFE keys"
         );
 
-        // Create a keyring with all CTFE keys
+        // Create a keyring with all CTFE keys using their provided key IDs
         // This tests that our keyring can handle mixed key formats
-        let keyring = Keyring::new(ctfe_keys.values().copied())
+        let keys_with_ids: Vec<_> = ctfe_keys
+            .iter()
+            .map(|(key_id_hex, key_bytes)| {
+                let key_id_bytes = hex::decode(key_id_hex).expect("Key ID should be valid hex");
+                let key_id: [u8; 32] = key_id_bytes.try_into().expect("Key ID should be 32 bytes");
+                (key_id, *key_bytes)
+            })
+            .collect();
+
+        let keyring = Keyring::new_with_ids(keys_with_ids.iter().map(|(id, bytes)| (id, *bytes)))
             .expect("Failed to create keyring from staging CTFE keys");
 
         println!("✓ Successfully created keyring with all staging CTFE keys");
         println!("✓ This includes 1 PKCS#1 RSA key and 2 SPKI ECDSA keys");
+
+        // Verify that ALL 3 keys were actually loaded (not silently dropped)
+        // The keyring uses flat_map which silently ignores failed keys,
+        // so we need to check that all keys are present
+        for (key_id, _key_bytes) in keys_with_ids.iter() {
+            assert!(
+                keyring.contains_key(key_id),
+                "Key {} was not loaded into keyring (possibly due to parse failure)",
+                hex::encode(key_id)
+            );
+        }
+        println!("✓ Verified all 3 keys are present in keyring");
 
         drop(keyring);
     }

@@ -449,13 +449,25 @@ impl SigningContext {
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn from_trust_root(trust_root: SigstoreTrustRoot) -> SigstoreResult<Self> {
+        // Convert hex-encoded key IDs from trust root to [u8; 32]
+        let ctfe_keys = trust_root.ctfe_keys()?;
+        let keys_with_ids: Vec<([u8; 32], &[u8])> = ctfe_keys
+            .iter()
+            .filter_map(|(key_id_hex, key_bytes)| {
+                // Decode hex key ID to bytes
+                let key_id_vec = hex::decode(key_id_hex).ok()?;
+                let key_id: [u8; 32] = key_id_vec.try_into().ok()?;
+                Some((key_id, *key_bytes))
+            })
+            .collect();
+
         Ok(Self::new(
             FulcioClient::new(
                 Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
-            Keyring::new(trust_root.ctfe_keys()?.values().copied())?,
+            Keyring::new_with_ids(keys_with_ids.iter().map(|(id, bytes)| (id, *bytes)))?,
         ))
     }
 
