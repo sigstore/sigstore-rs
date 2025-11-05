@@ -451,10 +451,7 @@ pub fn verify_scts(
 
         // Check if we have the key for this SCT
         if !keyring.contains_key(&sct.log_id.key_id) {
-            debug!(
-                "Skipping SCT with log_id {}: key not in keyring",
-                log_id_hex
-            );
+            debug!("Skipping SCT with log_id {log_id_hex}: key not in keyring",);
             continue;
         }
 
@@ -462,11 +459,11 @@ pub fn verify_scts(
         let digitally_signed = scts.to_digitally_signed(sct);
         match verify_sct(digitally_signed, keyring) {
             Ok(()) => {
-                debug!("Successfully verified SCT with log_id {}", log_id_hex);
+                debug!("Successfully verified SCT with log_id: {log_id_hex}");
                 verified += 1;
             }
             Err(e) => {
-                debug!("Failed to verify SCT with log_id {}: {:?}", log_id_hex, e);
+                debug!("Failed to verify SCT with log_id {log_id_hex}: {e:?}");
                 // Continue trying other SCTs instead of failing immediately
                 continue;
             }
@@ -475,15 +472,11 @@ pub fn verify_scts(
 
     if verified < threshold {
         return Err(SCTError::Verification(KeyringError::KeyNotFound(format!(
-            "only able to verify {} SCT(s); unable to meet threshold of {}",
-            verified, threshold
+            "only able to verify {verified} SCT(s); unable to meet threshold of {threshold}",
         ))));
     }
 
-    debug!(
-        "Successfully verified {} SCT(s) (threshold: {})",
-        verified, threshold
-    );
+    debug!("Successfully verified {verified} SCT(s) (threshold: {threshold})",);
     Ok(())
 }
 
