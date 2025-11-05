@@ -157,11 +157,11 @@ impl SigstoreTrustRoot {
         tlogs
             .iter()
             .filter(|tlog| {
-                if let Some(public_key) = tlog.public_key.as_ref() {
-                    is_timerange_valid(public_key.valid_for.as_ref(), false)
-                } else {
-                    false
-                }
+                // For CTFE keys (CT logs), we accept expired keys because we need to verify
+                // old SCTs. The validity check will be done at SCT verification time based on
+                // the SCT timestamp, matching sigstore-go behavior.
+                // We only filter out entries that have no public key at all.
+                tlog.public_key.is_some()
             })
             .filter_map(|tlog| {
                 let key_id = tlog

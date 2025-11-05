@@ -30,7 +30,7 @@ use crate::{
         CertificatePool, CosignVerificationKey, Signature,
         keyring::Keyring,
         merkle,
-        transparency::{CertificateEmbeddedSCT, verify_sct},
+        transparency::{CertificateEmbeddedSCTs, verify_scts},
     },
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
@@ -215,11 +215,15 @@ impl Verifier {
 
         debug!("signing certificate chains back to trusted root");
 
-        let sct_context =
-            CertificateEmbeddedSCT::new_with_verified_path(&materials.certificate, &trusted_chain)
+        // Try to verify multiple SCTs (matching sigstore-go behavior).
+        // This allows old bundles with rotated CTFE keys to still verify if they have
+        // at least one SCT that can be verified with the current trust root.
+        let scts_context =
+            CertificateEmbeddedSCTs::new_with_verified_path(&materials.certificate, &trusted_chain)
                 .map_err(CertificateErrorKind::Sct)?;
-        verify_sct(&sct_context, &self.ctfe_keyring).map_err(CertificateErrorKind::Sct)?;
-        debug!("signing certificate's SCT is valid");
+        // Use threshold of 1 - at least one SCT must be verifiable
+        verify_scts(&scts_context, &self.ctfe_keyring, 1).map_err(CertificateErrorKind::Sct)?;
+        debug!("signing certificate's SCT(s) are valid");
 
         // 2) Verify that the signing certificate belongs to the signer.
         policy.verify(&materials.certificate)?;

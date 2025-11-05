@@ -41,11 +41,10 @@ use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
 
-use crate::bundle::dsse;
 use crate::bundle::intoto::Statement;
 use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
-use crate::crypto::transparency::{CertificateEmbeddedSCT, verify_sct};
+use crate::crypto::transparency::verify_sct;
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::fulcio::{self, FULCIO_ROOT, FulcioClient};
@@ -54,6 +53,7 @@ use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
 use crate::trust::TrustRoot;
+use crate::{bundle::dsse, crypto::transparency::CertificateEmbeddedSCT};
 
 #[cfg(feature = "sigstore-trust-root")]
 use crate::trust::sigstore::SigstoreTrustRoot;

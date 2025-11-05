@@ -153,6 +153,14 @@ pub struct CertificateEmbeddedSCT<'a> {
     issuer_id: [u8; 32],
 }
 
+/// Collection of SCTs from a certificate that can be verified
+#[derive(Debug)]
+pub struct CertificateEmbeddedSCTs<'a> {
+    cert: &'a Certificate,
+    scts: Vec<SignedCertificateTimestamp>,
+    issuer_id: [u8; 32],
+}
+
 impl<'a> CertificateEmbeddedSCT<'a> {
     fn new_with_spki(cert: &'a Certificate, spki: &[u8]) -> Result<Self, SCTError> {
         let scts: SignedCertificateTimestampList = match cert.tbs_certificate.get() {
@@ -231,6 +239,112 @@ impl<'a> CertificateEmbeddedSCT<'a> {
     }
 }
 
+impl<'a> CertificateEmbeddedSCTs<'a> {
+    fn new_with_spki(cert: &'a Certificate, spki: &[u8]) -> Result<Self, SCTError> {
+        let scts_list: SignedCertificateTimestampList = match cert.tbs_certificate.get() {
+            Ok(Some((_, ext))) => ext,
+            _ => return Err(SCTError::Parsing(CertificateErrorKind::LeafSCTMissing))?,
+        };
+
+        // Parse all SCT structures
+        let parsed_timestamps = scts_list
+            .parse_timestamps()
+            .map_err(CertificateErrorKind::from)?;
+
+        let mut scts = Vec::new();
+        for timestamp in parsed_timestamps.iter() {
+            match timestamp.parse_timestamp() {
+                Ok(sct) => scts.push(sct),
+                Err(e) => {
+                    // Log but don't fail - skip unparseable SCTs
+                    debug!("Failed to parse SCT, skipping: {:?}", e);
+                    continue;
+                }
+            }
+        }
+
+        if scts.is_empty() {
+            return Err(CertificateErrorKind::LeafSCTMissing)?;
+        }
+
+        let issuer_id = {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(spki);
+            hasher.finalize().into()
+        };
+
+        Ok(Self {
+            cert,
+            scts,
+            issuer_id,
+        })
+    }
+
+    pub fn new_with_verified_path(
+        leaf: &'a Certificate,
+        chain: &webpki::VerifiedPath,
+    ) -> Result<Self, SCTError> {
+        let issuer_spki = if let Some(issuer) = chain.intermediate_certificates().next() {
+            debug!("intermediate is the leaf's issuer");
+
+            let issuer = Certificate::from_der(&issuer.der())
+                .map_err(CertificateErrorKind::from)?
+                .tbs_certificate;
+            issuer
+                .subject_public_key_info
+                .to_der()
+                .map_err(CertificateErrorKind::from)?
+        } else {
+            debug!("anchor is the leaf's issuer");
+
+            // Prefix the SPKI with the DER SEQUENCE tag and a short definite-form length.
+            let body = &chain.anchor().subject_public_key_info[..];
+            let body_len = body
+                .len()
+                .try_into()
+                .or(Err(CertificateErrorKind::IssuerMalformed))?;
+            let prefix = &[0x30u8, body_len];
+
+            [prefix, body].concat()
+        };
+
+        Self::new_with_spki(leaf, &issuer_spki)
+    }
+
+    /// Create DigitallySigned for a specific SCT by index
+    fn to_digitally_signed(&self, sct: &SignedCertificateTimestamp) -> DigitallySigned {
+        // Construct the precert by filtering out the SCT extension.
+        let mut tbs_precert = self.cert.tbs_certificate.clone();
+        tbs_precert.extensions = tbs_precert.extensions.map(|exts| {
+            exts.iter()
+                .filter(|v| v.extn_id != CT_PRECERT_SCTS)
+                .cloned()
+                .collect()
+        });
+
+        let mut tbs_precert_der = Vec::new();
+        tbs_precert
+            .encode_to_vec(&mut tbs_precert_der)
+            .expect("failed to re-encode Precertificate!");
+
+        DigitallySigned {
+            version: match sct.version {
+                Version::V1 => Version::V1,
+            },
+            signature_type: SignatureType::CertificateTimestamp,
+            timestamp: sct.timestamp,
+            signed_entry: SignedEntry::PrecertEntry(PreCert {
+                issuer_key_hash: self.issuer_id,
+                tbs_certificate: tbs_precert_der.as_slice().into(),
+            }),
+            extensions: sct.extensions.clone(),
+
+            log_id: sct.log_id.key_id,
+            signature: sct.signature.signature.clone().into(),
+        }
+    }
+}
+
 impl From<&CertificateEmbeddedSCT<'_>> for DigitallySigned {
     fn from(value: &CertificateEmbeddedSCT) -> Self {
         // Construct the precert by filtering out the SCT extension.
@@ -302,6 +416,74 @@ where
 
     keyring.verify(&sct.log_id, &sct.signature, &serialized)?;
 
+    Ok(())
+}
+
+/// Verifies multiple SCTs from a certificate, matching sigstore-go behavior.
+///
+/// This function attempts to verify all SCTs in the certificate and succeeds if at least
+/// `threshold` SCTs can be verified. SCTs that cannot be verified (e.g., key not in keyring,
+/// or verification fails) are skipped rather than causing immediate failure.
+///
+/// This matches the behavior of sigstore-go which allows for key rotation - old bundles
+/// may have SCTs signed by keys that are no longer in the trust root, but as long as
+/// at least one SCT can be verified, the certificate is considered valid.
+///
+/// # Arguments
+///
+/// * `scts` - The collection of SCTs from the certificate
+/// * `keyring` - The keyring containing trusted CTFE keys
+/// * `threshold` - Minimum number of SCTs that must be verified (typically 1)
+///
+/// # Returns
+///
+/// Returns `Ok(())` if at least `threshold` SCTs were successfully verified.
+/// Returns `Err` if fewer than `threshold` SCTs could be verified.
+pub fn verify_scts(
+    scts: &CertificateEmbeddedSCTs,
+    keyring: &Keyring,
+    threshold: usize,
+) -> Result<(), SCTError> {
+    let mut verified = 0;
+
+    for sct in &scts.scts {
+        let log_id_hex = hex::encode(sct.log_id.key_id);
+
+        // Check if we have the key for this SCT
+        if !keyring.contains_key(&sct.log_id.key_id) {
+            debug!(
+                "Skipping SCT with log_id {}: key not in keyring",
+                log_id_hex
+            );
+            continue;
+        }
+
+        // Try to verify this SCT
+        let digitally_signed = scts.to_digitally_signed(sct);
+        match verify_sct(digitally_signed, keyring) {
+            Ok(()) => {
+                debug!("Successfully verified SCT with log_id {}", log_id_hex);
+                verified += 1;
+            }
+            Err(e) => {
+                debug!("Failed to verify SCT with log_id {}: {:?}", log_id_hex, e);
+                // Continue trying other SCTs instead of failing immediately
+                continue;
+            }
+        }
+    }
+
+    if verified < threshold {
+        return Err(SCTError::Verification(KeyringError::KeyNotFound(format!(
+            "only able to verify {} SCT(s); unable to meet threshold of {}",
+            verified, threshold
+        ))));
+    }
+
+    debug!(
+        "Successfully verified {} SCT(s) (threshold: {})",
+        verified, threshold
+    );
     Ok(())
 }
 

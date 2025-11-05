@@ -41,8 +41,8 @@ pub enum KeyringError {
     #[error("unsupported algorithm")]
     AlgoUnsupported,
 
-    #[error("requested key not in keyring")]
-    KeyNotFound,
+    #[error("requested key not in keyring: {0}")]
+    KeyNotFound(String),
     #[error("verification failed")]
     VerificationFailed,
 }
@@ -191,9 +191,17 @@ impl Keyring {
         ))
     }
 
+    /// Checks if the keyring contains a key with the given ID.
+    pub fn contains_key(&self, key_id: &[u8; 32]) -> bool {
+        self.0.contains_key(key_id)
+    }
+
     /// Verifies `data` against a `signature` with a public key identified by `key_id`.
     pub fn verify(&self, key_id: &[u8; 32], signature: &[u8], data: &[u8]) -> Result<()> {
-        let key = self.0.get(key_id).ok_or(KeyringError::KeyNotFound)?;
+        let key = self
+            .0
+            .get(key_id)
+            .ok_or(KeyringError::KeyNotFound(hex::encode(key_id)))?;
 
         key.inner.verify(data, signature).map_err(|e| {
             tracing::debug!("Keyring verification failed: {:?}", e);
