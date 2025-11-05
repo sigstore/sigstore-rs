@@ -280,6 +280,19 @@ impl<'a> CertificateEmbeddedSCTs<'a> {
         })
     }
 
+    pub fn new(leaf: &'a Certificate, chain: &[Certificate]) -> Result<Self, SCTError> {
+        // Traverse chain to find the issuer we're verifying against.
+        let issuer = find_issuer_cert(chain);
+        let spki = issuer
+            .ok_or(CertificateErrorKind::IssuerMissing)?
+            .tbs_certificate
+            .subject_public_key_info
+            .to_der()
+            .map_err(CertificateErrorKind::from)?;
+
+        Self::new_with_spki(leaf, &spki)
+    }
+
     pub fn new_with_verified_path(
         leaf: &'a Certificate,
         chain: &webpki::VerifiedPath,

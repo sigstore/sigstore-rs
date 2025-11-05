@@ -44,7 +44,7 @@ use x509_cert::ext::pkix as x509_ext;
 use crate::bundle::intoto::Statement;
 use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
-use crate::crypto::transparency::verify_sct;
+use crate::crypto::transparency::{verify_sct, verify_scts};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::fulcio::{self, FULCIO_ROOT, FulcioClient};
@@ -53,7 +53,7 @@ use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
 use crate::rekor::apis::entries_api::create_log_entry;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
 use crate::trust::TrustRoot;
-use crate::{bundle::dsse, crypto::transparency::CertificateEmbeddedSCT};
+use crate::{bundle::dsse, crypto::transparency::CertificateEmbeddedSCTs};
 
 #[cfg(feature = "sigstore-trust-root")]
 use crate::trust::sigstore::SigstoreTrustRoot;
@@ -152,11 +152,16 @@ impl<'ctx> SigningSession<'ctx> {
             return Err(SigstoreError::ExpiredSigningSession());
         }
 
+        // Verify SCTs from the Fulcio-issued certificate
         if let Some(detached_sct) = &self.certs.detached_sct {
+            // Detached SCT - use single SCT verification
             verify_sct(detached_sct, &self.context.ctfe_keyring)?;
         } else {
-            let sct = CertificateEmbeddedSCT::new(&self.certs.cert, &self.certs.chain)?;
-            verify_sct(&sct, &self.context.ctfe_keyring)?;
+            // Embedded SCTs - use multi-SCT verification with threshold of 1
+            // This allows signing to work even if some CTFE keys in the trust root
+            // are malformed or missing, as long as at least one SCT can be verified
+            let scts = CertificateEmbeddedSCTs::new(&self.certs.cert, &self.certs.chain)?;
+            verify_scts(&scts, &self.context.ctfe_keyring, 1)?;
         }
 
         // Sign artifact.
