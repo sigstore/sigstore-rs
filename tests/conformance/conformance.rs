@@ -167,8 +167,12 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
         let config: SigningConfig = serde_json::from_slice(&config_data)
             .with_context(|| format!("failed to parse signing config: {}", config_path))?;
 
-        // Extract the Fulcio URL from ca_url
-        Some(config.ca_url)
+        // Extract the Fulcio URL from ca_urls (v0.2 format)
+        if !config.ca_urls.is_empty() {
+            Some(config.ca_urls[0].url.clone())
+        } else {
+            None
+        }
     } else {
         None
     };

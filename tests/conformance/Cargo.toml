@@ -15,7 +15,7 @@ sigstore = { path = "../../", default-features = false, features = [
     "full",
     "native-tls",
 ] }
-sigstore_protobuf_specs = "0.3.2"
+sigstore_protobuf_specs = "0.5.0"
 tracing-subscriber = "0.3"
 
 [[bin]]

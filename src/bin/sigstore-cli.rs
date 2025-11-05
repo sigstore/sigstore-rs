@@ -288,3 +288,53 @@ fn get_identity_token() -> Result<oauth::IdentityToken, Box<dyn std::error::Erro
     let (_, token) = listener.redirect_listener()?;
     Ok(oauth::IdentityToken::from(token))
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_load_signing_config_v02() {
+        use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
+
+        // Load the v0.2 signing config
+        let test_data = env!("CARGO_MANIFEST_DIR");
+        let config_path = format!("{}/tests/data/signing_config.v0.2.json", test_data);
+        let config_data = std::fs::read(config_path).expect("failed to read signing config file");
+        let config: SigningConfig =
+            serde_json::from_slice(&config_data).expect("failed to parse signing config");
+
+        // Verify the config was parsed correctly
+        assert_eq!(
+            config.media_type,
+            "application/vnd.dev.sigstore.signingconfig.v0.2+json"
+        );
+
+        // Check CA URLs
+        assert!(
+            !config.ca_urls.is_empty(),
+            "should have at least one CA URL"
+        );
+        assert_eq!(config.ca_urls[0].url, "https://fulcio.sigstage.dev");
+
+        // Check Rekor TLog URLs
+        assert!(
+            !config.rekor_tlog_urls.is_empty(),
+            "should have at least one Rekor URL"
+        );
+        assert!(
+            config
+                .rekor_tlog_urls
+                .iter()
+                .any(|u| u.url == "https://log2025-alpha3.rekor.sigstage.dev")
+        );
+
+        // Check TSA URLs
+        assert!(
+            !config.tsa_urls.is_empty(),
+            "should have at least one TSA URL"
+        );
+        assert_eq!(
+            config.tsa_urls[0].url,
+            "https://timestamp.sigstage.dev/api/v1/timestamp"
+        );
+    }
+}
