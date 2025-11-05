@@ -449,6 +449,19 @@ impl SigningContext {
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn from_trust_root(trust_root: SigstoreTrustRoot) -> SigstoreResult<Self> {
+        Self::from_trust_root_and_fulcio(trust_root, None)
+    }
+
+    /// Returns a [`SigningContext`] configured with a custom trust root and optional Fulcio URL.
+    ///
+    /// This allows using a custom Sigstore trust root and Fulcio instance for signing operations.
+    /// If no Fulcio URL is provided, defaults to the production Fulcio instance.
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
+    #[cfg(feature = "sigstore-trust-root")]
+    pub fn from_trust_root_and_fulcio(
+        trust_root: SigstoreTrustRoot,
+        fulcio_url: Option<String>,
+    ) -> SigstoreResult<Self> {
         // Convert hex-encoded key IDs from trust root to [u8; 32]
         let ctfe_keys = trust_root.ctfe_keys()?;
         let keys_with_ids: Vec<([u8; 32], &[u8])> = ctfe_keys
@@ -461,9 +474,13 @@ impl SigningContext {
             })
             .collect();
 
+        let fulcio_url_str = fulcio_url.as_deref().unwrap_or(FULCIO_ROOT);
+        let fulcio_url_parsed = Url::parse(fulcio_url_str)
+            .map_err(|e| SigstoreError::UnexpectedError(format!("Invalid Fulcio URL: {}", e)))?;
+
         Ok(Self::new(
             FulcioClient::new(
-                Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
+                fulcio_url_parsed,
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             Default::default(),
