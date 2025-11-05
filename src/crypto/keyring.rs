@@ -58,6 +58,25 @@ struct Key {
 }
 
 impl Key {
+    /// Helper function to detect and create a PKCS#1 RSA key.
+    ///
+    /// Returns Some(Key) if the bytes represent a valid PKCS#1 RSA key, None otherwise.
+    /// This is used for compatibility with staging TUF roots that provide PKCS#1 keys.
+    fn try_pkcs1_rsa(spki_bytes: &[u8], fingerprint: [u8; 32]) -> Option<Self> {
+        // Try to parse as PKCS#1 RSA key to properly validate the format
+        if RsaPublicKey::from_der(spki_bytes).is_ok() {
+            tracing::debug!("Detected deprecated PKCS#1 RSA key format");
+            return Some(Key {
+                inner: UnparsedPublicKey::new(
+                    &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
+                    spki_bytes.to_owned(),
+                ),
+                fingerprint,
+            });
+        }
+        None
+    }
+
     /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object.
     ///
     /// The key ID (fingerprint) is computed as the RFC 6962-style SHA256 hash of the SPKI.
@@ -67,19 +86,13 @@ impl Key {
     /// (like the staging instance) that incorrectly provide PKCS#1 keys instead of SPKI keys.
     pub fn new(spki_bytes: &[u8]) -> Result<Self> {
         // Check for PKCS#1 format FIRST (before SPKI parsing fails)
-        // PKCS#1 RSA keys start with SEQUENCE { INTEGER (modulus), INTEGER (exponent) }
-        // Try to parse as PKCS#1 RSA key to properly validate the format
-        if let Ok(_rsa_key) = RsaPublicKey::from_der(spki_bytes) {
-            tracing::debug!(
-                "Detected PKCS#1 RSA key format (deprecated, used in staging) in Key::new()"
-            );
-            // For PKCS#1 keys, compute fingerprint from the raw bytes
-            let fingerprint = {
-                let mut hasher = sha2::Sha256::new();
-                hasher.update(spki_bytes);
-                hasher.finalize().into()
-            };
-            return Self::new_with_id(spki_bytes, fingerprint);
+        // For PKCS#1 keys, compute fingerprint from the raw bytes
+        if let Some(key) = Self::try_pkcs1_rsa(spki_bytes, {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(spki_bytes);
+            hasher.finalize().into()
+        }) {
+            return Ok(key);
         }
 
         // Normal SPKI path
@@ -109,16 +122,8 @@ impl Key {
             Ok(spki) => spki,
             Err(spki_err) => {
                 // If SPKI parsing fails, check if it's a PKCS#1 RSA key (used in staging TUF root)
-                // Try to parse as PKCS#1 RSA key to properly validate the format
-                if let Ok(_rsa_key) = RsaPublicKey::from_der(spki_bytes) {
-                    tracing::debug!("Detected deprecated PKCS#1 RSA key format in new_with_id()");
-                    return Ok(Key {
-                        inner: UnparsedPublicKey::new(
-                            &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
-                            spki_bytes.to_owned(),
-                        ),
-                        fingerprint,
-                    });
+                if let Some(key) = Self::try_pkcs1_rsa(spki_bytes, fingerprint) {
+                    return Ok(key);
                 }
 
                 // Not PKCS#1 either, return the original SPKI error
