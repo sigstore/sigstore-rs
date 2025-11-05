@@ -24,6 +24,7 @@ use const_oid::{
     db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1},
 };
 use digest::Digest;
+use pkcs1::RsaPublicKey;
 use thiserror::Error;
 use x509_cert::{
     der,
@@ -67,8 +68,8 @@ impl Key {
     pub fn new(spki_bytes: &[u8]) -> Result<Self> {
         // Check for PKCS#1 format FIRST (before SPKI parsing fails)
         // PKCS#1 RSA keys start with SEQUENCE { INTEGER (modulus), INTEGER (exponent) }
-        // We can detect this by checking: byte[0] = 0x30 (SEQUENCE) and byte[4] = 0x02 (INTEGER)
-        if spki_bytes.len() >= 4 && spki_bytes[0] == 0x30 && spki_bytes[4] == 0x02 {
+        // Try to parse as PKCS#1 RSA key to properly validate the format
+        if let Ok(_rsa_key) = RsaPublicKey::from_der(spki_bytes) {
             tracing::debug!(
                 "Detected PKCS#1 RSA key format (deprecated, used in staging) in Key::new()"
             );
@@ -108,19 +109,9 @@ impl Key {
             Ok(spki) => spki,
             Err(spki_err) => {
                 // If SPKI parsing fails, check if it's a PKCS#1 RSA key (used in staging TUF root)
-                // PKCS#1 RSA keys start with SEQUENCE { INTEGER (modulus), INTEGER (exponent) }
-                // We can detect this by checking if it's a SEQUENCE containing INTEGERs
-                tracing::debug!(
-                    "Failed to parse as SPKI (len={}, first_bytes={:02x?}), checking if PKCS#1 RSA...",
-                    spki_bytes.len(),
-                    &spki_bytes[..spki_bytes.len().min(10)]
-                );
-
-                // Try to parse as PKCS#1 RSA key
-                // If successful, create an RSA key directly without SPKI wrapper
-                if spki_bytes.len() >= 4 && spki_bytes[0] == 0x30 && spki_bytes[4] == 0x02 {
-                    // This looks like PKCS#1: SEQUENCE { INTEGER ... }
-                    tracing::debug!("Detected deprecated PKCS#1 RSA key format");
+                // Try to parse as PKCS#1 RSA key to properly validate the format
+                if let Ok(_rsa_key) = RsaPublicKey::from_der(spki_bytes) {
+                    tracing::debug!("Detected deprecated PKCS#1 RSA key format in new_with_id()");
                     return Ok(Key {
                         inner: UnparsedPublicKey::new(
                             &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
@@ -132,8 +123,9 @@ impl Key {
 
                 // Not PKCS#1 either, return the original SPKI error
                 tracing::debug!(
-                    "Not PKCS#1 format either, failing with SPKI error: {:?}",
-                    spki_err
+                    "Failed to parse as both SPKI and PKCS#1 RSA (len={}, first_bytes={:02x?})",
+                    spki_bytes.len(),
+                    &spki_bytes[..spki_bytes.len().min(10)]
                 );
                 return Err(spki_err.into());
             }
@@ -199,12 +191,58 @@ impl Keyring {
     /// the trusted root.
     pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
         let keys_vec: Vec<_> = keys.into_iter().collect();
-        tracing::debug!("Creating keyring from {} key(s)", keys_vec.len());
+        let num_input_keys = keys_vec.len();
+        tracing::debug!("Creating keyring from {} key(s)", num_input_keys);
 
-        Ok(Self(
-            keys_vec
-                .into_iter()
-                .flat_map(|key_bytes| match Key::new(key_bytes) {
+        let loaded_keys: HashMap<[u8; 32], Key> = keys_vec
+            .into_iter()
+            .flat_map(|key_bytes| match Key::new(key_bytes) {
+                Ok(key) => {
+                    tracing::debug!(
+                        "Loaded key with fingerprint: {}",
+                        hex::encode(key.fingerprint)
+                    );
+                    Some(key)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load key: {:?}", e);
+                    None
+                }
+            })
+            .map(|k| Ok((k.fingerprint, k)))
+            .collect::<Result<_>>()?;
+
+        if loaded_keys.is_empty() && num_input_keys > 0 {
+            return Err(KeyringError::AlgoUnsupported);
+        }
+
+        tracing::debug!(
+            "Successfully loaded {}/{} key(s) into keyring",
+            loaded_keys.len(),
+            num_input_keys
+        );
+
+        Ok(Self(loaded_keys))
+    }
+
+    /// Creates a `Keyring` from DER encoded SPKI-format public keys with explicit key IDs.
+    ///
+    /// This method should be used for Rekor transparency logs where key IDs are provided
+    /// by the trusted root, rather than being computed from the SPKI.
+    pub fn new_with_ids<'a>(
+        keys: impl IntoIterator<Item = (&'a [u8; 32], &'a [u8])>,
+    ) -> Result<Self> {
+        let keys_vec: Vec<_> = keys.into_iter().collect();
+        let num_input_keys = keys_vec.len();
+        tracing::debug!(
+            "Creating keyring from {} key(s) with explicit IDs",
+            num_input_keys
+        );
+
+        let loaded_keys: HashMap<[u8; 32], Key> = keys_vec
+            .into_iter()
+            .flat_map(
+                |(key_id, key_bytes)| match Key::new_with_id(key_bytes, *key_id) {
                     Ok(key) => {
                         tracing::debug!(
                             "Loaded key with fingerprint: {}",
@@ -216,46 +254,22 @@ impl Keyring {
                         tracing::warn!("Failed to load key: {:?}", e);
                         None
                     }
-                })
-                .map(|k| Ok((k.fingerprint, k)))
-                .collect::<Result<_>>()?,
-        ))
-    }
+                },
+            )
+            .map(|k| Ok((k.fingerprint, k)))
+            .collect::<Result<_>>()?;
 
-    /// Creates a `Keyring` from DER encoded SPKI-format public keys with explicit key IDs.
-    ///
-    /// This method should be used for Rekor transparency logs where key IDs are provided
-    /// by the trusted root, rather than being computed from the SPKI.
-    pub fn new_with_ids<'a>(
-        keys: impl IntoIterator<Item = (&'a [u8; 32], &'a [u8])>,
-    ) -> Result<Self> {
-        let keys_vec: Vec<_> = keys.into_iter().collect();
+        if loaded_keys.is_empty() && num_input_keys > 0 {
+            return Err(KeyringError::AlgoUnsupported);
+        }
+
         tracing::debug!(
-            "Creating keyring from {} key(s) with explicit IDs",
-            keys_vec.len()
+            "Successfully loaded {}/{} key(s) into keyring",
+            loaded_keys.len(),
+            num_input_keys
         );
 
-        Ok(Self(
-            keys_vec
-                .into_iter()
-                .flat_map(
-                    |(key_id, key_bytes)| match Key::new_with_id(key_bytes, *key_id) {
-                        Ok(key) => {
-                            tracing::debug!(
-                                "Loaded key with fingerprint: {}",
-                                hex::encode(key.fingerprint)
-                            );
-                            Some(key)
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to load key: {:?}", e);
-                            None
-                        }
-                    },
-                )
-                .map(|k| Ok((k.fingerprint, k)))
-                .collect::<Result<_>>()?,
-        ))
+        Ok(Self(loaded_keys))
     }
 
     /// Checks if the keyring contains a key with the given ID.
