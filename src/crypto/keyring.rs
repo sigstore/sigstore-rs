@@ -77,8 +77,46 @@ impl Key {
     ///
     /// This method should be used when the key ID is provided externally (e.g., from a trusted root),
     /// rather than being computed from the SPKI.
+    ///
+    /// Note: This also handles PKCS#1 RSA keys (which are not in SPKI format) by detecting them
+    /// and converting them to RSA keys. This is needed for compatibility with some TUF roots
+    /// (like the staging instance) that incorrectly provide PKCS#1 keys instead of SPKI keys.
     pub fn new_with_id(spki_bytes: &[u8], fingerprint: [u8; 32]) -> Result<Self> {
-        let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
+        // First try to parse as SPKI (the expected format)
+        let spki = match SubjectPublicKeyInfoOwned::from_der(spki_bytes) {
+            Ok(spki) => spki,
+            Err(spki_err) => {
+                // If SPKI parsing fails, check if it's a PKCS#1 RSA key (used in staging TUF root)
+                // PKCS#1 RSA keys start with SEQUENCE { INTEGER (modulus), INTEGER (exponent) }
+                // We can detect this by checking if it's a SEQUENCE containing INTEGERs
+                tracing::debug!(
+                    "Failed to parse as SPKI (len={}, first_bytes={:02x?}), checking if PKCS#1 RSA...",
+                    spki_bytes.len(),
+                    &spki_bytes[..spki_bytes.len().min(10)]
+                );
+
+                // Try to parse as PKCS#1 RSA key
+                // If successful, create an RSA key directly without SPKI wrapper
+                if spki_bytes.len() >= 4 && spki_bytes[0] == 0x30 && spki_bytes[4] == 0x02 {
+                    // This looks like PKCS#1: SEQUENCE { INTEGER ... }
+                    tracing::debug!("Detected PKCS#1 RSA key format (deprecated, used in staging)");
+                    return Ok(Key {
+                        inner: UnparsedPublicKey::new(
+                            &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
+                            spki_bytes.to_owned(),
+                        ),
+                        fingerprint,
+                    });
+                }
+
+                // Not PKCS#1 either, return the original SPKI error
+                tracing::debug!(
+                    "Not PKCS#1 format either, failing with SPKI error: {:?}",
+                    spki_err
+                );
+                return Err(spki_err.into());
+            }
+        };
 
         // Ed25519 keys don't have algorithm parameters
         if spki.algorithm.oid == ID_ED25519 {
@@ -95,10 +133,18 @@ impl Key {
         }
 
         let (algo, params) = if let Some(params) = &spki.algorithm.parameters {
-            // Special-case RSA keys, which don't have SPKI parameters.
+            // RSA keys have NULL parameters in SPKI format
             if spki.algorithm.oid == RSA_ENCRYPTION && params == &der::Any::null() {
-                // TODO(tnytown): Do we need to support RSA keys?
-                return Err(KeyringError::AlgoUnsupported);
+                // RSA key with SHA256 (used by Sigstore CTFE logs)
+                // Note: Sigstore uses RSA PKCS#1v1.5 with SHA256 for SCT signatures
+                tracing::debug!("RSA key detected, using RSA_PKCS1_2048_8192_SHA256");
+                return Ok(Key {
+                    inner: UnparsedPublicKey::new(
+                        &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
+                        spki.subject_public_key.raw_bytes().to_owned(),
+                    ),
+                    fingerprint,
+                });
             };
 
             (spki.algorithm.oid, params.decode_as()?)
@@ -218,6 +264,98 @@ mod tests {
     use crate::crypto::signing_key::ecdsa::{ECDSAKeys, EllipticCurve};
     use digest::Digest;
     use std::io::Write;
+
+    #[test]
+    fn test_pkcs1_rsa_key_from_staging_tuf() {
+        // This is a CTFE RSA public key from the Sigstore staging TUF repository.
+        // Source: https://tuf-repo-cdn.sigstage.dev (ctlogs[0])
+        // Format: PKCS#1 RSAPublicKey (deprecated format, but used in staging)
+        //
+        // The key is in PKCS#1 format instead of the standard SPKI format.
+        // According to sigstore-go: "This key format is deprecated, but currently
+        // in use for Sigstore staging instance"
+        //
+        // Our keyring now supports both formats:
+        // - Standard SPKI format (used in production)
+        // - Legacy PKCS#1 format (used in staging, for compatibility)
+
+        // Load the test key from file
+        const KEY_PATH: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/keys/ctfe_rsa_pkcs1_staging.der"
+        );
+        let rsa_key_bytes = std::fs::read(KEY_PATH)
+            .expect("Failed to read test RSA key - make sure tests/data/keys/ctfe_rsa_pkcs1_staging.der exists");
+
+        // Create a keyring with this PKCS#1 RSA key
+        // This should succeed now that we have PKCS#1 support
+        let result = Keyring::new([rsa_key_bytes.as_slice()]);
+
+        match result {
+            Ok(keyring) => {
+                // Success! The PKCS#1 RSA key was loaded
+                println!("✓ Keyring created successfully with PKCS#1 RSA key");
+
+                // Verify the keyring is not empty (the key was actually loaded)
+                // Note: We can't easily check the internal hashmap, but the fact
+                // that Keyring::new() succeeded without returning AlgoUnsupported
+                // means the key was processed
+                drop(keyring);
+            }
+            Err(e) => {
+                panic!(
+                    "❌ Failed to load PKCS#1 RSA key: {:?}\nThis key should be supported for staging compatibility",
+                    e
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "sigstore-trust-root")]
+    fn test_load_staging_trusted_root_with_pkcs1_rsa() {
+        use crate::trust::TrustRoot;
+        use crate::trust::sigstore::SigstoreTrustRoot;
+        use std::path::Path;
+
+        // Load the staging trusted root which contains a PKCS#1 RSA key
+        const STAGING_ROOT_PATH: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/keys/staging_trusted_root.json"
+        );
+
+        let staging_root = SigstoreTrustRoot::from_file_unchecked(Path::new(STAGING_ROOT_PATH))
+            .expect("Failed to load staging trusted root");
+
+        // Extract CTFE keys - this should succeed even with the PKCS#1 RSA key
+        let ctfe_keys = staging_root
+            .ctfe_keys()
+            .expect("Failed to get CTFE keys from staging root");
+
+        println!(
+            "✓ Loaded {} CTFE key(s) from staging trusted root",
+            ctfe_keys.len()
+        );
+
+        // The staging root has 3 CTFE keys:
+        // - 1 RSA 4096-bit key (PKCS#1 format)
+        // - 2 ECDSA P256 keys (SPKI format)
+        assert_eq!(
+            ctfe_keys.len(),
+            3,
+            "Staging trusted root should have 3 CTFE keys"
+        );
+
+        // Create a keyring with all CTFE keys
+        // This tests that our keyring can handle mixed key formats
+        let keyring = Keyring::new(ctfe_keys.values().copied())
+            .expect("Failed to create keyring from staging CTFE keys");
+
+        println!("✓ Successfully created keyring with all staging CTFE keys");
+        println!("✓ This includes 1 PKCS#1 RSA key and 2 SPKI ECDSA keys");
+
+        drop(keyring);
+    }
 
     #[test]
     fn verify_keyring() {
