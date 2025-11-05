@@ -67,6 +67,14 @@ struct SignBundle {
     #[clap(long)]
     bundle: String,
 
+    // Optional path to a custom trusted root JSON file
+    #[clap(long)]
+    trusted_root: Option<String>,
+
+    // Optional path to a custom signing config JSON file
+    #[clap(long)]
+    signing_config: Option<String>,
+
     // The artifact to sign
     artifact: String,
 }
@@ -134,16 +142,31 @@ fn main() {
 }
 
 fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use sigstore::trust::sigstore::SigstoreTrustRoot;
+    use std::path::Path;
+
     let SignBundle {
         identity_token,
         bundle,
+        trusted_root,
+        signing_config: _signing_config,
         artifact,
     } = args;
+
     let identity_token = IdentityToken::try_from(identity_token.as_str())?;
     let bundle = fs::File::create(bundle)?;
     let mut artifact = fs::File::open(artifact)?;
 
-    let context = SigningContext::production()?;
+    // Create signing context with custom or production trust root
+    let context = if let Some(trusted_root_path) = trusted_root {
+        let trust_root = SigstoreTrustRoot::from_file_unchecked(Path::new(&trusted_root_path))
+            .with_context(|| format!("failed to load trusted root from: {}", trusted_root_path))?;
+        SigningContext::from_trust_root(trust_root)?
+    } else {
+        SigningContext::production()?
+    };
+
     let signer = context.blocking_signer(identity_token);
 
     let signing_artifact = signer?.sign(&mut artifact)?;

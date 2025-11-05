@@ -437,6 +437,23 @@ impl SigningContext {
         rt.block_on(Self::async_production())
     }
 
+    /// Returns a [`SigningContext`] configured with a custom trust root.
+    ///
+    /// This allows using a custom Sigstore trust root for signing operations,
+    /// which is useful for testing or private deployments.
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
+    #[cfg(feature = "sigstore-trust-root")]
+    pub fn from_trust_root(trust_root: SigstoreTrustRoot) -> SigstoreResult<Self> {
+        Ok(Self::new(
+            FulcioClient::new(
+                Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
+                crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
+            ),
+            Default::default(),
+            Keyring::new(trust_root.ctfe_keys()?.values().copied())?,
+        ))
+    }
+
     /// Configures and returns a [`SigningSession`] with the held context.
     pub async fn signer(
         &self,
