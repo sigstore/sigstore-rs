@@ -28,6 +28,7 @@ use crate::rekor::models::proposed_entry::ProposedEntry;
 use sigstore_protobuf_specs::dev::sigstore::common::v1::{
     PublicKeyDetails, X509Certificate as ProtoX509Certificate,
 };
+use sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry;
 use sigstore_protobuf_specs::dev::sigstore::rekor::v2::{
     CreateEntryRequest, DsseRequestV002, HashedRekordRequestV002, Signature, Verifier,
     create_entry_request::Spec as EntrySpec, verifier::Verifier as VerifierEnum,
@@ -204,6 +205,119 @@ impl RekorV2Client {
             )),
         }
     }
+
+    /// Extract timestamp from checkpoint metadata.
+    ///
+    /// Rekor v2 checkpoints include a "Timestamp:" metadata line with nanoseconds since epoch.
+    /// This extracts that timestamp and converts it to seconds for use as integrated_time.
+    fn extract_checkpoint_timestamp(&self, checkpoint_envelope: &str) -> SigstoreResult<i64> {
+        use crate::crypto::note::LogCheckpoint;
+
+        // Parse the checkpoint from the envelope
+        let checkpoint = LogCheckpoint::from_text(checkpoint_envelope).map_err(|e| {
+            SigstoreError::UnexpectedError(format!("Failed to parse checkpoint: {}", e))
+        })?;
+
+        // Look for "Timestamp: <nanos>" in metadata
+        for line in &checkpoint.metadata {
+            if let Some(timestamp_str) = line.strip_prefix("Timestamp: ") {
+                let nanos = timestamp_str.parse::<i64>().map_err(|e| {
+                    SigstoreError::UnexpectedError(format!(
+                        "Failed to parse checkpoint timestamp: {}",
+                        e
+                    ))
+                })?;
+                // Convert nanoseconds to seconds
+                return Ok(nanos / 1_000_000_000);
+            }
+        }
+
+        Err(SigstoreError::UnexpectedError(
+            "No timestamp found in checkpoint metadata".to_string(),
+        ))
+    }
+
+    /// Convert a TransparencyLogEntry protobuf to v1 LogEntry format.
+    ///
+    /// This is a temporary bridge for backward compatibility. The v2 API returns
+    /// TransparencyLogEntry directly, but the existing codebase expects LogEntry.
+    /// Eventually, we should refactor the codebase to work with TransparencyLogEntry directly.
+    fn transparency_log_entry_to_v1(
+        &self,
+        tlog_entry: TransparencyLogEntry,
+    ) -> SigstoreResult<LogEntry> {
+        use std::str::FromStr;
+
+        // Extract fields from the protobuf
+        let log_index = tlog_entry.log_index;
+
+        // For v2 entries, integrated_time is 0 and the actual time is in the checkpoint metadata
+        let integrated_time = if tlog_entry.integrated_time == 0 {
+            // Extract timestamp from checkpoint metadata
+            // If no timestamp is found, use 0 (which signals to the verifier to use TSA timestamp or skip time checks)
+            if let Some(ref inclusion_proof) = tlog_entry.inclusion_proof {
+                if let Some(ref checkpoint) = inclusion_proof.checkpoint {
+                    self.extract_checkpoint_timestamp(&checkpoint.envelope).unwrap_or(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        } else {
+            tlog_entry.integrated_time
+        };
+
+        // Convert LogId from base64 bytes to hex string (v1 format)
+        let log_id_hex = tlog_entry
+            .log_id
+            .as_ref()
+            .map(|id| hex::encode(&id.key_id))
+            .ok_or_else(|| SigstoreError::UnexpectedError("Missing log_id".into()))?;
+
+        // Convert inclusion proof
+        let inclusion_proof = tlog_entry
+            .inclusion_proof
+            .as_ref()
+            .ok_or_else(|| SigstoreError::UnexpectedError("Missing inclusion_proof".into()))?;
+
+        // Handle inclusion promise (SET) - v2 entries may not have one
+        let signed_entry_timestamp = tlog_entry
+            .inclusion_promise
+            .as_ref()
+            .map(|p| base64.encode(&p.signed_entry_timestamp))
+            .unwrap_or_default();
+
+        // The canonicalized_body is already in bytes
+        let body_base64 = base64.encode(&tlog_entry.canonicalized_body);
+
+        // Create a temporary JSON structure that LogEntry::from_str can parse
+        let temp_json = serde_json::json!({
+            "uuid": log_index.to_string(),
+            "body": body_base64,
+            "integratedTime": integrated_time,
+            "logID": log_id_hex,
+            "logIndex": log_index,
+            "verification": {
+                "signedEntryTimestamp": signed_entry_timestamp.clone(),
+                "inclusionProof": {
+                    "logIndex": inclusion_proof.log_index,
+                    "rootHash": hex::encode(&inclusion_proof.root_hash),
+                    "treeSize": inclusion_proof.tree_size,
+                    "hashes": inclusion_proof.hashes.iter().map(|h| hex::encode(h)).collect::<Vec<_>>(),
+                    "checkpoint": inclusion_proof.checkpoint.as_ref().map(|c| c.envelope.clone()).unwrap_or_default(),
+                }
+            }
+        });
+
+        // Use LogEntry::from_str to properly decode and parse
+        LogEntry::from_str(&temp_json.to_string()).map_err(|e| {
+            SigstoreError::UnexpectedError(format!(
+                "Failed to convert TransparencyLogEntry to LogEntry: {}",
+                e
+            ))
+        })
+    }
 }
 
 #[async_trait]
@@ -242,21 +356,24 @@ impl RekorClient for RekorV2Client {
             )));
         }
 
-        // Parse response (v2 API returns JSON, same as v1)
-        // First get the response text for debugging
+        // Parse response - v2 API returns TransparencyLogEntry protobuf as JSON
         let response_text = response.text().await.map_err(|e| {
             SigstoreError::RekorClientError(format!("Failed to read response: {}", e))
         })?;
 
-        // Parse the v2 response format
-        let v2_response: RekorV2Response = serde_json::from_str(&response_text).map_err(|e| {
-            SigstoreError::RekorClientError(format!("Failed to parse v2 response: {}. Response was: {}", e, response_text))
+        // Parse directly to TransparencyLogEntry protobuf (like sigstore-python does)
+        let tlog_entry: TransparencyLogEntry = serde_json::from_str(&response_text).map_err(|e| {
+            SigstoreError::RekorClientError(format!(
+                "Failed to parse v2 response as TransparencyLogEntry: {}. Response was: {}",
+                e, response_text
+            ))
         })?;
 
-        // Convert v2 response to v1 LogEntry format
-        let entry = v2_response.to_log_entry(&entry)?;
+        // Convert to v1 LogEntry for backward compatibility with existing code
+        // This is a temporary bridge until we refactor the rest of the codebase
+        let log_entry = self.transparency_log_entry_to_v1(tlog_entry)?;
 
-        Ok(entry)
+        Ok(log_entry)
     }
 
     fn base_url(&self) -> &str {
@@ -265,144 +382,6 @@ impl RekorClient for RekorV2Client {
 
     fn api_version(&self) -> u32 {
         2
-    }
-}
-
-/// Rekor v2 API response structure.
-///
-/// The v2 API returns a different structure than v1, with fields like `logIndex`
-/// as strings instead of integers, and `inclusionProof` at the top level.
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RekorV2Response {
-    log_index: String,
-    log_id: LogId,
-    kind_version: KindVersion,
-    integrated_time: String,
-    inclusion_promise: Option<serde_json::Value>,
-    inclusion_proof: V2InclusionProof,
-    canonicalized_body: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LogId {
-    key_id: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct KindVersion {
-    kind: String,
-    version: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct V2InclusionProof {
-    log_index: String,
-    root_hash: String,
-    tree_size: String,
-    hashes: Vec<String>,
-    checkpoint: Checkpoint,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct Checkpoint {
-    envelope: String,
-}
-
-impl RekorV2Response {
-    /// Convert a v2 response to a v1 LogEntry format.
-    ///
-    /// This method bridges the gap between the v2 API response and the v1 LogEntry
-    /// structure that the rest of the codebase expects.
-    fn to_log_entry(&self, _original_entry: &ProposedEntry) -> SigstoreResult<LogEntry> {
-        use crate::rekor::models::log_entry::{InclusionProof as V1InclusionProof, Verification};
-        use std::str::FromStr;
-
-        // Parse log index from string to i64
-        let log_index = self.log_index.parse::<i64>().map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to parse log index: {}", e))
-        })?;
-
-        // Parse integrated time from string to i64
-        let integrated_time = self.integrated_time.parse::<i64>().map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to parse integrated time: {}", e))
-        })?;
-
-        // Build inclusion proof
-        let tree_size = self.inclusion_proof.tree_size.parse::<i64>().map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to parse tree size: {}", e))
-        })?;
-
-        let proof_log_index = self.inclusion_proof.log_index.parse::<i64>().map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to parse proof log index: {}", e))
-        })?;
-
-        // The v2 API returns base64-encoded values, but v1 expects hex
-        // Convert base64 logID to hex
-        let log_id_bytes = base64.decode(&self.log_id.key_id).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to decode logID: {}", e))
-        })?;
-        let log_id_hex = hex::encode(&log_id_bytes);
-
-        // Convert base64 root_hash to hex
-        let root_hash_bytes = base64.decode(&self.inclusion_proof.root_hash).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to decode root_hash: {}", e))
-        })?;
-        let root_hash_hex = hex::encode(&root_hash_bytes);
-
-        // Convert base64 hashes to hex
-        let hashes_hex: Result<Vec<String>, SigstoreError> = self
-            .inclusion_proof
-            .hashes
-            .iter()
-            .map(|h| {
-                let hash_bytes = base64.decode(h).map_err(|e| {
-                    SigstoreError::UnexpectedError(format!("Failed to decode hash: {}", e))
-                })?;
-                Ok(hex::encode(&hash_bytes))
-            })
-            .collect();
-        let hashes_hex = hashes_hex?;
-
-        // The v2 API returns canonicalized_body as base64-encoded JSON
-        // We need to construct a JSON response that LogEntry::from_str can parse
-        // The from_str method will decode the base64 body and parse it
-        // We also need to store the kind and version to later fix up the LogEntry
-        let kind = self.kind_version.kind.clone();
-        let version = self.kind_version.version.clone();
-
-        let temp_entry_json = serde_json::json!({
-            "uuid": log_index.to_string(),
-            "body": self.canonicalized_body,
-            "integratedTime": integrated_time,
-            "logID": log_id_hex,
-            "logIndex": log_index,
-            "verification": {
-                "signedEntryTimestamp": "",  // v2 API uses checkpoints, not SETs
-                "inclusionProof": {
-                    "logIndex": proof_log_index,
-                    "rootHash": root_hash_hex,
-                    "treeSize": tree_size,
-                    "hashes": hashes_hex,
-                    "checkpoint": self.inclusion_proof.checkpoint.envelope,
-                }
-            }
-        });
-
-        // Use LogEntry::from_str to properly decode the body
-        let log_entry = LogEntry::from_str(&temp_entry_json.to_string()).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("Failed to parse v2 response into LogEntry: {}", e))
-        })?;
-
-        // TODO: The LogEntry doesn't store kind/version directly - it's in the body.
-        // The version information will be extracted properly when converting to TransparencyLogEntry.
-        // For now, we rely on the fact that the canonicalized_body contains the correct version.
-        // We may need to update the TryFrom implementation to extract version from the body
-        // rather than hardcoding it.
-
-        Ok(log_entry)
     }
 }
 
