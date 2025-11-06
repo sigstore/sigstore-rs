@@ -203,6 +203,30 @@ impl<'ctx> SigningSession<'ctx> {
                 "Rekor returned malformed LogEntry".into(),
             )))?;
 
+        // Request TSA timestamp for Rekor v2 (required by Sigstore spec)
+        // Rekor v2 uses checkpoint timestamps, but TSA provides an independent trusted timestamp
+        let is_rekor_v2 = self.context.rekor_client.api_version() == 2;
+        let tsa_timestamp = if is_rekor_v2 {
+            if let Some(ref tsa_url) = self.context.tsa_url {
+                tracing::debug!(
+                    "Rekor v2 detected, requesting TSA timestamp from: {}",
+                    tsa_url
+                );
+                use crate::crypto::tsa::TimestampAuthorityClient;
+                let tsa_client = TimestampAuthorityClient::new(tsa_url.clone());
+                let timestamp_bytes = tsa_client.request_timestamp(&signature_bytes).await?;
+                tracing::debug!("TSA timestamp received: {} bytes", timestamp_bytes.len());
+                Some(timestamp_bytes)
+            } else {
+                tracing::warn!(
+                    "Rekor v2 requires TSA timestamp per Sigstore spec - bundle may fail verification"
+                );
+                None
+            }
+        } else {
+            None
+        };
+
         // TODO(tnytown): Maybe run through the verification flow here? See sigstore-rs#296.
 
         Ok(SigningArtifact {
@@ -212,6 +236,7 @@ impl<'ctx> SigningSession<'ctx> {
             },
             cert: cert.to_der()?,
             log_entry,
+            tsa_timestamp,
         })
     }
 
@@ -332,12 +357,37 @@ impl<'ctx> SigningSession<'ctx> {
                 "Rekor returned malformed LogEntry".into(),
             )))?;
 
+        // Request TSA timestamp for Rekor v2 (required by Sigstore spec)
+        // Rekor v2 uses checkpoint timestamps, but TSA provides an independent trusted timestamp
+        let is_rekor_v2 = self.context.rekor_client.api_version() == 2;
+        let tsa_timestamp = if is_rekor_v2 {
+            if let Some(ref tsa_url) = self.context.tsa_url {
+                tracing::debug!(
+                    "Rekor v2 detected, requesting TSA timestamp from: {}",
+                    tsa_url
+                );
+                use crate::crypto::tsa::TimestampAuthorityClient;
+                let tsa_client = TimestampAuthorityClient::new(tsa_url.clone());
+                let timestamp_bytes = tsa_client.request_timestamp(&signature_bytes).await?;
+                tracing::debug!("TSA timestamp received: {} bytes", timestamp_bytes.len());
+                Some(timestamp_bytes)
+            } else {
+                tracing::warn!(
+                    "Rekor v2 requires TSA timestamp per Sigstore spec - bundle may fail verification"
+                );
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(SigningArtifact {
             content: SigningArtifactContent::DsseEnvelope {
                 envelope: envelope.into_inner(),
             },
             cert: cert.to_der()?,
             log_entry,
+            tsa_timestamp,
         })
     }
 }
@@ -403,6 +453,7 @@ pub struct SigningContext {
     fulcio: FulcioClient,
     rekor_client: Box<dyn RekorClient>,
     ctfe_keyring: Keyring,
+    tsa_url: Option<String>,
 }
 
 impl SigningContext {
@@ -416,6 +467,22 @@ impl SigningContext {
             fulcio,
             rekor_client,
             ctfe_keyring,
+            tsa_url: None,
+        }
+    }
+
+    /// Manually constructs a [`SigningContext`] with TSA URL support.
+    pub fn new_with_tsa(
+        fulcio: FulcioClient,
+        rekor_client: Box<dyn RekorClient>,
+        ctfe_keyring: Keyring,
+        tsa_url: Option<String>,
+    ) -> Self {
+        Self {
+            fulcio,
+            rekor_client,
+            ctfe_keyring,
+            tsa_url,
         }
     }
 
@@ -491,28 +558,41 @@ impl SigningContext {
         >,
     ) -> SigstoreResult<Self> {
         // Extract configuration from signing_config if provided
-        let (fulcio_url, rekor_url, rekor_api_version) = if let Some(config) = signing_config {
-            let fulcio = if !config.ca_urls.is_empty() {
-                Some(config.ca_urls[0].url.clone())
+        let (fulcio_url, rekor_url, rekor_api_version, tsa_url) =
+            if let Some(config) = signing_config {
+                let fulcio = if !config.ca_urls.is_empty() {
+                    Some(config.ca_urls[0].url.clone())
+                } else {
+                    None
+                };
+
+                let (rekor, rekor_version) = if !config.rekor_tlog_urls.is_empty() {
+                    (
+                        Some(config.rekor_tlog_urls[0].url.clone()),
+                        Some(config.rekor_tlog_urls[0].major_api_version),
+                    )
+                } else {
+                    (None, None)
+                };
+
+                let tsa = if !config.tsa_urls.is_empty() {
+                    Some(config.tsa_urls[0].url.clone())
+                } else {
+                    None
+                };
+
+                (fulcio, rekor, rekor_version, tsa)
             } else {
-                None
+                (None, None, None, None)
             };
 
-            let (rekor, rekor_version) = if !config.rekor_tlog_urls.is_empty() {
-                (
-                    Some(config.rekor_tlog_urls[0].url.clone()),
-                    Some(config.rekor_tlog_urls[0].major_api_version),
-                )
-            } else {
-                (None, None)
-            };
-
-            (fulcio, rekor, rekor_version)
-        } else {
-            (None, None, None)
-        };
-
-        Self::from_trust_root_and_fulcio(trust_root, fulcio_url, rekor_url, rekor_api_version)
+        Self::from_trust_root_and_fulcio(
+            trust_root,
+            fulcio_url,
+            rekor_url,
+            rekor_api_version,
+            tsa_url,
+        )
     }
 
     /// Returns a [`SigningContext`] configured with a custom trust root and optional Fulcio URL.
@@ -526,6 +606,7 @@ impl SigningContext {
     /// * `fulcio_url` - Optional custom Fulcio URL (defaults to production)
     /// * `rekor_url` - Optional custom Rekor URL (defaults to production v1)
     /// * `rekor_api_version` - Optional Rekor API version (defaults to 1)
+    /// * `tsa_url` - Optional TSA URL for timestamp requests
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn from_trust_root_and_fulcio(
@@ -533,6 +614,7 @@ impl SigningContext {
         fulcio_url: Option<String>,
         rekor_url: Option<String>,
         rekor_api_version: Option<u32>,
+        tsa_url: Option<String>,
     ) -> SigstoreResult<Self> {
         // Convert hex-encoded key IDs from trust root to [u8; 32]
         let ctfe_keys = trust_root.ctfe_keys()?;
@@ -562,13 +644,14 @@ impl SigningContext {
             }
         };
 
-        Ok(Self::new(
+        Ok(Self::new_with_tsa(
             FulcioClient::new(
                 fulcio_url_parsed,
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
             rekor_client,
             Keyring::new_with_ids(keys_with_ids.iter().map(|(id, bytes)| (id, *bytes)))?,
+            tsa_url,
         ))
     }
 
@@ -609,6 +692,7 @@ pub struct SigningArtifact {
     content: SigningArtifactContent,
     cert: Vec<u8>,
     log_entry: TransparencyLogEntry,
+    tsa_timestamp: Option<Vec<u8>>,
 }
 
 impl SigningArtifact {
@@ -616,13 +700,26 @@ impl SigningArtifact {
     ///
     /// The resulting bundle can be serialized with [`serde_json`].
     pub fn to_bundle(self) -> Bundle {
+        use sigstore_protobuf_specs::dev::sigstore::bundle::v1::TimestampVerificationData;
+
         // Bundle 0.3 uses a single certificate field instead of a certificate chain
         let certificate = X509Certificate {
             raw_bytes: self.cert,
         };
 
+        // Include TSA timestamp if present
+        let timestamp_verification_data =
+            self.tsa_timestamp
+                .map(|timestamp_bytes| TimestampVerificationData {
+                    rfc3161_timestamps: vec![
+                    sigstore_protobuf_specs::dev::sigstore::common::v1::Rfc3161SignedTimestamp {
+                        signed_timestamp: timestamp_bytes,
+                    },
+                ],
+                });
+
         let verification_material = Some(VerificationMaterial {
-            timestamp_verification_data: None,
+            timestamp_verification_data,
             tlog_entries: vec![self.log_entry],
             content: Some(verification_material::Content::Certificate(certificate)),
         });

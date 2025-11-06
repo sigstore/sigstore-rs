@@ -579,11 +579,11 @@ impl Verifier {
             debug!("no inclusion promise present, skipping SET verification");
         }
 
-        // 7) Verify that the signing certificate was valid at the time of
-        //    signing by comparing the expiry against the integrated timestamp
-        //    (Rekor v1) or TSA timestamp (Rekor v2).
+        // 7) Verify that the signing certificate was valid at the time of signing.
+        //    For Rekor v1: Use integrated_time from Rekor response
+        //    For Rekor v2: Use checkpoint timestamp (extracted to integrated_time) or TSA timestamp as fallback
         let signing_time = if log_entry.integrated_time == 0 {
-            // Rekor v2: use TSA timestamp
+            // No timestamp from Rekor checkpoint - fall back to TSA timestamp
             if let Some(tsa_time) = tsa_timestamp {
                 debug!(
                     "using TSA timestamp for certificate validity check: {}",
@@ -592,13 +592,13 @@ impl Verifier {
                 tsa_time.timestamp() as u64
             } else {
                 return Err(SignatureErrorKind::TransparencyLogError(
-                    "Rekor v2 entry has no integrated_time and no TSA timestamp found".to_string(),
+                    "No timestamp available: Rekor checkpoint timestamp extraction failed and no TSA timestamp found".to_string(),
                 ))?;
             }
         } else {
-            // Rekor v1: use integrated_time
+            // Use timestamp from Rekor (v1 integrated_time or v2 checkpoint timestamp)
             debug!(
-                "using Rekor integrated_time for certificate validity check: {}",
+                "using Rekor timestamp for certificate validity check: {}",
                 log_entry.integrated_time
             );
             log_entry.integrated_time as u64

@@ -251,13 +251,14 @@ impl RekorV2Client {
         // Extract fields from the protobuf
         let log_index = tlog_entry.log_index;
 
-        // For v2 entries, integrated_time is 0 and the actual time is in the checkpoint metadata
+        // Rekor v2 provides timestamps via checkpoint metadata rather than integrated_time
         let integrated_time = if tlog_entry.integrated_time == 0 {
-            // Extract timestamp from checkpoint metadata
-            // If no timestamp is found, use 0 (which signals to the verifier to use TSA timestamp or skip time checks)
+            // Extract timestamp from checkpoint metadata (this is the standard Rekor v2 mechanism)
+            // If extraction fails, use 0 (verification will fall back to TSA timestamp)
             if let Some(ref inclusion_proof) = tlog_entry.inclusion_proof {
                 if let Some(ref checkpoint) = inclusion_proof.checkpoint {
-                    self.extract_checkpoint_timestamp(&checkpoint.envelope).unwrap_or(0)
+                    self.extract_checkpoint_timestamp(&checkpoint.envelope)
+                        .unwrap_or(0)
                 } else {
                     0
                 }
@@ -304,7 +305,7 @@ impl RekorV2Client {
                     "logIndex": inclusion_proof.log_index,
                     "rootHash": hex::encode(&inclusion_proof.root_hash),
                     "treeSize": inclusion_proof.tree_size,
-                    "hashes": inclusion_proof.hashes.iter().map(|h| hex::encode(h)).collect::<Vec<_>>(),
+                    "hashes": inclusion_proof.hashes.iter().map(hex::encode).collect::<Vec<_>>(),
                     "checkpoint": inclusion_proof.checkpoint.as_ref().map(|c| c.envelope.clone()).unwrap_or_default(),
                 }
             }
@@ -362,12 +363,13 @@ impl RekorClient for RekorV2Client {
         })?;
 
         // Parse directly to TransparencyLogEntry protobuf (like sigstore-python does)
-        let tlog_entry: TransparencyLogEntry = serde_json::from_str(&response_text).map_err(|e| {
-            SigstoreError::RekorClientError(format!(
-                "Failed to parse v2 response as TransparencyLogEntry: {}. Response was: {}",
-                e, response_text
-            ))
-        })?;
+        let tlog_entry: TransparencyLogEntry =
+            serde_json::from_str(&response_text).map_err(|e| {
+                SigstoreError::RekorClientError(format!(
+                    "Failed to parse v2 response as TransparencyLogEntry: {}. Response was: {}",
+                    e, response_text
+                ))
+            })?;
 
         // Convert to v1 LogEntry for backward compatibility with existing code
         // This is a temporary bridge until we refactor the rest of the codebase

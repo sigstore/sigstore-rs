@@ -190,6 +190,9 @@ pub mod note;
 #[cfg(feature = "verify")]
 pub mod timestamp;
 
+#[cfg(feature = "sign")]
+pub mod tsa;
+
 use self::signing_key::{
     ecdsa::ec::{EcdsaKeys, EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},
