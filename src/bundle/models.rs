@@ -79,16 +79,39 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
     type Error = ();
 
     fn try_from(value: RekorLogEntry) -> Result<Self, Self::Error> {
-        let canonicalized_body = {
+        let (canonicalized_body, kind, version) = {
+            // First, serialize the body to JSON to extract kind and version
+            let body_json = serde_json::to_value(&value.body).or(Err(()))?;
+
+            // Extract kind and apiVersion
+            let kind = body_json
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| "hashedrekord".to_owned());
+
+            let version = body_json
+                .get("apiVersion")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| "0.0.1".to_owned());
+
+            // Then canonicalize for the bundle
             let mut body = json_syntax::to_value(value.body).or(Err(()))?;
             body.canonicalize();
-            body.compact_print().to_string().into_bytes()
+            (body.compact_print().to_string().into_bytes(), kind, version)
         };
-        let inclusion_promise = Some(InclusionPromise {
-            signed_entry_timestamp: base64
-                .decode(value.verification.signed_entry_timestamp)
-                .or(Err(()))?,
-        });
+        // V2 entries use checkpoints and don't have SETs (signed entry timestamps)
+        // Only create an inclusion_promise if there's actually a SET
+        let inclusion_promise = if value.verification.signed_entry_timestamp.is_empty() {
+            None
+        } else {
+            Some(InclusionPromise {
+                signed_entry_timestamp: base64
+                    .decode(value.verification.signed_entry_timestamp)
+                    .or(Err(()))?,
+            })
+        };
         let inclusion_proof = value
             .verification
             .inclusion_proof
@@ -100,10 +123,7 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
             inclusion_promise,
             inclusion_proof,
             integrated_time: value.integrated_time,
-            kind_version: Some(KindVersion {
-                kind: "hashedrekord".to_owned(),
-                version: "0.0.1".to_owned(),
-            }),
+            kind_version: Some(KindVersion { kind, version }),
             log_id: Some(LogId {
                 key_id: decode_hex(value.log_i_d)?,
             }),
