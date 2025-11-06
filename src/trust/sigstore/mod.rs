@@ -180,6 +180,7 @@ impl SigstoreTrustRoot {
                 let key_id = tlog
                     .log_id
                     .as_ref()
+                    // TODO(wolfv): should probably use a better type here and not hex encode
                     .map(|log_id| hex::encode(log_id.key_id.as_slice()));
                 let public_key_raw = tlog
                     .public_key

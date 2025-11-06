@@ -158,21 +158,15 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
     let bundle = fs::File::create(bundle)?;
     let mut artifact = fs::File::open(artifact)?;
 
-    // Parse signing config to get Fulcio URL if provided
-    let fulcio_url = if let Some(ref config_path) = signing_config {
+    // Parse signing config if provided
+    let signing_config_parsed = if let Some(ref config_path) = signing_config {
         use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
 
         let config_data = std::fs::read(config_path)
             .with_context(|| format!("failed to read signing config from: {}", config_path))?;
         let config: SigningConfig = serde_json::from_slice(&config_data)
             .with_context(|| format!("failed to parse signing config: {}", config_path))?;
-
-        // Extract the Fulcio URL from ca_urls (v0.2 format)
-        if !config.ca_urls.is_empty() {
-            Some(config.ca_urls[0].url.clone())
-        } else {
-            None
-        }
+        Some(config)
     } else {
         None
     };
@@ -181,7 +175,7 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
     let context = if let Some(trusted_root_path) = trusted_root {
         let trust_root = SigstoreTrustRoot::from_file_unchecked(Path::new(&trusted_root_path))
             .with_context(|| format!("failed to load trusted root from: {}", trusted_root_path))?;
-        SigningContext::from_trust_root_and_fulcio(trust_root, fulcio_url)?
+        SigningContext::from_trust_root_and_signing_config(trust_root, signing_config_parsed.as_ref())?
     } else {
         SigningContext::production()?
     };

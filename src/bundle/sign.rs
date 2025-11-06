@@ -49,8 +49,9 @@ use crate::errors::{Result as SigstoreResult, SigstoreError};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::fulcio::{self, FULCIO_ROOT, FulcioClient};
 use crate::oauth::IdentityToken;
-use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
-use crate::rekor::apis::entries_api::create_log_entry;
+use crate::rekor::client::RekorClient;
+use crate::rekor::client_v1::RekorV1Client;
+use crate::rekor::client_v2::RekorV2Client;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
 use crate::trust::TrustRoot;
 use crate::{bundle::dsse, crypto::transparency::CertificateEmbeddedSCTs};
@@ -190,7 +191,10 @@ impl<'ctx> SigningSession<'ctx> {
             },
         };
 
-        let log_entry = create_log_entry(&self.context.rekor_config, proposed_entry)
+        let log_entry = self
+            .context
+            .rekor_client
+            .create_entry(proposed_entry)
             .await
             .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
         let log_entry = log_entry
@@ -316,7 +320,10 @@ impl<'ctx> SigningSession<'ctx> {
             }),
         };
 
-        let log_entry = create_log_entry(&self.context.rekor_config, proposed_entry)
+        let log_entry = self
+            .context
+            .rekor_client
+            .create_entry(proposed_entry)
             .await
             .map_err(|err| SigstoreError::RekorClientError(err.to_string()))?;
         let log_entry = log_entry
@@ -394,7 +401,7 @@ pub mod blocking {
 /// the public-good Sigstore infrastructure.
 pub struct SigningContext {
     fulcio: FulcioClient,
-    rekor_config: RekorConfiguration,
+    rekor_client: Box<dyn RekorClient>,
     ctfe_keyring: Keyring,
 }
 
@@ -402,12 +409,12 @@ impl SigningContext {
     /// Manually constructs a [`SigningContext`] from its constituent data.
     pub fn new(
         fulcio: FulcioClient,
-        rekor_config: RekorConfiguration,
+        rekor_client: Box<dyn RekorClient>,
         ctfe_keyring: Keyring,
     ) -> Self {
         Self {
             fulcio,
-            rekor_config,
+            rekor_client,
             ctfe_keyring,
         }
     }
@@ -423,7 +430,7 @@ impl SigningContext {
                 Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
-            Default::default(),
+            Box::new(RekorV1Client::new("https://rekor.sigstore.dev".to_string())),
             Keyring::new(trust_root.ctfe_keys()?.values().copied())?,
         ))
     }
@@ -449,18 +456,83 @@ impl SigningContext {
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn from_trust_root(trust_root: SigstoreTrustRoot) -> SigstoreResult<Self> {
-        Self::from_trust_root_and_fulcio(trust_root, None)
+        Self::from_trust_root_and_signing_config(trust_root, None)
+    }
+
+    /// Returns a [`SigningContext`] configured with a custom trust root and signing config.
+    ///
+    /// This is the recommended way to create a signing context with custom configuration.
+    /// The signing config is used to extract Fulcio CA URLs and Rekor transparency log
+    /// service configuration (including the API version).
+    ///
+    /// # Arguments
+    ///
+    /// * `trust_root` - The Sigstore trust root to use
+    /// * `signing_config` - Optional signing configuration with CA and tlog service URLs
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use sigstore::trust::sigstore::SigstoreTrustRoot;
+    /// use sigstore::bundle::sign::SigningContext;
+    /// use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
+    ///
+    /// let trust_root = SigstoreTrustRoot::new(None).await?;
+    /// let config: SigningConfig = serde_json::from_slice(&config_bytes)?;
+    /// let ctx = SigningContext::from_trust_root_and_signing_config(trust_root, Some(&config))?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
+    #[cfg(feature = "sigstore-trust-root")]
+    pub fn from_trust_root_and_signing_config(
+        trust_root: SigstoreTrustRoot,
+        signing_config: Option<
+            &sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig,
+        >,
+    ) -> SigstoreResult<Self> {
+        // Extract configuration from signing_config if provided
+        let (fulcio_url, rekor_url, rekor_api_version) = if let Some(config) = signing_config {
+            let fulcio = if !config.ca_urls.is_empty() {
+                Some(config.ca_urls[0].url.clone())
+            } else {
+                None
+            };
+
+            let (rekor, rekor_version) = if !config.rekor_tlog_urls.is_empty() {
+                (
+                    Some(config.rekor_tlog_urls[0].url.clone()),
+                    Some(config.rekor_tlog_urls[0].major_api_version),
+                )
+            } else {
+                (None, None)
+            };
+
+            (fulcio, rekor, rekor_version)
+        } else {
+            (None, None, None)
+        };
+
+        Self::from_trust_root_and_fulcio(trust_root, fulcio_url, rekor_url, rekor_api_version)
     }
 
     /// Returns a [`SigningContext`] configured with a custom trust root and optional Fulcio URL.
     ///
     /// This allows using a custom Sigstore trust root and Fulcio instance for signing operations.
     /// If no Fulcio URL is provided, defaults to the production Fulcio instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `trust_root` - The Sigstore trust root to use
+    /// * `fulcio_url` - Optional custom Fulcio URL (defaults to production)
+    /// * `rekor_url` - Optional custom Rekor URL (defaults to production v1)
+    /// * `rekor_api_version` - Optional Rekor API version (defaults to 1)
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
     pub fn from_trust_root_and_fulcio(
         trust_root: SigstoreTrustRoot,
         fulcio_url: Option<String>,
+        rekor_url: Option<String>,
+        rekor_api_version: Option<u32>,
     ) -> SigstoreResult<Self> {
         // Convert hex-encoded key IDs from trust root to [u8; 32]
         let ctfe_keys = trust_root.ctfe_keys()?;
@@ -478,12 +550,24 @@ impl SigningContext {
         let fulcio_url_parsed = Url::parse(fulcio_url_str)
             .map_err(|e| SigstoreError::UnexpectedError(format!("Invalid Fulcio URL: {}", e)))?;
 
+        // Determine Rekor client based on API version
+        let rekor_client: Box<dyn RekorClient> = match rekor_api_version.unwrap_or(1) {
+            2 => {
+                let url = rekor_url.unwrap_or_else(|| "https://rekor.sigstore.dev".to_string());
+                Box::new(RekorV2Client::new(url))
+            }
+            _ => {
+                let url = rekor_url.unwrap_or_else(|| "https://rekor.sigstore.dev".to_string());
+                Box::new(RekorV1Client::new(url))
+            }
+        };
+
         Ok(Self::new(
             FulcioClient::new(
                 fulcio_url_parsed,
                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
             ),
-            Default::default(),
+            rekor_client,
             Keyring::new_with_ids(keys_with_ids.iter().map(|(id, bytes)| (id, *bytes)))?,
         ))
     }

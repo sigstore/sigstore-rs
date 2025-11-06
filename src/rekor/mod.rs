@@ -87,5 +87,8 @@
 //!
 
 pub mod apis;
+pub mod client;
+pub mod client_v1;
+pub mod client_v2;
 pub mod models;
 type TreeSize = i64;
