@@ -62,7 +62,7 @@ rustls-tls-native-roots = ["oci-client?/rustls-tls-native-roots"]
 sign = [
     "cert",
     "dep:hex",
-    "dep:json-syntax",
+    "dep:serde_json_canonicalizer",
     "dep:sigstore_protobuf_specs",
     "fulcio",
     "rekor",
@@ -80,7 +80,7 @@ test-registry = [] # used for testing against a test registry
 verify = [
     "cert",
     "dep:hex",
-    "dep:json-syntax",
+    "dep:serde_json_canonicalizer",
     "dep:sigstore_protobuf_specs",
     "fulcio",
     "rekor",
@@ -126,10 +126,6 @@ getrandom = { version = "0.2", default-features = false, optional = true }
 hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
-json-syntax = { version = "0.12", default-features = false, features = [
-    "canonicalize",
-    "serde",
-], optional = true }
 oci-client = { version = "0.15", default-features = false, optional = true }
 olpc-cjson = { version = "0.1", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
@@ -177,6 +173,7 @@ scrypt = { version = "0.11", default-features = false, features = [
 ] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_json_canonicalizer = { version = "0.3", optional = true }
 serde_repr = { version = "0.1", default-features = false, optional = true }
 serde_with = { version = "3.9", default-features = false, features = [
     "base64",
