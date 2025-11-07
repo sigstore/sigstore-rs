@@ -36,7 +36,6 @@ use sigstore_protobuf_specs::dev::sigstore::common::v1::{
 use sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry;
 use tokio::io::AsyncRead;
 use tokio_util::io::SyncIoBridge;
-use url::Url;
 use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
@@ -46,15 +45,24 @@ use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
 use crate::crypto::transparency::{verify_sct, verify_scts};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
-use crate::fulcio::oauth::OauthTokenProvider;
-use crate::fulcio::{self, FULCIO_ROOT, FulcioClient};
+use crate::fulcio::{self, FulcioClient};
 use crate::oauth::IdentityToken;
 use crate::rekor::client::RekorClient;
-use crate::rekor::client_v1::RekorV1Client;
-use crate::rekor::client_v2::RekorV2Client;
 use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
-use crate::trust::TrustRoot;
 use crate::{bundle::dsse, crypto::transparency::CertificateEmbeddedSCTs};
+
+#[cfg(feature = "sigstore-trust-root")]
+use crate::fulcio::FULCIO_ROOT;
+#[cfg(feature = "sigstore-trust-root")]
+use crate::fulcio::oauth::OauthTokenProvider;
+#[cfg(feature = "sigstore-trust-root")]
+use crate::rekor::client_v1::RekorV1Client;
+#[cfg(feature = "sigstore-trust-root")]
+use crate::rekor::client_v2::RekorV2Client;
+#[cfg(feature = "sigstore-trust-root")]
+use crate::trust::TrustRoot;
+#[cfg(feature = "sigstore-trust-root")]
+use url::Url;
 
 #[cfg(feature = "sigstore-trust-root")]
 use crate::trust::sigstore::SigstoreTrustRoot;

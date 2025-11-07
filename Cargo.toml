@@ -50,7 +50,7 @@ native-tls = [
 ]
 oauth = ["dep:openidconnect", "dep:reqwest"]
 registry = ["dep:async-trait", "dep:oci-client", "dep:olpc-cjson"]
-rekor = ["dep:reqwest"]
+rekor = ["dep:async-trait", "dep:hex", "dep:reqwest", "dep:sigstore_protobuf_specs"]
 rustls-tls = [
     "oci-client?/rustls-tls",
     "openidconnect?/rustls-tls",
@@ -64,6 +64,7 @@ sign = [
     "dep:hex",
     "dep:json-syntax",
     "dep:sigstore_protobuf_specs",
+    "dep:x509-tsp",
     "fulcio",
     "rekor",
 ]
