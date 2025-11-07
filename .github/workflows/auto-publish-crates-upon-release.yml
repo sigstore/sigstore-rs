@@ -3,12 +3,19 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-automatically:
+    name: Publish crates
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write
+      id-token: write # needed to get OpenID Connect token for authentication
 
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
