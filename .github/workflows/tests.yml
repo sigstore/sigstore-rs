@@ -59,6 +59,15 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@351f82a4dc29e4159746a068ed925da17341219f # 1.89.0
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+
+      # Checkout transparency-dev/merkle test vectors for Merkle tree validation
+      - name: Checkout transparency-dev/merkle test vectors
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: transparency-dev/merkle
+          path: tests/data/merkle
+          persist-credentials: false
+
       - run: |
           cargo test --workspace --no-default-features --features full,native-tls,test-registry
 
@@ -71,6 +80,15 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@351f82a4dc29e4159746a068ed925da17341219f # 1.89.0
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+
+      # Checkout transparency-dev/merkle test vectors for Merkle tree validation
+      - name: Checkout transparency-dev/merkle test vectors
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: transparency-dev/merkle
+          path: tests/data/merkle
+          persist-credentials: false
+
       - run: |
           cargo test --workspace --no-default-features --features full,rustls-tls,test-registry
 
