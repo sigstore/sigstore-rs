@@ -2,7 +2,6 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
-use json_syntax::Print;
 
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::LogId,
@@ -96,10 +95,12 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
                 .map(|s| s.to_owned())
                 .unwrap_or_else(|| "0.0.1".to_owned());
 
-            // Then canonicalize for the bundle
-            let mut body = json_syntax::to_value(value.body).or(Err(()))?;
-            body.canonicalize();
-            (body.compact_print().to_string().into_bytes(), kind, version)
+            // Then canonicalize for the bundle using serde_json_canonicalizer
+            let canonicalized = serde_json_canonicalizer::to_string(&value.body)
+                .map_err(|_| ())?
+                .into_bytes();
+
+            (canonicalized, kind, version)
         };
         // V2 entries use checkpoints and don't have SETs (signed entry timestamps)
         // Only create an inclusion_promise if there's actually a SET
