@@ -83,6 +83,7 @@ verify = [
     "dep:cmpv2",
     "dep:cms",
     "dep:hex",
+    "dep:olpc-cjson",
     "dep:serde_json_canonicalizer",
     "dep:sigstore_protobuf_specs",
     "dep:x509-tsp",
