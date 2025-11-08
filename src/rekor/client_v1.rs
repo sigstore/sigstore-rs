@@ -41,7 +41,7 @@ impl RekorV1Client {
     ///
     /// # Arguments
     ///
-    /// * `base_url` - The base URL of the Rekor instance (e.g., "https://rekor.sigstore.dev")
+    /// * `base_url` - The base URL of the Rekor instance (e.g., <https://rekor.sigstore.dev>)
     pub fn new(base_url: String) -> Self {
         let config = Configuration {
             // TODO(wolfv): base_path should perhaps be a URL type?

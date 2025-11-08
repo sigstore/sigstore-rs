@@ -52,7 +52,7 @@ impl RekorV2Client {
     ///
     /// # Arguments
     ///
-    /// * `base_url` - The base URL of the Rekor instance (e.g., "https://log2025-alpha3.rekor.sigstage.dev")
+    /// * `base_url` - The base URL of the Rekor instance (e.g., <https://log2025-alpha3.rekor.sigstage.dev>)
     pub fn new(base_url: String) -> Self {
         Self {
             base_url,

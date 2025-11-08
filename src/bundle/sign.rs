@@ -548,14 +548,20 @@ impl SigningContext {
     /// # Example
     ///
     /// ```no_run
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// use sigstore::trust::sigstore::SigstoreTrustRoot;
     /// use sigstore::bundle::sign::SigningContext;
     /// use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
     ///
     /// let trust_root = SigstoreTrustRoot::new(None).await?;
-    /// let config: SigningConfig = serde_json::from_slice(&config_bytes)?;
+    ///
+    /// // Example: Load signing config from JSON bytes
+    /// let config_json = r#"{"ca_urls": [], "tlog_urls": []}"#;
+    /// let config: SigningConfig = serde_json::from_slice(config_json.as_bytes())?;
+    ///
     /// let ctx = SigningContext::from_trust_root_and_signing_config(trust_root, Some(&config))?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # Ok(())
+    /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
     #[cfg(feature = "sigstore-trust-root")]
