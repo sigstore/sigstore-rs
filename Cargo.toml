@@ -22,8 +22,8 @@ cosign = [
     "dep:async-trait",
     "dep:cfg-if",
     "dep:oci-client",
-    "dep:olpc-cjson",
     "dep:regex",
+    "dep:serde_json_canonicalizer",
     "registry",
 ]
 fulcio = [
@@ -49,7 +49,7 @@ native-tls = [
     "reqwest?/native-tls",
 ]
 oauth = ["dep:openidconnect", "dep:reqwest"]
-registry = ["dep:async-trait", "dep:oci-client", "dep:olpc-cjson"]
+registry = ["dep:async-trait", "dep:oci-client", "dep:serde_json_canonicalizer"]
 rekor = ["dep:reqwest"]
 rustls-tls = [
     "oci-client?/rustls-tls",
@@ -127,7 +127,6 @@ hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
 oci-client = { version = "0.15", default-features = false, optional = true }
-olpc-cjson = { version = "0.1", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "reqwest-blocking",
