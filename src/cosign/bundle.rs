@@ -15,7 +15,6 @@
 
 use std::{cmp::PartialEq, collections::BTreeMap};
 
-use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -87,9 +86,7 @@ impl Bundle {
         bundle: &Bundle,
         rekor_pub_keys: &BTreeMap<String, CosignVerificationKey>,
     ) -> Result<()> {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        bundle.payload.serialize(&mut ser).map_err(|e| {
+        let buf = serde_json_canonicalizer::to_vec(&bundle.payload).map_err(|e| {
             SigstoreError::UnexpectedError(format!(
                 "Cannot create canonical JSON representation of bundle: {e:?}"
             ))
