@@ -14,12 +14,43 @@
 
 //! Client for requesting RFC 3161 timestamps from a Timestamp Authority.
 
+use cmpv2::status::PkiStatus;
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use x509_cert::der::{Decode, Encode};
 use x509_tsp::{MessageImprint, TimeStampReq, TspVersion};
 
 use crate::errors::{Result as SigstoreResult, SigstoreError};
+
+/// Generates a random nonce suitable for RFC 3161 timestamp requests.
+///
+/// The nonce is generated as 8 random bytes and encoded as a positive INTEGER
+/// according to DER rules:
+/// - If the high bit is clear (0x00-0x7F), no padding is needed
+/// - If the high bit is set (0x80-0xFF), prepend 0x00 to indicate positive
+///
+/// This ensures the nonce is always interpreted as a positive integer,
+/// which is required by RFC 3161.
+///
+/// # Returns
+///
+/// A `Vec<u8>` containing 8-9 bytes suitable for passing to `Int::new()`.
+fn generate_positive_nonce_bytes() -> Vec<u8> {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let nonce_random: [u8; 8] = rng.r#gen();
+
+    // Only prepend 0x00 if the high bit is set (to avoid negative number)
+    if nonce_random[0] & 0x80 != 0 {
+        // High bit set, need 0x00 padding to indicate positive
+        let mut padded = vec![0x00];
+        padded.extend_from_slice(&nonce_random);
+        padded
+    } else {
+        // High bit clear, no padding needed
+        nonce_random.to_vec()
+    }
+}
 
 /// Client for interacting with a Timestamp Authority (TSA).
 ///
@@ -77,22 +108,10 @@ impl TimestampAuthorityClient {
         let signature_hash = hasher.finalize();
 
         // Build the MessageImprint
-        // According to RFC 4055, the parameters field for SHA-256 SHOULD be either
-        // absent or NULL. However, the Sigstore TSA has a bug where it returns
-        // malformed timestamps when the request omits NULL parameters.
-        // So we explicitly include NULL to work around this TSA bug.
-        use x509_cert::der::Encode;
-        let null_der = x509_cert::der::asn1::Null.to_der().map_err(|e| {
-            SigstoreError::UnexpectedError(format!("failed to encode NULL: {}", e))
-        })?;
-        let null_any = x509_cert::der::Any::from_der(&null_der).map_err(|e| {
-            SigstoreError::UnexpectedError(format!("failed to create Any from NULL: {}", e))
-        })?;
-
         let message_imprint = MessageImprint {
             hash_algorithm: x509_cert::spki::AlgorithmIdentifier {
                 oid: const_oid::db::rfc5912::ID_SHA_256,
-                parameters: Some(null_any),
+                parameters: None,
             },
             hashed_message: x509_cert::der::asn1::OctetString::new(&signature_hash[..]).map_err(
                 |e| {
@@ -105,23 +124,8 @@ impl TimestampAuthorityClient {
         };
 
         // Generate a random nonce for replay protection
-        // IMPORTANT: The nonce must be a positive INTEGER in DER encoding.
-        // Per DER rules, we should only prepend 0x00 if the high bit is set.
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let nonce_random: [u8; 8] = rng.r#gen();
-
-        // Only prepend 0x00 if the high bit is set (to avoid negative number)
-        let nonce_bytes = if nonce_random[0] & 0x80 != 0 {
-            // High bit set, need 0x00 padding
-            let mut padded = vec![0x00];
-            padded.extend_from_slice(&nonce_random);
-            padded
-        } else {
-            // High bit clear, no padding needed
-            nonce_random.to_vec()
-        };
-
+        // The nonce must be a positive INTEGER in DER encoding
+        let nonce_bytes = generate_positive_nonce_bytes();
         let nonce = x509_cert::der::asn1::Int::new(&nonce_bytes).map_err(|e| {
             SigstoreError::UnexpectedError(format!("failed to create nonce: {}", e))
         })?;
@@ -142,7 +146,6 @@ impl TimestampAuthorityClient {
         })?;
 
         tracing::debug!("Sending timestamp request to TSA: {}", self.url);
-        tracing::debug!("Request size: {} bytes", request_der.len());
 
         // Send the request to the TSA
         let response = self
@@ -168,11 +171,6 @@ impl TimestampAuthorityClient {
             SigstoreError::UnexpectedError(format!("failed to read TSA response: {}", e))
         })?;
 
-        tracing::debug!(
-            "Received timestamp response: {} bytes",
-            response_bytes.len()
-        );
-
         // Parse and validate the TimeStampResp to ensure it's well-formed
         use x509_tsp::TimeStampResp;
         let timestamp_resp = TimeStampResp::from_der(&response_bytes).map_err(|e| {
@@ -180,7 +178,6 @@ impl TimestampAuthorityClient {
         })?;
 
         // Check that the response status is successful
-        use cmpv2::status::PkiStatus;
         match timestamp_resp.status.status {
             PkiStatus::Accepted | PkiStatus::GrantedWithMods => {
                 // Response is successful, continue
@@ -203,25 +200,5 @@ impl TimestampAuthorityClient {
         tracing::debug!("TimeStampResp validation successful");
 
         Ok(response_bytes.to_vec())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore] // Only run manually as it requires network access
-    async fn test_timestamp_request() {
-        let client = TimestampAuthorityClient::new(
-            "https://timestamp.sigstage.dev/api/v1/timestamp".to_string(),
-        );
-
-        let signature = b"test signature bytes";
-        let result = client.request_timestamp(signature).await;
-
-        assert!(result.is_ok(), "Timestamp request should succeed");
-        let timestamp_bytes = result.unwrap();
-        assert!(!timestamp_bytes.is_empty(), "Timestamp should not be empty");
     }
 }

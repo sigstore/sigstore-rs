@@ -70,6 +70,7 @@ sign = [
     "dep:serde_json_canonicalizer",
     "dep:sigstore_protobuf_specs",
     "dep:x509-tsp",
+    "dep:cmpv2",
     "fulcio",
     "rekor",
 ]
