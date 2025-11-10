@@ -35,7 +35,7 @@ impl TimestampAuthorityClient {
     ///
     /// # Arguments
     ///
-    /// * `url` - The URL of the TSA endpoint (e.g., "https://timestamp.sigstore.dev/api/v1/timestamp")
+    /// * `url` - The URL of the TSA endpoint (e.g., "<https://timestamp.sigstore.dev/api/v1/timestamp>")
     pub fn new(url: String) -> Self {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -77,10 +77,12 @@ impl TimestampAuthorityClient {
         let signature_hash = hasher.finalize();
 
         // Build the MessageImprint
+        // According to RFC 4055, the parameters field for SHA-256 SHOULD be either
+        // absent or NULL. We use None (absent) to match what other implementations do.
         let message_imprint = MessageImprint {
             hash_algorithm: x509_cert::spki::AlgorithmIdentifier {
                 oid: const_oid::db::rfc5912::ID_SHA_256,
-                parameters: Some(x509_cert::der::asn1::Null.into()),
+                parameters: None,
             },
             hashed_message: x509_cert::der::asn1::OctetString::new(&signature_hash[..]).map_err(
                 |e| {
@@ -147,11 +149,34 @@ impl TimestampAuthorityClient {
             response_bytes.len()
         );
 
-        // Basic validation: try to parse as TimeStampResp to ensure it's well-formed
+        // Parse and validate the TimeStampResp to ensure it's well-formed
         use x509_tsp::TimeStampResp;
-        let _ = TimeStampResp::from_der(&response_bytes).map_err(|e| {
+        let timestamp_resp = TimeStampResp::from_der(&response_bytes).map_err(|e| {
             SigstoreError::UnexpectedError(format!("TSA returned invalid TimeStampResp: {}", e))
         })?;
+
+        // Check that the response status is successful
+        use cmpv2::status::PkiStatus;
+        match timestamp_resp.status.status {
+            PkiStatus::Accepted | PkiStatus::GrantedWithMods => {
+                // Response is successful, continue
+            }
+            _ => {
+                return Err(SigstoreError::UnexpectedError(format!(
+                    "TSA returned non-success status: {:?}",
+                    timestamp_resp.status.status
+                )));
+            }
+        }
+
+        // Verify that the timestamp token is present
+        if timestamp_resp.time_stamp_token.is_none() {
+            return Err(SigstoreError::UnexpectedError(
+                "TSA response missing TimeStampToken".to_string(),
+            ));
+        }
+
+        tracing::debug!("TimeStampResp validation successful");
 
         Ok(response_bytes.to_vec())
     }
