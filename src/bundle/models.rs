@@ -17,6 +17,8 @@ use crate::rekor::models::{
 pub enum Version {
     Bundle0_1,
     Bundle0_2,
+    Bundle0_3,
+    Bundle0_3Alt,
 }
 
 impl Display for Version {
@@ -24,6 +26,8 @@ impl Display for Version {
         f.write_str(match &self {
             Version::Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
             Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
+            Version::Bundle0_3 => "application/vnd.dev.sigstore.bundle.v0.3+json",
+            Version::Bundle0_3Alt => "application/vnd.dev.sigstore.bundle+json;version=0.3",
         })
     }
 }
@@ -35,6 +39,8 @@ impl FromStr for Version {
         match s {
             "application/vnd.dev.sigstore.bundle+json;version=0.1" => Ok(Version::Bundle0_1),
             "application/vnd.dev.sigstore.bundle+json;version=0.2" => Ok(Version::Bundle0_2),
+            "application/vnd.dev.sigstore.bundle.v0.3+json" => Ok(Version::Bundle0_3),
+            "application/vnd.dev.sigstore.bundle+json;version=0.3" => Ok(Version::Bundle0_3Alt),
             _ => Err(()),
         }
     }
@@ -72,14 +78,41 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
     type Error = ();
 
     fn try_from(value: RekorLogEntry) -> Result<Self, Self::Error> {
-        let canonicalized_body = serde_json_canonicalizer::to_string(&value.body)
-            .map_err(|_| ())?
-            .into_bytes();
-        let inclusion_promise = Some(InclusionPromise {
-            signed_entry_timestamp: base64
-                .decode(value.verification.signed_entry_timestamp)
-                .or(Err(()))?,
-        });
+        let (canonicalized_body, kind, version) = {
+            // First, serialize the body to JSON to extract kind and version
+            let body_json = serde_json::to_value(&value.body).or(Err(()))?;
+
+            // Extract kind and apiVersion
+            let kind = body_json
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| "hashedrekord".to_owned());
+
+            let version = body_json
+                .get("apiVersion")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| "0.0.1".to_owned());
+
+            // Then canonicalize for the bundle using serde_json_canonicalizer
+            let canonicalized = serde_json_canonicalizer::to_string(&value.body)
+                .map_err(|_| ())?
+                .into_bytes();
+
+            (canonicalized, kind, version)
+        };
+        // V2 entries use checkpoints and don't have SETs (signed entry timestamps)
+        // Only create an inclusion_promise if there's actually a SET
+        let inclusion_promise = if value.verification.signed_entry_timestamp.is_empty() {
+            None
+        } else {
+            Some(InclusionPromise {
+                signed_entry_timestamp: base64
+                    .decode(value.verification.signed_entry_timestamp)
+                    .or(Err(()))?,
+            })
+        };
         let inclusion_proof = value
             .verification
             .inclusion_proof
@@ -91,14 +124,66 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
             inclusion_promise,
             inclusion_proof,
             integrated_time: value.integrated_time,
-            kind_version: Some(KindVersion {
-                kind: "hashedrekord".to_owned(),
-                version: "0.0.1".to_owned(),
-            }),
+            kind_version: Some(KindVersion { kind, version }),
             log_id: Some(LogId {
                 key_id: decode_hex(value.log_i_d)?,
             }),
             log_index: value.log_index,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bundle_version_parsing() {
+        // Test Bundle 0.1
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.1"),
+            Ok(Version::Bundle0_1)
+        ));
+
+        // Test Bundle 0.2
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.2"),
+            Ok(Version::Bundle0_2)
+        ));
+
+        // Test Bundle 0.3 (canonical format)
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle.v0.3+json"),
+            Ok(Version::Bundle0_3)
+        ));
+
+        // Test Bundle 0.3 (alternate format)
+        assert!(matches!(
+            Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.3"),
+            Ok(Version::Bundle0_3Alt)
+        ));
+
+        // Test unknown version
+        assert!(Version::from_str("application/vnd.dev.sigstore.bundle+json;version=0.4").is_err());
+    }
+
+    #[test]
+    fn test_bundle_version_display() {
+        assert_eq!(
+            Version::Bundle0_1.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.1"
+        );
+        assert_eq!(
+            Version::Bundle0_2.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.2"
+        );
+        assert_eq!(
+            Version::Bundle0_3.to_string(),
+            "application/vnd.dev.sigstore.bundle.v0.3+json"
+        );
+        assert_eq!(
+            Version::Bundle0_3Alt.to_string(),
+            "application/vnd.dev.sigstore.bundle+json;version=0.3"
+        );
     }
 }

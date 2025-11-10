@@ -28,7 +28,15 @@ pub struct Claims {
     #[serde(with = "chrono::serde::ts_seconds_option")]
     #[serde(default)]
     pub nbf: Option<DateTime<Utc>>,
-    pub email: String,
+    /// Email address from OIDC provider (e.g., Google, Microsoft)
+    /// For GitHub Actions, this field is not present; use `sub` instead
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Subject field - contains the identity
+    /// For GitHub Actions: "repo:owner/repo:ref:refs/heads/branch"
+    /// For other providers: usually the email or user ID
+    #[serde(default)]
+    pub sub: Option<String>,
 }
 
 pub type UnverifiedClaims = Claims;

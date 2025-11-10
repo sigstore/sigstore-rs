@@ -12,17 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Keyring is used by multiple features (sign, verify, etc.)
+// Allow dead code when only 'cert' feature is enabled
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
-use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
+use const_oid::{
+    ObjectIdentifier,
+    db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1},
+};
 use digest::Digest;
+use pkcs1::RsaPublicKey;
 use thiserror::Error;
 use x509_cert::{
     der,
     der::{Decode, Encode},
     spki::SubjectPublicKeyInfoOwned,
 };
+
+// Ed25519 OID: 1.3.101.112
+const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
 #[derive(Error, Debug)]
 pub enum KeyringError {
@@ -31,8 +42,8 @@ pub enum KeyringError {
     #[error("unsupported algorithm")]
     AlgoUnsupported,
 
-    #[error("requested key not in keyring")]
-    KeyNotFound,
+    #[error("requested key not in keyring: {0}")]
+    KeyNotFound(String),
     #[error("verification failed")]
     VerificationFailed,
 }
@@ -47,14 +58,111 @@ struct Key {
 }
 
 impl Key {
+    /// Helper function to detect and create a PKCS#1 RSA key.
+    ///
+    /// Returns Some(Key) if the bytes represent a valid PKCS#1 RSA key, None otherwise.
+    /// This is used for compatibility with staging TUF roots that provide PKCS#1 keys.
+    fn try_pkcs1_rsa(spki_bytes: &[u8], fingerprint: [u8; 32]) -> Option<Self> {
+        // Try to parse as PKCS#1 RSA key to properly validate the format
+        if RsaPublicKey::from_der(spki_bytes).is_ok() {
+            tracing::debug!("Detected deprecated PKCS#1 RSA key format");
+            return Some(Key {
+                inner: UnparsedPublicKey::new(
+                    &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
+                    spki_bytes.to_owned(),
+                ),
+                fingerprint,
+            });
+        }
+        None
+    }
+
     /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object.
+    ///
+    /// The key ID (fingerprint) is computed as the RFC 6962-style SHA256 hash of the SPKI.
+    ///
+    /// Note: This also handles PKCS#1 RSA keys (which are not in SPKI format) by detecting them
+    /// before attempting SPKI parsing. This is needed for compatibility with some TUF roots
+    /// (like the staging instance) that incorrectly provide PKCS#1 keys instead of SPKI keys.
     pub fn new(spki_bytes: &[u8]) -> Result<Self> {
+        // Check for PKCS#1 format FIRST (before SPKI parsing fails)
+        // For PKCS#1 keys, compute fingerprint from the raw bytes
+        if let Some(key) = Self::try_pkcs1_rsa(spki_bytes, {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(spki_bytes);
+            hasher.finalize().into()
+        }) {
+            return Ok(key);
+        }
+
+        // Normal SPKI path
         let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
+
+        // Compute RFC 6962-style key ID (SHA256 hash of SPKI)
+        let fingerprint = {
+            let mut hasher = sha2::Sha256::new();
+            spki.encode(&mut hasher).expect("failed to hash key!");
+            hasher.finalize().into()
+        };
+
+        Self::new_with_id(spki_bytes, fingerprint)
+    }
+
+    /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object with an explicit key ID.
+    ///
+    /// This method should be used when the key ID is provided externally (e.g., from a trusted root),
+    /// rather than being computed from the SPKI.
+    ///
+    /// Note: This also handles PKCS#1 RSA keys (which are not in SPKI format) by detecting them
+    /// and converting them to RSA keys. This is needed for compatibility with some TUF roots
+    /// (like the staging instance) that incorrectly provide PKCS#1 keys instead of SPKI keys.
+    pub fn new_with_id(spki_bytes: &[u8], fingerprint: [u8; 32]) -> Result<Self> {
+        // First try to parse as SPKI (the expected format)
+        let spki = match SubjectPublicKeyInfoOwned::from_der(spki_bytes) {
+            Ok(spki) => spki,
+            Err(spki_err) => {
+                // If SPKI parsing fails, check if it's a PKCS#1 RSA key (used in staging TUF root)
+                if let Some(key) = Self::try_pkcs1_rsa(spki_bytes, fingerprint) {
+                    return Ok(key);
+                }
+
+                // Not PKCS#1 either, return the original SPKI error
+                tracing::debug!(
+                    "Failed to parse as both SPKI and PKCS#1 RSA (len={}, first_bytes={:02x?})",
+                    spki_bytes.len(),
+                    &spki_bytes[..spki_bytes.len().min(10)]
+                );
+                return Err(spki_err.into());
+            }
+        };
+
+        // Ed25519 keys don't have algorithm parameters
+        if spki.algorithm.oid == ID_ED25519 {
+            let raw_key_bytes = spki.subject_public_key.raw_bytes();
+            tracing::debug!("Ed25519 key: raw_bytes len = {}", raw_key_bytes.len());
+
+            return Ok(Key {
+                inner: UnparsedPublicKey::new(
+                    &aws_lc_rs_signature::ED25519,
+                    raw_key_bytes.to_owned(),
+                ),
+                fingerprint,
+            });
+        }
+
         let (algo, params) = if let Some(params) = &spki.algorithm.parameters {
-            // Special-case RSA keys, which don't have SPKI parameters.
+            // RSA keys have NULL parameters in SPKI format
             if spki.algorithm.oid == RSA_ENCRYPTION && params == &der::Any::null() {
-                // TODO(tnytown): Do we need to support RSA keys?
-                return Err(KeyringError::AlgoUnsupported);
+                // RSA key with SHA256 (used by Sigstore CTFE logs)
+                // Note: Sigstore uses RSA PKCS#1v1.5 with SHA256 for SCT signatures
+                tracing::debug!("RSA key detected, using RSA_PKCS1_2048_8192_SHA256");
+                return Ok(Key {
+                    inner: UnparsedPublicKey::new(
+                        &aws_lc_rs_signature::RSA_PKCS1_2048_8192_SHA256,
+                        spki.subject_public_key.raw_bytes().to_owned(),
+                    ),
+                    fingerprint,
+                });
             };
 
             (spki.algorithm.oid, params.decode_as()?)
@@ -63,17 +171,13 @@ impl Key {
         };
 
         match (algo, params) {
-            // TODO(tnytown): should we also accept ed25519, p384, ... ?
+            // TODO(tnytown): should we also accept p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
                 inner: UnparsedPublicKey::new(
                     &aws_lc_rs_signature::ECDSA_P256_SHA256_ASN1,
                     spki.subject_public_key.raw_bytes().to_owned(),
                 ),
-                fingerprint: {
-                    let mut hasher = sha2::Sha256::new();
-                    spki.encode(&mut hasher).expect("failed to hash key!");
-                    hasher.finalize().into()
-                },
+                fingerprint,
             }),
             _ => Err(KeyringError::AlgoUnsupported),
         }
@@ -86,22 +190,109 @@ pub struct Keyring(HashMap<[u8; 32], Key>);
 
 impl Keyring {
     /// Creates a `Keyring` from DER encoded SPKI-format public keys.
+    ///
+    /// This method computes RFC 6962-style key IDs (SHA256 hash of SPKI) for each key.
+    /// For Rekor transparency logs, use `new_with_ids` instead to use the key IDs from
+    /// the trusted root.
     pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
-        Ok(Self(
-            keys.into_iter()
-                .flat_map(Key::new)
-                .map(|k| Ok((k.fingerprint, k)))
-                .collect::<Result<_>>()?,
-        ))
+        let keys_vec: Vec<_> = keys.into_iter().collect();
+        let num_input_keys = keys_vec.len();
+        tracing::debug!("Creating keyring from {} key(s)", num_input_keys);
+
+        let loaded_keys: HashMap<[u8; 32], Key> = keys_vec
+            .into_iter()
+            .flat_map(|key_bytes| match Key::new(key_bytes) {
+                Ok(key) => {
+                    tracing::debug!(
+                        "Loaded key with fingerprint: {}",
+                        hex::encode(key.fingerprint)
+                    );
+                    Some(key)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load key: {:?}", e);
+                    None
+                }
+            })
+            .map(|k| Ok((k.fingerprint, k)))
+            .collect::<Result<_>>()?;
+
+        if loaded_keys.is_empty() && num_input_keys > 0 {
+            return Err(KeyringError::AlgoUnsupported);
+        }
+
+        tracing::debug!(
+            "Successfully loaded {}/{} key(s) into keyring",
+            loaded_keys.len(),
+            num_input_keys
+        );
+
+        Ok(Self(loaded_keys))
+    }
+
+    /// Creates a `Keyring` from DER encoded SPKI-format public keys with explicit key IDs.
+    ///
+    /// This method should be used for Rekor transparency logs where key IDs are provided
+    /// by the trusted root, rather than being computed from the SPKI.
+    pub fn new_with_ids<'a>(
+        keys: impl IntoIterator<Item = (&'a [u8; 32], &'a [u8])>,
+    ) -> Result<Self> {
+        let keys_vec: Vec<_> = keys.into_iter().collect();
+        let num_input_keys = keys_vec.len();
+        tracing::debug!(
+            "Creating keyring from {} key(s) with explicit IDs",
+            num_input_keys
+        );
+
+        let loaded_keys: HashMap<[u8; 32], Key> = keys_vec
+            .into_iter()
+            .flat_map(
+                |(key_id, key_bytes)| match Key::new_with_id(key_bytes, *key_id) {
+                    Ok(key) => {
+                        tracing::debug!(
+                            "Loaded key with fingerprint: {}",
+                            hex::encode(key.fingerprint)
+                        );
+                        Some(key)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load key: {:?}", e);
+                        None
+                    }
+                },
+            )
+            .map(|k| Ok((k.fingerprint, k)))
+            .collect::<Result<_>>()?;
+
+        if loaded_keys.is_empty() && num_input_keys > 0 {
+            return Err(KeyringError::AlgoUnsupported);
+        }
+
+        tracing::debug!(
+            "Successfully loaded {}/{} key(s) into keyring",
+            loaded_keys.len(),
+            num_input_keys
+        );
+
+        Ok(Self(loaded_keys))
+    }
+
+    /// Checks if the keyring contains a key with the given ID.
+    pub fn contains_key(&self, key_id: &[u8; 32]) -> bool {
+        self.0.contains_key(key_id)
     }
 
     /// Verifies `data` against a `signature` with a public key identified by `key_id`.
     pub fn verify(&self, key_id: &[u8; 32], signature: &[u8], data: &[u8]) -> Result<()> {
-        let key = self.0.get(key_id).ok_or(KeyringError::KeyNotFound)?;
+        let key = self
+            .0
+            .get(key_id)
+            .ok_or(KeyringError::KeyNotFound(hex::encode(key_id)))?;
 
-        key.inner
-            .verify(data, signature)
-            .or(Err(KeyringError::VerificationFailed))?;
+        key.inner.verify(data, signature).map_err(|e| {
+            tracing::debug!("Keyring verification failed: {:?}", e);
+            KeyringError::VerificationFailed
+        })?;
 
         Ok(())
     }
@@ -113,6 +304,119 @@ mod tests {
     use crate::crypto::signing_key::ecdsa::{ECDSAKeys, EllipticCurve};
     use digest::Digest;
     use std::io::Write;
+
+    #[test]
+    fn test_pkcs1_rsa_key_from_staging_tuf() {
+        // This is a CTFE RSA public key from the Sigstore staging TUF repository.
+        // Source: https://tuf-repo-cdn.sigstage.dev (ctlogs[0])
+        // Format: PKCS#1 RSAPublicKey (deprecated format, but used in staging)
+        //
+        // The key is in PKCS#1 format instead of the standard SPKI format.
+        // According to sigstore-go: "This key format is deprecated, but currently
+        // in use for Sigstore staging instance"
+        //
+        // Our keyring now supports both formats:
+        // - Standard SPKI format (used in production)
+        // - Legacy PKCS#1 format (used in staging, for compatibility)
+
+        // Load the test key from file
+        const KEY_PATH: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/keys/ctfe_rsa_pkcs1_staging.der"
+        );
+        let rsa_key_bytes = std::fs::read(KEY_PATH)
+            .expect("Failed to read test RSA key - make sure tests/data/keys/ctfe_rsa_pkcs1_staging.der exists");
+
+        // Create a keyring with this PKCS#1 RSA key
+        // This should succeed now that we have PKCS#1 support
+        let result = Keyring::new([rsa_key_bytes.as_slice()]);
+
+        match result {
+            Ok(keyring) => {
+                // Success! The PKCS#1 RSA key was loaded
+                println!("✓ Keyring created successfully with PKCS#1 RSA key");
+
+                // Verify the keyring is not empty (the key was actually loaded)
+                // Note: We can't easily check the internal hashmap, but the fact
+                // that Keyring::new() succeeded without returning AlgoUnsupported
+                // means the key was processed
+                drop(keyring);
+            }
+            Err(e) => {
+                panic!(
+                    "❌ Failed to load PKCS#1 RSA key: {:?}\nThis key should be supported for staging compatibility",
+                    e
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "sigstore-trust-root")]
+    fn test_load_staging_trusted_root_with_pkcs1_rsa() {
+        use crate::trust::TrustRoot;
+        use crate::trust::sigstore::SigstoreTrustRoot;
+        use std::path::Path;
+
+        // Load the staging trusted root which contains a PKCS#1 RSA key
+        const STAGING_ROOT_PATH: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/keys/staging_trusted_root.json"
+        );
+
+        let staging_root = SigstoreTrustRoot::from_file_unchecked(Path::new(STAGING_ROOT_PATH))
+            .expect("Failed to load staging trusted root");
+
+        // Extract CTFE keys - this should succeed even with the PKCS#1 RSA key
+        let ctfe_keys = staging_root
+            .ctfe_keys()
+            .expect("Failed to get CTFE keys from staging root");
+
+        println!(
+            "✓ Loaded {} CTFE key(s) from staging trusted root",
+            ctfe_keys.len()
+        );
+
+        // The staging root has 3 CTFE keys:
+        // - 1 RSA 4096-bit key (PKCS#1 format)
+        // - 2 ECDSA P256 keys (SPKI format)
+        assert_eq!(
+            ctfe_keys.len(),
+            3,
+            "Staging trusted root should have 3 CTFE keys"
+        );
+
+        // Create a keyring with all CTFE keys using their provided key IDs
+        // This tests that our keyring can handle mixed key formats
+        let keys_with_ids: Vec<_> = ctfe_keys
+            .iter()
+            .map(|(key_id_hex, key_bytes)| {
+                let key_id_bytes = hex::decode(key_id_hex).expect("Key ID should be valid hex");
+                let key_id: [u8; 32] = key_id_bytes.try_into().expect("Key ID should be 32 bytes");
+                (key_id, *key_bytes)
+            })
+            .collect();
+
+        let keyring = Keyring::new_with_ids(keys_with_ids.iter().map(|(id, bytes)| (id, *bytes)))
+            .expect("Failed to create keyring from staging CTFE keys");
+
+        println!("✓ Successfully created keyring with all staging CTFE keys");
+        println!("✓ This includes 1 PKCS#1 RSA key and 2 SPKI ECDSA keys");
+
+        // Verify that ALL 3 keys were actually loaded (not silently dropped)
+        // The keyring uses flat_map which silently ignores failed keys,
+        // so we need to check that all keys are present
+        for (key_id, _key_bytes) in keys_with_ids.iter() {
+            assert!(
+                keyring.contains_key(key_id),
+                "Key {} was not loaded into keyring (possibly due to parse failure)",
+                hex::encode(key_id)
+            );
+        }
+        println!("✓ Verified all 3 keys are present in keyring");
+
+        drop(keyring);
+    }
 
     #[test]
     fn verify_keyring() {

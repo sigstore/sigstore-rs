@@ -90,6 +90,19 @@ impl SigstoreTrustRoot {
         Ok(Self { trusted_root })
     }
 
+    /// Constructs a new trust root from a file containing a JSON object with a
+    /// [`TrustedRoot`](https://github.com/sigstore/protobuf-specs).
+    ///
+    /// # Warning
+    ///
+    /// This constructor does not perform any validation of the provided data.
+    /// The caller must ensure that the data is trustworthy.
+    /// Using untrusted data may lead to security vulnerabilities.
+    pub fn from_file_unchecked(path: &Path) -> Result<Self> {
+        let data = std::fs::read(path)?;
+        Self::from_trusted_root_json_unchecked(&data)
+    }
+
     async fn fetch_target<N>(
         repository: &tough::Repository,
         checkout_dir: Option<&Path>,
@@ -157,16 +170,17 @@ impl SigstoreTrustRoot {
         tlogs
             .iter()
             .filter(|tlog| {
-                if let Some(public_key) = tlog.public_key.as_ref() {
-                    is_timerange_valid(public_key.valid_for.as_ref(), false)
-                } else {
-                    false
-                }
+                // For CTFE keys (CT logs), we accept expired keys because we need to verify
+                // old SCTs. The validity check will be done at SCT verification time based on
+                // the SCT timestamp, matching sigstore-go behavior.
+                // We only filter out entries that have no public key at all.
+                tlog.public_key.is_some()
             })
             .filter_map(|tlog| {
                 let key_id = tlog
                     .log_id
                     .as_ref()
+                    // TODO(wolfv): should probably use a better type here and not hex encode
                     .map(|log_id| hex::encode(log_id.key_id.as_slice()));
                 let public_key_raw = tlog
                     .public_key
@@ -238,6 +252,141 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
         } else {
             Ok(keys)
         }
+    }
+
+    /// Fetch TSA certificates from the trusted root.
+    ///
+    /// Returns the leaf certificates from all timestamp authorities.
+    fn tsa_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get the leaf certificates from timestamp authorities
+        // Allow expired certificates: they may have been active when used
+        let certs = Self::ca_keys(&self.trusted_root.timestamp_authorities, true);
+        let certs: Vec<_> = certs
+            .map(|c| CertificateDer::from(c).into_owned())
+            .collect();
+
+        Ok(certs)
+    }
+
+    /// Get TSA certificates with their validity periods from the trusted root.
+    ///
+    /// Returns tuples of (certificate, valid_from, valid_to) for each timestamp authority.
+    fn tsa_certs_with_validity(
+        &self,
+    ) -> Result<
+        Vec<(
+            CertificateDer<'_>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        )>,
+    > {
+        use sigstore_protobuf_specs::dev::sigstore::common::v1::TimeRange;
+
+        tracing::debug!(
+            "Extracting TSA certificates with validity from {} timestamp authorities",
+            self.trusted_root.timestamp_authorities.len()
+        );
+
+        let result: Vec<_> = self
+            .trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter_map(|ca| {
+                // Get the leaf certificate
+                let cert = ca.cert_chain.as_ref()?.certificates.first()?;
+                let cert_der = CertificateDer::from(cert.raw_bytes.as_slice()).into_owned();
+
+                // Get the validity period
+                let (valid_from, valid_to) = if let Some(TimeRange { start, end }) = &ca.valid_for {
+                    tracing::debug!("TSA has valid_for, start={:?}, end={:?}", start, end);
+                    let valid_from = start.as_ref().and_then(|ts| {
+                        let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
+                        tracing::debug!(
+                            "TSA valid_from: ts.seconds={}, ts.nanos={}, result={:?}",
+                            ts.seconds,
+                            ts.nanos,
+                            dt
+                        );
+                        dt
+                    });
+                    let valid_to = end.as_ref().and_then(|ts| {
+                        let dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
+                        tracing::debug!(
+                            "TSA valid_to: ts.seconds={}, ts.nanos={}, result={:?}",
+                            ts.seconds,
+                            ts.nanos,
+                            dt
+                        );
+                        dt
+                    });
+                    tracing::debug!(
+                        "TSA validity period: from={:?}, to={:?}",
+                        valid_from,
+                        valid_to
+                    );
+                    (valid_from, valid_to)
+                } else {
+                    tracing::warn!("No valid_for in TSA certificate authority");
+                    (None, None)
+                };
+
+                Some((cert_der, valid_from, valid_to))
+            })
+            .collect();
+
+        tracing::debug!("Extracted {} TSA certificates with validity", result.len());
+
+        Ok(result)
+    }
+
+    fn tsa_root_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get the root certificates (last cert in each chain) from timestamp authorities
+        let root_certs: Vec<_> = self
+            .trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter_map(|ca| {
+                let cert_chain = ca.cert_chain.as_ref()?;
+                // Get the last certificate in the chain (the root)
+                let root_cert = cert_chain.certificates.last()?;
+                Some(CertificateDer::from(root_cert.raw_bytes.as_slice()).into_owned())
+            })
+            .collect();
+
+        tracing::debug!(
+            "Extracted {} TSA root certificates for chain validation",
+            root_certs.len()
+        );
+
+        Ok(root_certs)
+    }
+
+    fn tsa_intermediate_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
+        // Get intermediate certificates (all certs except first and last) from timestamp authorities
+        let intermediate_certs: Vec<_> = self
+            .trusted_root
+            .timestamp_authorities
+            .iter()
+            .filter(|ca| is_timerange_valid(ca.valid_for.as_ref(), true))
+            .filter_map(|ca| {
+                let cert_chain = ca.cert_chain.as_ref()?;
+                if cert_chain.certificates.len() <= 2 {
+                    // No intermediates if chain has 2 or fewer certs (leaf + root)
+                    return None;
+                }
+                // Get all certs except first (leaf) and last (root)
+                Some(cert_chain.certificates[1..cert_chain.certificates.len() - 1].iter())
+            })
+            .flatten()
+            .map(|cert| CertificateDer::from(cert.raw_bytes.as_slice()).into_owned())
+            .collect();
+
+        tracing::debug!(
+            "Extracted {} TSA intermediate certificates for chain validation",
+            intermediate_certs.len()
+        );
+
+        Ok(intermediate_certs)
     }
 }
 

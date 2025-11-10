@@ -26,6 +26,40 @@ pub trait TrustRoot {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
     fn rekor_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
     fn ctfe_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
+    fn tsa_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
+
+    /// Get TSA certificates with their validity periods.
+    /// Returns tuples of (certificate, valid_from, valid_to).
+    /// Default implementation returns None for validity periods.
+    #[allow(clippy::type_complexity)] // TODO fix return type
+    fn tsa_certs_with_validity(
+        &self,
+    ) -> crate::errors::Result<
+        Vec<(
+            CertificateDer<'_>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        )>,
+    > {
+        // Default implementation: just return certs without validity info
+        let certs = self.tsa_certs()?;
+        Ok(certs.into_iter().map(|c| (c, None, None)).collect())
+    }
+
+    /// Get TSA root certificates for chain validation.
+    /// Returns the root certificates (last cert in each chain) that should be used
+    /// as trust anchors when validating TSA certificate chains.
+    /// Default implementation returns empty vector.
+    fn tsa_root_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
+        Ok(vec![])
+    }
+
+    /// Get TSA intermediate certificates (all certs between leaf and root).
+    /// These should be passed as untrusted intermediates when validating TSA certificate chains.
+    /// Default implementation returns empty vector.
+    fn tsa_intermediate_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
+        Ok(vec![])
+    }
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
@@ -35,6 +69,7 @@ pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Vec<CertificateDer<'a>>,
     pub rekor_keys: BTreeMap<String, Vec<u8>>,
     pub ctfe_keys: BTreeMap<String, Vec<u8>>,
+    pub tsa_certs: Vec<CertificateDer<'a>>,
 }
 
 impl<'a> TrustRoot for ManualTrustRoot<'a> {
@@ -56,5 +91,9 @@ impl<'a> TrustRoot for ManualTrustRoot<'a> {
             .iter()
             .map(|(k, v)| (k.clone(), v.as_slice()))
             .collect())
+    }
+
+    fn tsa_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'a>>> {
+        Ok(self.tsa_certs.clone())
     }
 }

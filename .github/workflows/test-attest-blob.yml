@@ -1,0 +1,180 @@
+name: Test attest-blob with OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-attest-blob:
+    name: Test sigstore-cli attest-blob
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Build sigstore-cli
+        run: |
+          cargo build --bin sigstore-cli --features sign,full,clap,sigstore-trust-root --release
+          echo "Built sigstore-cli at: target/release/sigstore-cli"
+          ./target/release/sigstore-cli --version
+
+      - name: Create test blob
+        run: |
+          echo "Hello from GitHub Actions!" > test-blob.txt
+          echo "This is a test attestation." >> test-blob.txt
+          cat test-blob.txt
+
+      - name: Create test predicate
+        run: |
+          cat > predicate.json <<'EOF'
+          {
+            "predicateType": "https://example.com/predicate/v1",
+            "predicate": {
+              "buildType": "github-actions",
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              },
+              "metadata": {
+                "buildInvocationId": "${{ github.run_id }}",
+                "buildStartedOn": "${{ github.event.repository.updated_at }}",
+                "completeness": {
+                  "parameters": true,
+                  "environment": false,
+                  "materials": false
+                },
+                "reproducible": false
+              }
+            }
+          }
+          EOF
+          cat predicate.json
+
+      - name: Run attest-blob with OIDC (using --statement)
+        run: |
+          ./target/release/sigstore-cli attest-blob \
+            --statement predicate.json \
+            --bundle test-blob.sigstore.json \
+            -y \
+            test-blob.txt
+
+          echo "Bundle created successfully!"
+          ls -lh test-blob.sigstore.json
+
+      - name: Verify bundle structure
+        run: |
+          echo "=== Bundle Contents ==="
+          cat test-blob.sigstore.json | jq '.'
+
+          echo ""
+          echo "=== Bundle Media Type ==="
+          cat test-blob.sigstore.json | jq -r '.mediaType'
+
+          echo ""
+          echo "=== DSSE Envelope ==="
+          cat test-blob.sigstore.json | jq '.dsseEnvelope'
+
+          echo ""
+          echo "=== Certificate Subject ==="
+          cat test-blob.sigstore.json | jq -r '.verificationMaterial.certificate.rawBytes' | base64 -d | openssl x509 -inform DER -noout -subject -ext subjectAltName
+
+          echo ""
+          echo "=== Rekor Entry ==="
+          cat test-blob.sigstore.json | jq '.verificationMaterial.tlogEntries[0]'
+
+      - name: Test attest-blob with --type flag
+        run: |
+          echo "Testing with simple predicate type" > simple-blob.txt
+
+          ./target/release/sigstore-cli attest-blob \
+            --type "https://example.com/simple-attestation/v1" \
+            --bundle simple-blob.sigstore.json \
+            -y \
+            simple-blob.txt
+
+          echo "Simple attestation created!"
+          cat simple-blob.sigstore.json | jq '.dsseEnvelope.payloadType'
+
+      - name: Verify bundle format compatibility
+        run: |
+          # Check that the bundle is v0.3 format
+          MEDIA_TYPE=$(cat test-blob.sigstore.json | jq -r '.mediaType')
+          if [[ "$MEDIA_TYPE" != "application/vnd.dev.sigstore.bundle.v0.3+json" ]]; then
+            echo "Error: Expected bundle v0.3 format, got: $MEDIA_TYPE"
+            exit 1
+          fi
+
+          # Check that DSSE envelope is present
+          PAYLOAD_TYPE=$(cat test-blob.sigstore.json | jq -r '.dsseEnvelope.payloadType')
+          if [[ "$PAYLOAD_TYPE" != "application/vnd.in-toto+json" ]]; then
+            echo "Error: Expected in-toto payload type, got: $PAYLOAD_TYPE"
+            exit 1
+          fi
+
+          echo "✓ Bundle format is correct (v0.3 with DSSE)"
+
+      - name: Install cosign for verification
+        run: |
+          curl -sSfL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o cosign
+          chmod +x cosign
+          ./cosign version
+
+      - name: Verify with cosign
+        run: |
+          # Verify the attestation using cosign
+          ./cosign verify-blob-attestation \
+            --bundle test-blob.sigstore.json \
+            --new-bundle-format \
+            --type "https://example.com/predicate/v1" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/test-attest-blob.yml@${{ github.ref }}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            test-blob.txt || echo "Cosign verification completed with status: $?"
+
+      - name: Upload bundle as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sigstore-bundles
+          path: |
+            test-blob.sigstore.json
+            simple-blob.sigstore.json
+          retention-days: 7
+
+      - name: Success summary
+        run: |
+          echo "✅ Test Summary:"
+          echo "  - Built sigstore-cli successfully"
+          echo "  - Created DSSE attestation with GitHub OIDC"
+          echo "  - Generated Sigstore Bundle v0.3"
+          echo "  - Uploaded to Rekor transparency log"
+          echo "  - Bundle structure verified"

@@ -17,6 +17,64 @@
 
 use thiserror::Error;
 
+/// Errors related to Merkle tree operations (RFC 6962)
+#[derive(Error, Debug)]
+pub enum MerkleTreeError {
+    #[error("Merkle tree verification: leaf index {index} >= tree size {tree_size}")]
+    LeafIndexOutOfBounds { index: u64, tree_size: u64 },
+
+    #[error("Merkle tree inclusion proof: invalid leaf hash size (got {got}, expected 32)")]
+    InvalidLeafHashSize { got: usize },
+
+    #[error("Merkle tree inclusion proof: invalid root hash size (got {got}, expected 32)")]
+    InvalidRootHashSize { got: usize },
+
+    #[error(
+        "Merkle tree inclusion proof: invalid proof hash size at index {index} (got {got}, expected 32)"
+    )]
+    InvalidProofHashSize { index: usize, got: usize },
+
+    #[error("Merkle tree inclusion proof: wrong proof size (got {got}, expected {expected})")]
+    WrongInclusionProofSize { got: usize, expected: usize },
+
+    #[error(
+        "Merkle tree inclusion proof verification failed: computed root hash does not match expected root"
+    )]
+    InclusionProofVerificationFailed,
+
+    #[error("Merkle consistency proof: new tree size {new_size} < old tree size {old_size}")]
+    TreeCannotShrink { old_size: u64, new_size: u64 },
+
+    #[error("Merkle consistency proof: roots must match when tree sizes are equal")]
+    RootsMustMatchForEqualSizes,
+
+    #[error("Merkle consistency proof: proof must be empty when tree sizes are equal")]
+    ProofMustBeEmptyForEqualSizes,
+
+    #[error(
+        "Merkle consistency proof: empty tree (size 0) cannot be consistent with non-empty tree"
+    )]
+    EmptyTreeInconsistentWithNonEmpty,
+
+    #[error("Merkle consistency proof: proof must be empty when old tree is empty")]
+    ProofMustBeEmptyForEmptyTree,
+
+    #[error("Merkle consistency proof: proof cannot be empty for non-trivial consistency")]
+    ProofCannotBeEmpty,
+
+    #[error("Merkle consistency proof: insufficient proof hashes")]
+    InsufficientProofHashes,
+
+    #[error("Merkle consistency proof: wrong proof size (got {got}, expected {expected})")]
+    WrongConsistencyProofSize { got: usize, expected: usize },
+
+    #[error("Merkle consistency proof: old root mismatch (expected {expected:x?}, got {got:x?})")]
+    OldRootMismatch { expected: Vec<u8>, got: Vec<u8> },
+
+    #[error("Merkle consistency proof: new root mismatch (expected {expected:x?}, got {got:x?})")]
+    NewRootMismatch { expected: Vec<u8>, got: Vec<u8> },
+}
+
 #[cfg(feature = "cosign")]
 use crate::cosign::{
     constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
@@ -68,6 +126,9 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
+
+    #[error(transparent)]
+    MerkleTreeError(#[from] MerkleTreeError),
 
     #[error("Public key with unsupported algorithm: {0}")]
     PublicKeyUnsupportedAlgorithmError(String),

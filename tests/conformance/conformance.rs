@@ -67,6 +67,14 @@ struct SignBundle {
     #[clap(long)]
     bundle: String,
 
+    // Optional path to a custom trusted root JSON file
+    #[clap(long)]
+    trusted_root: Option<String>,
+
+    // Optional path to a custom signing config JSON file
+    #[clap(long)]
+    signing_config: Option<String>,
+
     // The artifact to sign
     artifact: String,
 }
@@ -107,7 +115,11 @@ struct VerifyBundle {
     #[clap(long)]
     certificate_oidc_issuer: String,
 
-    // The path to the artifact to verify
+    // Optional path to a custom trusted root file
+    #[clap(long)]
+    trusted_root: Option<String>,
+
+    // The path to the artifact to verify (or a digest prefixed with "sha256:")
     artifact: String,
 }
 
@@ -122,7 +134,7 @@ fn main() {
     };
 
     if let Err(error) = result {
-        eprintln!("Operation failed:\n{error:?}");
+        eprintln!("Operation failed:\n{error}");
         exit(-1);
     }
 
@@ -130,16 +142,44 @@ fn main() {
 }
 
 fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use sigstore::trust::sigstore::SigstoreTrustRoot;
+    use std::path::Path;
+
     let SignBundle {
         identity_token,
         bundle,
+        trusted_root,
+        signing_config,
         artifact,
     } = args;
+
     let identity_token = IdentityToken::try_from(identity_token.as_str())?;
     let bundle = fs::File::create(bundle)?;
     let mut artifact = fs::File::open(artifact)?;
 
-    let context = SigningContext::production()?;
+    // Parse signing config if provided
+    let signing_config_parsed = if let Some(ref config_path) = signing_config {
+        use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
+
+        let config_data = std::fs::read(config_path)
+            .with_context(|| format!("failed to read signing config from: {}", config_path))?;
+        let config: SigningConfig = serde_json::from_slice(&config_data)
+            .with_context(|| format!("failed to parse signing config: {}", config_path))?;
+        Some(config)
+    } else {
+        None
+    };
+
+    // Create signing context with custom or production trust root
+    let context = if let Some(trusted_root_path) = trusted_root {
+        let trust_root = SigstoreTrustRoot::from_file_unchecked(Path::new(&trusted_root_path))
+            .with_context(|| format!("failed to load trusted root from: {}", trusted_root_path))?;
+        SigningContext::from_trust_root_and_signing_config(trust_root, signing_config_parsed.as_ref())?
+    } else {
+        SigningContext::production()?
+    };
+
     let signer = context.blocking_signer(identity_token);
 
     let signing_artifact = signer?.sign(&mut artifact)?;
@@ -151,24 +191,59 @@ fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
 }
 
 fn verify_bundle(args: VerifyBundle) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use sigstore::trust::sigstore::SigstoreTrustRoot;
+    use std::io::Read;
+
     let VerifyBundle {
         bundle,
         certificate_identity,
         certificate_oidc_issuer,
+        trusted_root,
         artifact,
     } = args;
-    let bundle = fs::File::open(bundle)?;
-    let mut artifact = fs::File::open(artifact)?;
 
-    let bundle: sigstore::bundle::Bundle = serde_json::from_reader(bundle)?;
-    let verifier = Verifier::production()?;
+    let bundle_file = fs::File::open(&bundle)
+        .with_context(|| format!("failed to open bundle file: {}", bundle))?;
+    let bundle: sigstore::bundle::Bundle = serde_json::from_reader(bundle_file)
+        .context("failed to parse bundle JSON")?;
 
-    verifier.verify(
-        &mut artifact,
-        bundle,
-        &policy::Identity::new(certificate_identity, certificate_oidc_issuer),
-        true,
-    )?;
+    // Create verifier with custom or production trust root
+    let verifier = if let Some(trusted_root_path) = trusted_root {
+        let mut trusted_root_file = fs::File::open(&trusted_root_path)
+            .with_context(|| format!("failed to open trusted root file: {}", trusted_root_path))?;
+        let mut trusted_root_data = Vec::new();
+        trusted_root_file.read_to_end(&mut trusted_root_data)
+            .context("failed to read trusted root file")?;
+        let trust_root = SigstoreTrustRoot::from_trusted_root_json_unchecked(&trusted_root_data)
+            .context("failed to parse trusted root JSON")?;
+        Verifier::new(Default::default(), trust_root)
+            .context("failed to create verifier with custom trust root")?
+    } else {
+        Verifier::production()
+            .context("failed to create production verifier")?
+    };
+
+    let policy = policy::Identity::new(certificate_identity, certificate_oidc_issuer);
+
+    // Check if artifact is a digest (prefixed with "sha256:") or a file path
+    if let Some(digest_hex) = artifact.strip_prefix("sha256:") {
+        // Digest verification
+        let digest_bytes = hex::decode(digest_hex)
+            .context("failed to decode digest hex")?;
+        if digest_bytes.len() != 32 {
+            anyhow::bail!("invalid SHA256 digest length: expected 32 bytes, got {}", digest_bytes.len());
+        }
+        let digest_array: [u8; 32] = digest_bytes.try_into().unwrap();
+        verifier.verify_digest_bytes(&digest_array, bundle, &policy, true)
+            .with_context(|| format!("digest verification failed"))?;
+    } else {
+        // File verification
+        let mut artifact_file = fs::File::open(&artifact)
+            .with_context(|| format!("failed to open artifact file: {}", artifact))?;
+        verifier.verify(&mut artifact_file, bundle, &policy, true)
+            .context("artifact verification failed")?;
+    }
 
     Ok(())
 }
