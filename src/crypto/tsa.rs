@@ -78,11 +78,21 @@ impl TimestampAuthorityClient {
 
         // Build the MessageImprint
         // According to RFC 4055, the parameters field for SHA-256 SHOULD be either
-        // absent or NULL. We use None (absent) to match what other implementations do.
+        // absent or NULL. However, the Sigstore TSA has a bug where it returns
+        // malformed timestamps when the request omits NULL parameters.
+        // So we explicitly include NULL to work around this TSA bug.
+        use x509_cert::der::Encode;
+        let null_der = x509_cert::der::asn1::Null.to_der().map_err(|e| {
+            SigstoreError::UnexpectedError(format!("failed to encode NULL: {}", e))
+        })?;
+        let null_any = x509_cert::der::Any::from_der(&null_der).map_err(|e| {
+            SigstoreError::UnexpectedError(format!("failed to create Any from NULL: {}", e))
+        })?;
+
         let message_imprint = MessageImprint {
             hash_algorithm: x509_cert::spki::AlgorithmIdentifier {
                 oid: const_oid::db::rfc5912::ID_SHA_256,
-                parameters: None,
+                parameters: Some(null_any),
             },
             hashed_message: x509_cert::der::asn1::OctetString::new(&signature_hash[..]).map_err(
                 |e| {
@@ -95,9 +105,23 @@ impl TimestampAuthorityClient {
         };
 
         // Generate a random nonce for replay protection
+        // IMPORTANT: The nonce must be a positive INTEGER in DER encoding.
+        // Per DER rules, we should only prepend 0x00 if the high bit is set.
         use rand::Rng;
         let mut rng = rand::thread_rng();
-        let nonce_bytes: [u8; 8] = rng.r#gen();
+        let nonce_random: [u8; 8] = rng.r#gen();
+
+        // Only prepend 0x00 if the high bit is set (to avoid negative number)
+        let nonce_bytes = if nonce_random[0] & 0x80 != 0 {
+            // High bit set, need 0x00 padding
+            let mut padded = vec![0x00];
+            padded.extend_from_slice(&nonce_random);
+            padded
+        } else {
+            // High bit clear, no padding needed
+            nonce_random.to_vec()
+        };
+
         let nonce = x509_cert::der::asn1::Int::new(&nonce_bytes).map_err(|e| {
             SigstoreError::UnexpectedError(format!("failed to create nonce: {}", e))
         })?;
