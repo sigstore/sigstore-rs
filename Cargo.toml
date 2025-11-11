@@ -85,7 +85,7 @@ verify = [
     "fulcio",
     "rekor",
 ]
-wasm = ["chrono/wasmbind", "getrandom/js", "ring?/wasm32_unknown_unknown_js"]
+wasm = ["chrono/wasmbind", "ring?/wasm32_unknown_unknown_js"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
@@ -122,7 +122,6 @@ elliptic-curve = { version = "0.13", default-features = false, features = [
 ] }
 futures = { version = "0.3", default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
-getrandom = { version = "0.2", default-features = false, optional = true }
 hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
@@ -153,10 +152,7 @@ pkcs8 = { version = "0.10", default-features = false, features = [
     "std",
 ] }
 pki-types = { package = "rustls-pki-types", version = "1.11", default-features = false }
-rand = { version = "0.8", default-features = false, features = [
-    "getrandom",
-    "std",
-] }
+rand = { version = "0.8", default-features = false, features = ["std"] }
 regex = { version = "1.10", default-features = false, optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
