@@ -25,27 +25,27 @@ pub(crate) mod merkle;
 
 /// Different digital signature algorithms.
 /// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256
-///    for RSA signatures. All the `usize` member inside
-///    an RSA enum represents the key size of the RSA key.
+///   for RSA signatures. All the `usize` member inside
+///   an RSA enum represents the key size of the RSA key.
 /// * `RSA_PSS_SHA384`: RSA PSS padding using SHA-384
-///    for RSA signatures.
+///   for RSA signatures.
 /// * `RSA_PSS_SHA512`: RSA PSS padding using SHA-512
-///    for RSA signatures.
+///   for RSA signatures.
 /// * `RSA_PKCS1_SHA256`: PKCS#1 1.5 padding using
-///    SHA-256 for RSA signatures.
+///   SHA-256 for RSA signatures.
 /// * `RSA_PKCS1_SHA384`: PKCS#1 1.5 padding using
-///    SHA-384 for RSA signatures.
+///   SHA-384 for RSA signatures.
 /// * `RSA_PKCS1_SHA512`: PKCS#1 1.5 padding using
-///    SHA-512 for RSA signatures.
+///   SHA-512 for RSA signatures.
 /// * `ECDSA_P256_SHA256_ASN1`: ASN.1 DER-encoded ECDSA
-///    signatures using the P-256 curve and SHA-256. It
-///    is the default signing scheme.
+///   signatures using the P-256 curve and SHA-256. It
+///   is the default signing scheme.
 /// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA
-///    signatures using the P-384 curve and SHA-384.
+///   signatures using the P-384 curve and SHA-384.
 /// * `ED25519`: ECDSA signature using SHA2-512
-///    as the digest function and curve edwards25519. The
-///    signature format please refer
-///    to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
+///   as the digest function and curve edwards25519. The
+///   signature format please refer
+///   to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SigningScheme {

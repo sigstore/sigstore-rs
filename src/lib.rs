@@ -238,7 +238,7 @@
 //!
 //! - `default`: Enables `full-native-tls`, `cached-client` and `test-registry` features.
 //! - `full-native-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
-//!    tls uses `native-tls`. This feature will not enable `test-registry.`
+//!   tls uses `native-tls`. This feature will not enable `test-registry.`
 //! - `full-rustls-tls`: Enables support for `fulcio`, `rekor` and `cosign`. All the underlying
 //!   tls uses `rustls-tls`. This feature will not enable `test-registry.`
 //!

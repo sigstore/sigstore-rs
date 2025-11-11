@@ -20,7 +20,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let tree_id = args.tree_id.as_ref().map(|s| s.as_str());
+    let tree_id = args.tree_id.as_deref();
     // read verification key
     let rekor_key = read_to_string(&args.rekor_key)
         .map_err(Into::into)

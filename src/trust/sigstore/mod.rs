@@ -162,7 +162,7 @@ impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// the local cache if its contents are not outdated.
     ///
     /// The contents of the local cache are updated when they are outdated.
-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+    fn fulcio_certs(&self) -> Result<Vec<CertificateDer<'_>>> {
         // Allow expired certificates: they may have been active when the
         // certificate was used to sign.
         let certs = Self::ca_keys(&self.trusted_root.certificate_authorities, true);

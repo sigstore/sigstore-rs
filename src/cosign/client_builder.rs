@@ -63,7 +63,7 @@ pub struct ClientBuilder<'a> {
 impl<'a> ClientBuilder<'a> {
     /// Enable caching of data returned from remote OCI registries
     #[cfg(feature = "cached-client")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cached-registry")))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cached-client")))]
     pub fn enable_registry_caching(mut self) -> Self {
         self.enable_registry_caching = true;
         self

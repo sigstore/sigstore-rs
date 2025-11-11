@@ -306,7 +306,10 @@ impl SigningContext {
     }
 
     /// Configures and returns a [`SigningSession`] with the held context.
-    pub async fn signer(&self, identity_token: IdentityToken) -> SigstoreResult<SigningSession> {
+    pub async fn signer(
+        &self,
+        identity_token: IdentityToken,
+    ) -> SigstoreResult<SigningSession<'_>> {
         SigningSession::new(self, identity_token).await
     }
 
@@ -316,7 +319,7 @@ impl SigningContext {
     pub fn blocking_signer(
         &self,
         identity_token: IdentityToken,
-    ) -> SigstoreResult<blocking::SigningSession> {
+    ) -> SigstoreResult<blocking::SigningSession<'_>> {
         blocking::SigningSession::new(self, identity_token)
     }
 }

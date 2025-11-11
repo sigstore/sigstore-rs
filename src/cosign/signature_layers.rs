@@ -228,7 +228,7 @@ impl SignatureLayer {
     ///     with the Sigstore object
     ///   * `layer`: the data referenced by the descriptor
     ///   * `source_image_digest`: the digest of the object that we're trying
-    ///      to verify. This is **not** the digest of the signature itself.
+    ///     to verify. This is **not** the digest of the signature itself.
     ///   * `rekor_pub_key`: the public key of Rekor, used to verify `bundle`
     ///     entries
     ///   * `fulcio_pub_key`: the public key provided by Fulcio's certificate.
@@ -319,11 +319,7 @@ impl SignatureLayer {
         fulcio_cert_pool: Option<&CertificatePool>,
         bundle: Option<&Bundle>,
     ) -> Option<CertificateSignature> {
-        let cert_raw = match annotations.get(SIGSTORE_CERT_ANNOTATION) {
-            Some(value) => value,
-            None => return None,
-        };
-
+        let cert_raw = annotations.get(SIGSTORE_CERT_ANNOTATION)?;
         let fulcio_cert_pool = match fulcio_cert_pool {
             Some(cp) => cp,
             None => {
