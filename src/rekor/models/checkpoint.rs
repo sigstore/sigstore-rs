@@ -98,19 +98,27 @@ impl Checkpoint {
         )
     }
 
-    /// Checks if the checkpoint and inclusion proof are valid together.
+    /// Checks if the checkpoint (root hash) matches the Merkle root and tree size claimed by an
+    /// inclusion or consistency proof. This prevents accepting proofs that claim to be for a
+    /// different tree than the one actually signed by the log, even if they are correctly signed.
+    /// This ensures a cryptographic linkage between the log's signed state and the proof being
+    /// verified.
     pub(crate) fn is_valid_for_proof(
         &self,
         proof_root_hash: &Output<Rfc6269Default>,
         proof_tree_size: u64,
     ) -> Result<(), SigstoreError> {
         // Delegate implementation as trivial consistency proof.
+        // the checkpoint and the proof claim the same tree size. According to RFC-6962,
+        // if two tree sizes are equal, the only valid consistency proof is that their roots are
+        // equal and the proof is empty: one doesn't need any hashes to prove consistency between
+        // two identical trees, just check that the roots match.
         Rfc6269Default::verify_consistency(
-            self.note.size,
-            proof_tree_size,
-            &[],
-            &self.note.hash.into(),
-            proof_root_hash,
+            self.note.size,         // checkpoint's tree size
+            proof_tree_size,        // proof's tree size
+            &[],                    // empty proof_hashes
+            &self.note.hash.into(), // checkpoint's root hash
+            proof_root_hash,        // proof's root hash
         )
         .map_err(ConsistencyProofError)
     }

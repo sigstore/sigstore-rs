@@ -29,7 +29,8 @@ impl ConsistencyProof {
     }
 
     /// Verify this consistency proof against the given parameters.
-    /// If `new_root` is `Some` then this root will be used in the verification. If it is `None` then the root in `self.root_hash` is used.
+    /// If `new_root` is `Some` then this root will be used in the verification. If it is `None`
+    /// then the root in `self.root_hash` is used.
     pub fn verify(
         &self,
         old_size: u64,

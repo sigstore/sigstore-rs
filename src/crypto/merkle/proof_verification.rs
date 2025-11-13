@@ -29,11 +29,11 @@ where
     /// with the specified `leaf_hash` and `index`, relatively to the tree of the given `tree_size`
     /// and `root_hash`. Requires `0 <= index < tree_size`.
     fn verify_inclusion(
-        index: u64,
-        leaf_hash: &O,
+        index: u64,    // leaf index, m in RFC
+        leaf_hash: &O, // d(m) leaf hash
         tree_size: u64,
-        proof_hashes: &[O],
-        root_hash: &O,
+        proof_hashes: &[O], // PATH(m, D[n]) audit path
+        root_hash: &O,      // MTH(D[n])
     ) -> Result<(), MerkleProofError> {
         if index >= tree_size {
             return Err(IndexGtTreeSize);
@@ -52,10 +52,10 @@ where
     /// given size, provided a leaf index and hash with the corresponding inclusion
     /// proof. Requires `0 <= index < tree_size`.
     fn root_from_inclusion_proof(
-        index: u64,
-        leaf_hash: &O,
+        index: u64,    // leaf index, m in RFC
+        leaf_hash: &O, // d(m) leaf hash
         tree_size: u64,
-        proof_hashes: &[O],
+        proof_hashes: &[O], // PATH(m, D[n]) audit path
     ) -> Result<Box<O>, MerkleProofError> {
         if index >= tree_size {
             return Err(IndexGtTreeSize);
@@ -117,24 +117,46 @@ where
             (Ordering::Less, false, false) => {}
         }
 
+        // find the largest power of two smaller than new_size.
+        // - shift: power of two (k in RFC-6962)
+        // - inner: number of hashes in the proof that correspond to the inner part, the hashes
+        //   needed to reconstruct the subtree up to the divergence point
+        // - border: number of hashes in the proof that correspond to the border part, the hashes
+        //   needed to be reconstructed
         let shift = old_size.trailing_zeros() as u64;
         let (inner, border) = Self::decomp_inclusion_proof(old_size - 1, new_size);
         let inner = inner - shift;
 
         // The proof includes the root hash for the sub-tree of size 2^shift.
-        // Unless size1 is that very 2^shift.
+        // Unless old_size is that very 2^shift.
+        // - start: offsef into the proof array where the actual path hashes begin
+        // - seed: starting hash for reconstructing the old tree root
         let (seed, start) = if old_size == 1 << shift {
+            // smaller tree is a perfect subtree
             (old_root, 0)
         } else {
+            // seed: use first hash for the proof
+            // start: 1, skip the first hash as we are using it as the seed
             (&proof_hashes[0], 1)
         };
 
+        // check that the proof has the correct number of hashes. This prevents too short or too
+        // long proofs which could indicate tampering or errors. Needed after unwinding from the
+        // recursive proof algorithm.
         match (proof_hashes.len() as u64, start + inner + border) {
             (got, want) if got != want => return Err(WrongProofSize { got, want }),
             _ => {}
         }
 
         let proof = &proof_hashes[start as usize..];
+        // mask determines which direction (left or right) to combine the hashes as you walk up
+        // the tree from the seed hash, encoding the path from the subtree to the tree root.
+        // It skips the bits that are always zero due to the subtree's alignment.
+        // if:
+        // - mask is 0 (old_size is power of two): take the hash as is without combining.
+        // Else, take bit matching the level, starting with less significant bits:
+        // - mask bit matching the level is 0: propagate hash
+        // - mask bit matching the level is 1: combine with proof
         let mask = (old_size - 1) >> shift;
 
         // verify the old hash is correct
@@ -164,8 +186,10 @@ where
             .enumerate()
             .fold(seed.clone(), |seed, (i, h)| {
                 let (left, right) = if ((index >> i) & 1) == 0 {
+                    // mask bit is 0: hash( seed || proof_hash )
                     (&seed, h)
                 } else {
+                    // mask bit is 1: hash( proof_hash || seed )
                     (h, &seed)
                 };
                 Self::hash_children(left, right)
@@ -181,8 +205,10 @@ where
             .enumerate()
             .fold(seed.clone(), |seed, (i, h)| {
                 if ((index >> i) & 1) == 1 {
+                    // mask bit is 1: hash( proof_hash || seed )
                     Self::hash_children(h, seed)
                 } else {
+                    // propagate the seed upwards
                     seed
                 }
             })
@@ -190,7 +216,9 @@ where
 
     /// `chain_border_right` chains proof hashes along tree borders. This differs from
     /// inner chaining because `proof` contains only left-side subtree hashes.
+    /// Used to finish the path up to the root after the walk done using the mask.
     fn chain_border_right(seed: &O, proof_hashes: &[O]) -> O {
+        // always combine as hash( proof_hash || seed )
         proof_hashes
             .iter()
             .fold(seed.clone(), |seed, h| Self::hash_children(h, seed))
@@ -207,7 +235,11 @@ where
         (inner, border)
     }
 
+    // `inner_proof_size` computes the number of inner levels (hashes) required in the audit path
+    // given a leaf at index in a tree of tree_size
     fn inner_proof_size(index: u64, tree_size: u64) -> u64 {
+        // return the position of the highest differing bit, which is the number of inner proof
+        // steps.
         u64::BITS as u64 - ((index ^ (tree_size - 1)).leading_zeros() as u64)
     }
 }
@@ -819,6 +851,7 @@ mod test_verify {
         let proof2 = [SHA256_EMPTY_TREE_HASH.into()];
         let empty_tree_hash = &SHA256_EMPTY_TREE_HASH.into();
         let test_cases = [
+            // Same sizes but the root hashes differ.
             (0, 0, root1, root2, proof1, true),
             (1, 1, root1, root2, proof1, true),
             // Sizes that are always consistent.
@@ -830,7 +863,7 @@ mod test_verify {
             (2, 1, root1, root2, proof1, true),
             // Empty proof.
             (1, 2, root1, root2, proof1, true),
-            // Roots don't match.
+            // Roots don't match with equal size, append-only violated.
             (0, 0, empty_tree_hash, root2, proof1, true),
             (1, 1, empty_tree_hash, root2, proof1, true),
             // Roots match but the proof is not empty.
