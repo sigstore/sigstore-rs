@@ -70,7 +70,7 @@ pub enum SigstoreError {
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
 
-    #[cfg(any(feature = "verify", feature = "sign", feature = "sigstore-trust-root"))]
+    #[cfg(any(feature = "verify", feature = "sign", feature = "sigstore-trust-root", feature = "rekor"))]
     #[error(transparent)]
     HexDecodeError(#[from] hex::FromHexError),
 
