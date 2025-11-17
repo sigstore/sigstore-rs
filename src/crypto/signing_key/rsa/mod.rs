@@ -209,10 +209,10 @@ impl Signer for RSASigner {
 mod tests {
     use rstest::rstest;
 
-    use super::{keypair::RSAKeys, DigestAlgorithm, PaddingScheme, RSASigner, DEFAULT_KEY_SIZE};
+    use super::{DEFAULT_KEY_SIZE, DigestAlgorithm, PaddingScheme, RSASigner, keypair::RSAKeys};
     use crate::crypto::{
-        signing_key::{tests::MESSAGE, KeyPair, Signer},
         Signature, SigningScheme,
+        signing_key::{KeyPair, Signer, tests::MESSAGE},
     };
 
     #[rstest]

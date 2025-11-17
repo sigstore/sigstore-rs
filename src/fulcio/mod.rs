@@ -2,20 +2,20 @@ pub(crate) mod models;
 
 pub mod oauth;
 
-use crate::crypto::signing_key::SigStoreSigner;
 use crate::crypto::SigningScheme;
+use crate::crypto::signing_key::SigStoreSigner;
 use crate::errors::{Result, SigstoreError};
 use crate::fulcio::models::{CreateSigningCertificateRequest, SigningCertificate};
 use crate::fulcio::oauth::OauthTokenProvider;
 use crate::oauth::IdentityToken;
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use openidconnect::core::CoreIdToken;
-use reqwest::{header, Body};
+use reqwest::{Body, header};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::fmt::{Debug, Display, Formatter};
 use url::Url;
-use x509_cert::{der::Decode, Certificate};
+use x509_cert::{Certificate, der::Decode};
 
 pub use models::{CertificateResponse, SigningCertificateDetachedSCT};
 

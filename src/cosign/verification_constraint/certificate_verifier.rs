@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
 use pkcs8::der::Decode;
+use pki_types::CertificateDer;
 use tracing::warn;
-use webpki::types::CertificateDer;
 use x509_cert::Certificate;
 
 use super::VerificationConstraint;
 use crate::cosign::signature_layers::SignatureLayer;
-use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
+use crate::crypto::{CosignVerificationKey, certificate_pool::CertificatePool};
 use crate::errors::{Result, SigstoreError};
 
 /// Verify signature layers using the public key defined inside of a x509 certificate
@@ -23,10 +23,10 @@ impl CertificateVerifier {
     ///
     /// * `cert_bytes`: PEM encoded certificate
     /// * `require_rekor_bundle`: require the  signature layer to have a Rekor
-    ///    bundle. Having a Rekor bundle allows further checks to be performed,
-    ///    like ensuring the signature has been produced during the validity
-    ///    time frame of the certificate. It is recommended to set this value
-    ///    to `true` to have a more secure verification process.
+    ///   bundle. Having a Rekor bundle allows further checks to be performed,
+    ///   like ensuring the signature has been produced during the validity
+    ///   time frame of the certificate. It is recommended to set this value
+    ///   to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
     pub fn from_pem(
@@ -43,10 +43,10 @@ impl CertificateVerifier {
     ///
     /// * `cert_bytes`: DER encoded certificate
     /// * `require_rekor_bundle`: require the  signature layer to have a Rekor
-    ///    bundle. Having a Rekor bundle allows further checks to be performed,
-    ///    like ensuring the signature has been produced during the validity
-    ///    time frame of the certificate. It is recommended to set this value
-    ///    to `true` to have a more secure verification process.
+    ///   bundle. Having a Rekor bundle allows further checks to be performed,
+    ///   like ensuring the signature has been produced during the validity
+    ///   time frame of the certificate. It is recommended to set this value
+    ///   to `true` to have a more secure verification process.
     /// * `cert_chain`: the certificate chain that is used to verify the provided
     ///   certificate. When not specified, the certificate is assumed to be trusted
     pub fn from_der(
@@ -214,8 +214,12 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
 
         let signature_layer = SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
-            oci_digest: String::from("sha256:f9b817c013972c75de8689d55c0d441c3eb84f6233ac75f6a9c722ea5db0058b"),
-            signature: Some(String::from("MEYCIQCIqLEe6hnjEXP/YC2P9OIwEr2yMmwPNHLzvCPaoaXFOQIhALyTouhKNKc2ZVrR0GUQ7J0U5AtlyDZDLGnasAi7XnV/")),
+            oci_digest: String::from(
+                "sha256:f9b817c013972c75de8689d55c0d441c3eb84f6233ac75f6a9c722ea5db0058b",
+            ),
+            signature: Some(String::from(
+                "MEYCIQCIqLEe6hnjEXP/YC2P9OIwEr2yMmwPNHLzvCPaoaXFOQIhALyTouhKNKc2ZVrR0GUQ7J0U5AtlyDZDLGnasAi7XnV/",
+            )),
             bundle: Some(bundle),
             certificate_signature: None,
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
@@ -261,16 +265,18 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
         assert!(vc.verify(&signature_layer).expect("error while verifying"));
 
         // layer verification fails because there's no rekor bundle
-        assert!(!vc
-            .verify(&signature_layer_without_rekor_bundle)
-            .expect("error while verifying"));
+        assert!(
+            !vc.verify(&signature_layer_without_rekor_bundle)
+                .expect("error while verifying")
+        );
 
         // verification constraint that does not enforce rekor integration
         let vc = CertificateVerifier::from_pem(cert_pem_raw.as_bytes(), false, None)
             .expect("cannot create verification constraint");
-        assert!(vc
-            .verify(&signature_layer_without_rekor_bundle)
-            .expect("error while verifying"));
+        assert!(
+            vc.verify(&signature_layer_without_rekor_bundle)
+                .expect("error while verifying")
+        );
     }
 
     #[test]

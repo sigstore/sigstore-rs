@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use super::{ClientCapabilities, ClientCapabilitiesDeps};
 use crate::errors::{Result, SigstoreError};
 
@@ -30,21 +32,21 @@ use tracing::{debug, error};
 /// For testing purposes, use instead the client inside of the
 /// `mock_client` module.
 pub(crate) struct OciCachingClient {
-    pub registry_client: oci_distribution::Client,
+    pub registry_client: oci_client::Client,
 }
 
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ format!("{}", image) }"#,
     with_cached_flag = true
 )]
 async fn fetch_manifest_digest_cached(
-    client: &mut oci_distribution::Client,
-    image: &oci_distribution::Reference,
-    auth: &oci_distribution::secrets::RegistryAuth,
+    client: &mut oci_client::Client,
+    image: &oci_client::Reference,
+    auth: &oci_client::secrets::RegistryAuth,
 ) -> Result<cached::Return<String>> {
     client
         .fetch_manifest_digest(image, auth)
@@ -67,8 +69,8 @@ struct PullSettings<'a> {
 
 impl<'a> PullSettings<'a> {
     fn new(
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
         accepted_media_types: Vec<&'a str>,
     ) -> PullSettings<'a> {
         let image_str = image.whole();
@@ -82,15 +84,15 @@ impl<'a> PullSettings<'a> {
     }
 
     #[allow(clippy::unwrap_used)]
-    pub fn image(&self) -> oci_distribution::Reference {
+    pub fn image(&self) -> oci_client::Reference {
         // we can use `unwrap` here, because this will never fail
-        let reference: oci_distribution::Reference = self.image.parse().unwrap();
+        let reference: oci_client::Reference = self.image.parse().unwrap();
         reference
     }
 
-    pub fn auth(&self) -> oci_distribution::secrets::RegistryAuth {
+    pub fn auth(&self) -> oci_client::secrets::RegistryAuth {
         let internal_auth: &super::config::Auth = &self.auth;
-        let a: oci_distribution::secrets::RegistryAuth = internal_auth.into();
+        let a: oci_client::secrets::RegistryAuth = internal_auth.into();
         a
     }
 
@@ -131,15 +133,15 @@ impl<'a> PullSettings<'a> {
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
     with_cached_flag = true
 )]
 async fn pull_cached(
-    client: &mut oci_distribution::Client,
+    client: &mut oci_client::Client,
     settings: PullSettings<'_>,
-) -> Result<cached::Return<oci_distribution::client::ImageData>> {
+) -> Result<cached::Return<oci_client::client::ImageData>> {
     let auth = settings.auth();
     let image = settings.image();
 
@@ -163,8 +165,8 @@ struct PullManifestSettings {
 
 impl PullManifestSettings {
     fn new(
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
     ) -> PullManifestSettings {
         let image_str = image.whole();
         let auth_sigstore: super::config::Auth = From::from(auth);
@@ -176,15 +178,15 @@ impl PullManifestSettings {
     }
 
     #[allow(clippy::unwrap_used)]
-    pub fn image(&self) -> oci_distribution::Reference {
+    pub fn image(&self) -> oci_client::Reference {
         // we can use `unwrap` here, because this will never fail
-        let reference: oci_distribution::Reference = self.image.parse().unwrap();
+        let reference: oci_client::Reference = self.image.parse().unwrap();
         reference
     }
 
-    pub fn auth(&self) -> oci_distribution::secrets::RegistryAuth {
+    pub fn auth(&self) -> oci_client::secrets::RegistryAuth {
         let internal_auth: &super::config::Auth = &self.auth;
-        let a: oci_distribution::secrets::RegistryAuth = internal_auth.into();
+        let a: oci_client::secrets::RegistryAuth = internal_auth.into();
         a
     }
 
@@ -225,15 +227,15 @@ impl PullManifestSettings {
 #[cached(
     time = 60,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
     with_cached_flag = true
 )]
 async fn pull_manifest_cached(
-    client: &mut oci_distribution::Client,
+    client: &mut oci_client::Client,
     settings: PullManifestSettings,
-) -> Result<cached::Return<(oci_distribution::manifest::OciManifest, String)>> {
+) -> Result<cached::Return<(oci_client::manifest::OciManifest, String)>> {
     let image = settings.image();
     let auth = settings.auth();
     client
@@ -253,8 +255,8 @@ impl ClientCapabilitiesDeps for OciCachingClient {}
 impl ClientCapabilities for OciCachingClient {
     async fn fetch_manifest_digest(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
     ) -> Result<String> {
         fetch_manifest_digest_cached(&mut self.registry_client, image, auth)
             .await
@@ -270,10 +272,10 @@ impl ClientCapabilities for OciCachingClient {
 
     async fn pull(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
         accepted_media_types: Vec<&str>,
-    ) -> Result<oci_distribution::client::ImageData> {
+    ) -> Result<oci_client::client::ImageData> {
         let pull_settings = PullSettings::new(image, auth, accepted_media_types);
 
         pull_cached(&mut self.registry_client, pull_settings)
@@ -290,9 +292,9 @@ impl ClientCapabilities for OciCachingClient {
 
     async fn pull_manifest(
         &mut self,
-        image: &oci_distribution::Reference,
-        auth: &oci_distribution::secrets::RegistryAuth,
-    ) -> Result<(oci_distribution::manifest::OciManifest, String)> {
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
+    ) -> Result<(oci_client::manifest::OciManifest, String)> {
         let pull_manifest_settings = PullManifestSettings::new(image, auth);
 
         pull_manifest_cached(&mut self.registry_client, pull_manifest_settings)
@@ -309,12 +311,12 @@ impl ClientCapabilities for OciCachingClient {
 
     async fn push(
         &mut self,
-        image_ref: &oci_distribution::Reference,
-        layers: &[oci_distribution::client::ImageLayer],
-        config: oci_distribution::client::Config,
-        auth: &oci_distribution::secrets::RegistryAuth,
-        manifest: Option<oci_distribution::manifest::OciImageManifest>,
-    ) -> Result<oci_distribution::client::PushResponse> {
+        image_ref: &oci_client::Reference,
+        layers: &[oci_client::client::ImageLayer],
+        config: oci_client::client::Config,
+        auth: &oci_client::secrets::RegistryAuth,
+        manifest: Option<oci_client::manifest::OciImageManifest>,
+    ) -> Result<oci_client::client::PushResponse> {
         self.registry_client
             .push(image_ref, layers, config, auth, manifest)
             .await

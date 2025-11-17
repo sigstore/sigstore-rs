@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
+use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
 use digest::Digest;
-use ring::{signature as ring_signature, signature::UnparsedPublicKey};
 use thiserror::Error;
 use x509_cert::{
     der,
@@ -66,7 +66,7 @@ impl Key {
             // TODO(tnytown): should we also accept ed25519, p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
                 inner: UnparsedPublicKey::new(
-                    &ring_signature::ECDSA_P256_SHA256_ASN1,
+                    &aws_lc_rs_signature::ECDSA_P256_SHA256_ASN1,
                     spki.subject_public_key.raw_bytes().to_owned(),
                 ),
                 fingerprint: {
@@ -129,25 +129,31 @@ mod tests {
 
         // Generate the key id.
         let mut hasher = sha2::Sha256::new();
-        hasher.write(pub_key.as_slice()).unwrap();
+        hasher.write_all(pub_key.as_slice()).unwrap();
         let key_id: [u8; 32] = hasher.finalize().into();
 
         // Check for success.
-        assert!(keyring
-            .verify(&key_id, signature.as_slice(), message)
-            .is_ok());
+        assert!(
+            keyring
+                .verify(&key_id, signature.as_slice(), message)
+                .is_ok()
+        );
 
         // Check for failure with incorrect key id.
-        assert!(keyring
-            .verify(&[0; 32], signature.as_slice(), message)
-            .is_err());
+        assert!(
+            keyring
+                .verify(&[0; 32], signature.as_slice(), message)
+                .is_err()
+        );
 
         // Check for failure with incorrect payload.
         let incorrect_message = b"another message";
 
-        assert!(keyring
-            .verify(&key_id, signature.as_slice(), incorrect_message)
-            .is_err());
+        assert!(
+            keyring
+                .verify(&key_id, signature.as_slice(), incorrect_message)
+                .is_err()
+        );
 
         // Check for failure with incorrect keyring.
         let incorrect_key_pair = ECDSAKeys::new(EllipticCurve::P256).unwrap();
@@ -158,8 +164,10 @@ mod tests {
             .as_slice()])
         .unwrap();
 
-        assert!(incorrect_keyring
-            .verify(&key_id, signature.as_slice(), message)
-            .is_err());
+        assert!(
+            incorrect_keyring
+                .verify(&key_id, signature.as_slice(), message)
+                .is_err()
+        );
     }
 }

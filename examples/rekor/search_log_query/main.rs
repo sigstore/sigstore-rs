@@ -16,8 +16,8 @@
 use clap::{Arg, Command};
 use sigstore::rekor::apis::{configuration::Configuration, entries_api};
 use sigstore::rekor::models::{
-    hashedrekord::{AlgorithmKind, Data, Hash, PublicKey, Signature, Spec},
     ProposedEntry, SearchLogQuery,
+    hashedrekord::{AlgorithmKind, Data, Hash, PublicKey, Signature, Spec},
 };
 use std::str::FromStr;
 
@@ -114,16 +114,20 @@ async fn main() {
     };
 
     let query = SearchLogQuery {
-        entry_uuids: Some(vec![flags
-            .get_one::<String>("entry_uuids")
-            .unwrap_or(&ENTRY_UUIDS.to_string())
-            .to_owned()]),
-        log_indexes: Some(vec![i32::from_str(
+        entry_uuids: Some(vec![
             flags
-                .get_one::<String>("log_indexes")
-                .unwrap_or(&LOG_INDEXES.to_string()),
-        )
-        .unwrap()]),
+                .get_one::<String>("entry_uuids")
+                .unwrap_or(&ENTRY_UUIDS.to_string())
+                .to_owned(),
+        ]),
+        log_indexes: Some(vec![
+            i32::from_str(
+                flags
+                    .get_one::<String>("log_indexes")
+                    .unwrap_or(&LOG_INDEXES.to_string()),
+            )
+            .unwrap(),
+        ]),
         entries: Some(vec![proposed_entry]),
     };
 

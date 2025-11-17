@@ -1,0 +1,6 @@
+[toolchain]
+# Pin to a specific stable version for consistent clippy/fmt across contributors
+# Update this deliberately when ready to adopt new Rust features or fix new warnings
+# Minimum 1.89.0 required for edition 2024 support
+channel = "1.89.0"
+components = ["clippy", "rustfmt"]

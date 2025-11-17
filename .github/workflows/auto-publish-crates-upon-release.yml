@@ -6,12 +6,24 @@ on:
 jobs:
   publish-automatically:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
-      -  uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-      -  uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
-         with:
-           toolchain: stable
-           override: true
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: rust-lang/crates-io-auth-action@041cce5b4b821e6b0ebc9c9c38b58cac4e34dcc2 # v1.0.2
+        id: auth
+
+      - name: Rustup
+        run: |
+          rustup install stable
+          rustup override set stable
 
       - name: publish crates
-        run: cargo publish --token ${{ secrets.CARGO_API_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: "${{ steps.auth.outputs.token }}"
+        run: cargo publish

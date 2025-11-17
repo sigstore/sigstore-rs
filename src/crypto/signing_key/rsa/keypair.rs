@@ -41,8 +41,8 @@
 
 use pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use rsa::{
-    pkcs1::DecodeRsaPrivateKey, pkcs1v15::SigningKey, pss::BlindedSigningKey, RsaPrivateKey,
-    RsaPublicKey,
+    RsaPrivateKey, RsaPublicKey, pkcs1::DecodeRsaPrivateKey, pkcs1v15::SigningKey,
+    pss::BlindedSigningKey,
 };
 
 use crate::{
@@ -51,8 +51,8 @@ use crate::{
 };
 
 use crate::crypto::signing_key::{
-    kdf, KeyPair, COSIGN_PRIVATE_KEY_PEM_LABEL, PRIVATE_KEY_PEM_LABEL, RSA_PRIVATE_KEY_PEM_LABEL,
-    SIGSTORE_PRIVATE_KEY_PEM_LABEL,
+    COSIGN_PRIVATE_KEY_PEM_LABEL, KeyPair, PRIVATE_KEY_PEM_LABEL, RSA_PRIVATE_KEY_PEM_LABEL,
+    SIGSTORE_PRIVATE_KEY_PEM_LABEL, kdf,
 };
 
 use super::{DigestAlgorithm, PaddingScheme, RSASigner};
@@ -277,13 +277,13 @@ mod tests {
     use rstest::rstest;
 
     use crate::crypto::{
+        Signature, SigningScheme,
         signing_key::{
+            KeyPair, Signer,
             rsa::{DigestAlgorithm, PaddingScheme, RSASigner},
             tests::MESSAGE,
-            KeyPair, Signer,
         },
         verification_key::CosignVerificationKey,
-        Signature, SigningScheme,
     };
 
     use super::RSAKeys;
@@ -400,11 +400,10 @@ mod tests {
         let pubkey = key
             .public_key_to_pem()
             .expect("export private key to PEM format failed.");
-        assert!(CosignVerificationKey::from_pem(
-            pubkey.as_bytes(),
-            &SigningScheme::RSA_PSS_SHA256(0),
-        )
-        .is_ok());
+        assert!(
+            CosignVerificationKey::from_pem(pubkey.as_bytes(), &SigningScheme::RSA_PSS_SHA256(0),)
+                .is_ok()
+        );
         let pubkey = key
             .public_key_to_der()
             .expect("export private key to DER format failed.");

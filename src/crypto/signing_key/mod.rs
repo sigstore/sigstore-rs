@@ -73,12 +73,12 @@ use elliptic_curve::zeroize::Zeroizing;
 use crate::errors::*;
 
 use self::{
-    ecdsa::{ec::EcdsaSigner, ECDSAKeys},
+    ecdsa::{ECDSAKeys, ec::EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},
-    rsa::{keypair::RSAKeys, DigestAlgorithm, PaddingScheme, RSASigner},
+    rsa::{DigestAlgorithm, PaddingScheme, RSASigner, keypair::RSAKeys},
 };
 
-use super::{verification_key::CosignVerificationKey, SigningScheme};
+use super::{SigningScheme, verification_key::CosignVerificationKey};
 
 pub mod ecdsa;
 pub mod ed25519;
@@ -393,7 +393,7 @@ impl SigStoreSigner {
 mod tests {
     use rstest::rstest;
 
-    use crate::crypto::{verification_key::CosignVerificationKey, Signature, SigningScheme};
+    use crate::crypto::{Signature, SigningScheme, verification_key::CosignVerificationKey};
 
     /// This is a test MESSAGE used to be signed by all signing test.
     pub const MESSAGE: &str = r#"{

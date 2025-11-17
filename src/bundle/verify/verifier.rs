@@ -16,18 +16,18 @@
 
 use std::io::{self, Read};
 
+use pki_types::{CertificateDer, UnixTime};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::debug;
-use webpki::types::{CertificateDer, UnixTime};
 use x509_cert::der::Encode;
 
 use crate::{
     bundle::Bundle,
     crypto::{
-        keyring::Keyring,
-        transparency::{verify_sct, CertificateEmbeddedSCT},
         CertificatePool, CosignVerificationKey, Signature,
+        keyring::Keyring,
+        transparency::{CertificateEmbeddedSCT, verify_sct},
     },
     errors::Result as SigstoreResult,
     rekor::apis::configuration::Configuration as RekorConfiguration,
@@ -38,9 +38,9 @@ use crate::{
 use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{
+    VerificationError, VerificationResult,
     models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
     policy::VerificationPolicy,
-    VerificationError, VerificationResult,
 };
 
 /// An asynchronous Sigstore verifier.
@@ -62,7 +62,7 @@ impl Verifier {
         trust_repo: R,
     ) -> SigstoreResult<Self> {
         let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
-        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?)?;
+        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?.values().copied())?;
 
         Ok(Self {
             rekor_config,

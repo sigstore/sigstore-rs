@@ -16,12 +16,12 @@
 use std::str::FromStr;
 
 use crate::{
-    bundle::{models::Version as BundleVersion, Bundle},
-    crypto::certificate::{is_leaf, is_root_ca, CertificateValidationError},
+    bundle::{Bundle, models::Version as BundleVersion},
+    crypto::certificate::{CertificateValidationError, is_leaf, is_root_ca},
     rekor::models as rekor,
 };
 
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use sigstore_protobuf_specs::dev::sigstore::{
     bundle::v1::{bundle, verification_material},
     rekor::v1::{InclusionProof, TransparencyLogEntry},
@@ -29,8 +29,8 @@ use sigstore_protobuf_specs::dev::sigstore::{
 use thiserror::Error;
 use tracing::{debug, error, warn};
 use x509_cert::{
-    der::{Decode, EncodePem},
     Certificate,
+    der::{Decode, EncodePem},
 };
 
 use super::policy::PolicyError;

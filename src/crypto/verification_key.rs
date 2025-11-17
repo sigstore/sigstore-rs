@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
 use ed25519::pkcs8::DecodePublicKey as ED25519DecodePublicKey;
 use rsa::{pkcs1v15, pss};
 use sha2::{Digest, Sha256, Sha384};
-use signature::{hazmat::PrehashVerifier, DigestVerifier, Verifier};
+use signature::{DigestVerifier, Verifier, hazmat::PrehashVerifier};
 use x509_cert::{der::referenced::OwnedToRef, spki::SubjectPublicKeyInfoOwned};
 
 use super::{
-    signing_key::{KeyPair, SigStoreSigner},
     Signature, SigningScheme,
+    signing_key::{KeyPair, SigStoreSigner},
 };
 
 use crate::errors::*;
@@ -114,8 +114,7 @@ impl TryFrom<&SubjectPublicKeyInfoOwned> for CosignVerificationKey {
                 ed25519_dalek::VerifyingKey::try_from(subject_pub_key_info.owned_to_ref())?,
             )),
             _ => Err(SigstoreError::PublicKeyUnsupportedAlgorithmError(format!(
-                "Key with algorithm OID {} is not supported",
-                algorithm
+                "Key with algorithm OID {algorithm} is not supported"
             ))),
         }
     }
@@ -217,12 +216,13 @@ impl CosignVerificationKey {
             Ok(Self::ED25519(ed25519_dalek::VerifyingKey::from_bytes(
                 ed25519bytes.as_ref(),
             )?))
-        } else if let Ok(rsapk) = rsa::RsaPublicKey::from_public_key_der(der_data) {
-            Ok(Self::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(rsapk)))
         } else {
-            Err(SigstoreError::InvalidKeyFormat {
-                error: "Failed to parse the public key.".to_string(),
-            })
+            match rsa::RsaPublicKey::from_public_key_der(der_data) {
+                Ok(rsapk) => Ok(Self::RSA_PKCS1_SHA256(pkcs1v15::VerifyingKey::new(rsapk))),
+                _ => Err(SigstoreError::InvalidKeyFormat {
+                    error: "Failed to parse the public key.".to_string(),
+                }),
+            }
         }
     }
 
@@ -396,8 +396,8 @@ impl CosignVerificationKey {
 
 #[cfg(test)]
 mod tests {
-    use x509_cert::der::Decode;
     use x509_cert::Certificate;
+    use x509_cert::der::Decode;
 
     use super::*;
     use crate::crypto::tests::*;
@@ -425,10 +425,7 @@ mod tests {
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::PublicKeyVerificationError => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::PublicKeyVerificationError);
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
@@ -443,10 +440,7 @@ mod tests {
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::Base64DecodeError(_) => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::Base64DecodeError(_));
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
@@ -468,10 +462,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let err = verification_key
             .verify_signature(signature, msg.as_bytes())
             .expect_err("Was expecting an error");
-        let found = match err {
-            SigstoreError::PublicKeyVerificationError => true,
-            _ => false,
-        };
+        let found = matches!(err, SigstoreError::PublicKeyVerificationError);
         assert!(found, "Didn't get expected error, got {:?} instead", err);
     }
 
@@ -495,9 +486,11 @@ DwIDAQAB
         .expect("Cannot create CosignVerificationKey");
         let msg = r#"{"critical":{"identity":{"docker-reference":"registry.suse.com/suse/sle-micro/5.0/toolbox"},"image":{"docker-manifest-digest":"sha256:356631f7603526a0af827741f5fe005acf19b7ef7705a34241a91c2d47a6db5e"},"type":"cosign container image signature"},"optional":{"creator":"OBS"}}"#;
 
-        assert!(verification_key
-            .verify_signature(signature, msg.as_bytes())
-            .is_ok());
+        assert!(
+            verification_key
+                .verify_signature(signature, msg.as_bytes())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -609,8 +602,8 @@ DwIDAQAB
     }
 
     #[test]
-    fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key(
-    ) -> anyhow::Result<()> {
+    fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key()
+    -> anyhow::Result<()> {
         let (private_key, public_key) = generate_dsa_keypair(2048);
         let issued_cert_generation_options = CertGenerationOptions {
             private_key,

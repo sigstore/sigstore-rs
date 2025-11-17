@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::ops::Add;
 
 use async_trait::async_trait;
-use oci_distribution::manifest::OCI_IMAGE_MEDIA_TYPE;
+use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
 use tracing::warn;
 
 use super::constants::{SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION};
@@ -39,7 +39,7 @@ pub const CONFIG_DATA: &str = "{}";
 /// Instances of `Client` can be built via [`sigstore::cosign::ClientBuilder`](crate::cosign::ClientBuilder).
 pub struct Client {
     pub(crate) registry_client: Box<dyn crate::registry::ClientCapabilities>,
-    pub(crate) rekor_pub_key: Option<CosignVerificationKey>,
+    pub(crate) rekor_pub_keys: Option<BTreeMap<String, CosignVerificationKey>>,
     pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
@@ -73,8 +73,8 @@ impl CosignCapabilities for Client {
     ) -> Result<Vec<SignatureLayer>> {
         let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
         let image_manifest = match manifest {
-            oci_distribution::manifest::OciManifest::Image(im) => im,
-            oci_distribution::manifest::OciManifest::ImageIndex(_) => {
+            oci_client::manifest::OciManifest::Image(im) => im,
+            oci_client::manifest::OciManifest::ImageIndex(_) => {
                 return Err(SigstoreError::RegistryPullManifestError {
                     image: cosign_image.to_string(),
                     error: "Found a OciImageIndex instead of a OciImageManifest".to_string(),
@@ -86,7 +86,7 @@ impl CosignCapabilities for Client {
             &image_manifest,
             source_image_digest,
             &layers,
-            self.rekor_pub_key.as_ref(),
+            self.rekor_pub_keys.as_ref(),
             self.fulcio_cert_pool.as_ref(),
         )?;
 
@@ -96,21 +96,21 @@ impl CosignCapabilities for Client {
 
     async fn push_signature(
         &mut self,
-        annotations: Option<HashMap<String, String>>,
+        annotations: Option<BTreeMap<String, String>>,
         auth: &Auth,
         target_reference: &OciReference,
         signature_layers: Vec<SignatureLayer>,
     ) -> Result<PushResponse> {
-        let layers: Vec<oci_distribution::client::ImageLayer> = signature_layers
+        let layers: Vec<oci_client::client::ImageLayer> = signature_layers
             .iter()
             .filter_map(|sl| {
                 match serde_json::to_vec(&sl.simple_signing) {
                     Ok(data) => {
                         let annotations = match &sl.signature {
                             Some(sig) => [(SIGSTORE_SIGNATURE_ANNOTATION.into(), sig.clone())].into(),
-                            None => HashMap::new(),
+                            None => BTreeMap::new(),
                         };
-                        let image_layer = oci_distribution::client::ImageLayer::new(data, SIGSTORE_OCI_MEDIA_TYPE.into(), Some(annotations));
+                        let image_layer = oci_client::client::ImageLayer::new(data, SIGSTORE_OCI_MEDIA_TYPE.into(), Some(annotations));
                         Some(image_layer)
                     }
                     Err(e) => {
@@ -122,10 +122,9 @@ impl CosignCapabilities for Client {
             .collect();
 
         // TODO: Do we need to support OCI Image Configuration?
-        let config =
-            oci_distribution::client::Config::oci_v1(CONFIG_DATA.as_bytes().to_vec(), None);
+        let config = oci_client::client::Config::oci_v1(CONFIG_DATA.as_bytes().to_vec(), None);
         let mut manifest =
-            oci_distribution::manifest::OciImageManifest::build(&layers[..], &config, annotations);
+            oci_client::manifest::OciImageManifest::build(&layers[..], &config, annotations);
         manifest.media_type = Some(OCI_IMAGE_MEDIA_TYPE.to_string());
         self.registry_client
             .push(
@@ -147,10 +146,10 @@ impl Client {
         auth: &Auth,
         cosign_image: &OciReference,
     ) -> Result<(
-        oci_distribution::manifest::OciManifest,
-        Vec<oci_distribution::client::ImageLayer>,
+        oci_client::manifest::OciManifest,
+        Vec<oci_client::client::ImageLayer>,
     )> {
-        let oci_auth: oci_distribution::secrets::RegistryAuth = auth.into();
+        let oci_auth: oci_client::secrets::RegistryAuth = auth.into();
 
         let (manifest, _) = self
             .registry_client
@@ -173,18 +172,19 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::tests::{get_fulcio_cert_pool, REKOR_PUB_KEY};
-    use crate::crypto::SigningScheme;
-    use crate::mock_client::test::MockOciClient;
+
+    use crate::{
+        cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key},
+        mock_client::test::MockOciClient,
+    };
 
     fn build_test_client(mock_client: MockOciClient) -> Client {
-        let rekor_pub_key =
-            CosignVerificationKey::from_pem(REKOR_PUB_KEY.as_bytes(), &SigningScheme::default())
-                .expect("Cannot create CosignVerificationKey");
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         Client {
             registry_client: Box::new(mock_client),
-            rekor_pub_key: Some(rekor_pub_key),
+            rekor_pub_keys: Some(rekor_pub_keys),
             fulcio_cert_pool: Some(get_fulcio_cert_pool()),
         }
     }

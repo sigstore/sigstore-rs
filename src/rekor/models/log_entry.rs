@@ -15,7 +15,7 @@
 
 use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 
 use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError::UnexpectedError;
@@ -23,7 +23,7 @@ use crate::rekor::models::checkpoint::Checkpoint;
 use crate::rekor::models::InclusionProof as InclusionProof2;
 use json_syntax::Print;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Error, Value};
+use serde_json::{Error, Value, json};
 use std::collections::HashMap;
 use std::str::FromStr;
 

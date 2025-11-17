@@ -19,7 +19,7 @@
 //! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
 //! for golang version.
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use crypto_secretbox::aead::{AeadMut, KeyInit};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -166,7 +166,10 @@ impl SecretBoxCipher {
             ));
         }
         self.encrypted = true;
+
+        #[allow(deprecated)]
         let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        #[allow(deprecated)]
         let key = crypto_secretbox::Key::from_slice(key);
 
         let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
@@ -177,7 +180,9 @@ impl SecretBoxCipher {
 
     /// Unseal the ciphertext using the key
     fn decrypt(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        #[allow(deprecated)]
         let nonce = crypto_secretbox::Nonce::from_slice(&self.nonce);
+        #[allow(deprecated)]
         let key = crypto_secretbox::Key::from_slice(key);
 
         let mut cipher = crypto_secretbox::XSalsa20Poly1305::new(key);
@@ -204,7 +209,7 @@ struct Data {
 fn generate_random(len: u32) -> Vec<u8> {
     let mut res = Vec::new();
     for _ in 0..len {
-        res.push(rand::thread_rng().gen());
+        res.push(rand::thread_rng().r#gen());
     }
     res
 }
