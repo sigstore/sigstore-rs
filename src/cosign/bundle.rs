@@ -88,7 +88,8 @@ impl Bundle {
         rekor_pub_keys: &BTreeMap<String, CosignVerificationKey>,
     ) -> Result<()> {
         let mut encoded = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut encoded, CanonicalFormatter::new());
+        let mut ser =
+            serde_json::Serializer::with_formatter(&mut encoded, CanonicalFormatter::new());
         bundle.payload.serialize(&mut ser).map_err(|e| {
             SigstoreError::UnexpectedError(format!("Cannot serialize bundle payload: {e:?}"))
         })?;
