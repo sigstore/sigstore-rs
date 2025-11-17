@@ -21,7 +21,7 @@ use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError::UnexpectedError;
 use crate::rekor::models::checkpoint::Checkpoint;
 use crate::rekor::models::InclusionProof as InclusionProof2;
-use json_syntax::Print;
+use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
 use std::collections::HashMap;
@@ -160,14 +160,12 @@ impl LogEntry {
             })
             .and_then(|proof| {
                 // encode as canonical JSON
-                let mut body = json_syntax::to_value(&self.body).map_err(|_| {
-                    SigstoreError::UnexpectedError(
-                        "failed to serialize with json_syntax".to_string(),
-                    )
+                let mut encoded_entry = Vec::new();
+                let mut ser = serde_json::Serializer::with_formatter(&mut encoded_entry, CanonicalFormatter::new());
+                self.body.serialize(&mut ser).map_err(|e| {
+                    SigstoreError::UnexpectedError(format!("Cannot serialize log entry body: {e:?}"))
                 })?;
-                body.canonicalize();
-                let encoded_entry = body.compact_print().to_string();
-                proof.verify(encoded_entry.as_bytes(), rekor_key)
+                proof.verify(&encoded_entry, rekor_key)
             })
     }
 }

@@ -1,0 +1,3334 @@
+From a153e36fd4df6d57701650f4423868ff3533d04e Mon Sep 17 00:00:00 2001
+From: Andrew Pan <andrew.pan@trailofbits.com>
+Date: Mon, 4 Dec 2023 09:57:08 -0600
+Subject: [PATCH 1/4] sign: Signed Certificate Timestamp validation
+
+Co-authored-by: Alex Cameron <alex.cameron@trailofbits.com>
+Signed-off-by: Andrew Pan <andrew.pan@trailofbits.com>
+---
+ src/bundle/sign.rs            |  39 +++-
+ src/bundle/verify/models.rs   |   3 +
+ src/bundle/verify/verifier.rs |  17 +-
+ src/crypto/keyring.rs         | 165 ++++++++++++++
+ src/crypto/mod.rs             |   5 +
+ src/crypto/transparency.rs    | 404 ++++++++++++++++++++++++++++++++++
+ src/errors.rs                 |   8 +
+ src/fulcio/mod.rs             |   2 +-
+ 8 files changed, 636 insertions(+), 7 deletions(-)
+ create mode 100644 src/crypto/keyring.rs
+ create mode 100644 src/crypto/transparency.rs
+
+diff --git a/src/bundle/sign.rs b/src/bundle/sign.rs
+index b60472c568..8e7b0afc4f 100644
+--- a/src/bundle/sign.rs
++++ b/src/bundle/sign.rs
+@@ -39,6 +39,8 @@ use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
+ use x509_cert::ext::pkix as x509_ext;
+ 
+ use crate::bundle::models::Version;
++use crate::crypto::keyring::Keyring;
++use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
+ use crate::errors::{Result as SigstoreResult, SigstoreError};
+ use crate::fulcio::oauth::OauthTokenProvider;
+ use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
+@@ -46,6 +48,10 @@ use crate::oauth::IdentityToken;
+ use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
+ use crate::rekor::apis::entries_api::create_log_entry;
+ use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
++use crate::trust::TrustRoot;
++
++#[cfg(feature = "sigstore-trust-root")]
++use crate::trust::sigstore::SigstoreTrustRoot;
+ 
+ /// An asynchronous Sigstore signing session.
+ ///
+@@ -128,7 +134,12 @@ impl<'ctx> SigningSession<'ctx> {
+             return Err(SigstoreError::ExpiredSigningSession());
+         }
+ 
+-        // TODO(tnytown): verify SCT here, sigstore-rs#326
++        if let Some(detached_sct) = &self.certs.detached_sct {
++            verify_sct(detached_sct, &self.context.ctfe_keyring)?;
++        } else {
++            let sct = CertificateEmbeddedSCT::new(&self.certs.cert, &self.certs.chain)?;
++            verify_sct(&sct, &self.context.ctfe_keyring)?;
++        }
+ 
+         // Sign artifact.
+         let input_hash: &[u8] = &hasher.clone().finalize();
+@@ -247,29 +258,51 @@ pub mod blocking {
+ pub struct SigningContext {
+     fulcio: FulcioClient,
+     rekor_config: RekorConfiguration,
++    ctfe_keyring: Keyring,
+ }
+ 
+ impl SigningContext {
+     /// Manually constructs a [`SigningContext`] from its constituent data.
+-    pub fn new(fulcio: FulcioClient, rekor_config: RekorConfiguration) -> Self {
++    pub fn new(
++        fulcio: FulcioClient,
++        rekor_config: RekorConfiguration,
++        ctfe_keyring: Keyring,
++    ) -> Self {
+         Self {
+             fulcio,
+             rekor_config,
++            ctfe_keyring,
+         }
+     }
+ 
+     /// Returns a [`SigningContext`] configured against the public-good production Sigstore
+     /// infrastructure.
+-    pub fn production() -> SigstoreResult<Self> {
++    #[cfg(feature = "sigstore-trust-root")]
++    pub async fn async_production() -> SigstoreResult<Self> {
++        let trust_root = SigstoreTrustRoot::new(None).await?;
+         Ok(Self::new(
+             FulcioClient::new(
+                 Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
+                 crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
+             ),
+             Default::default(),
++            Keyring::new(trust_root.ctfe_keys()?)?,
+         ))
+     }
+ 
++    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
++    /// infrastructure.
++    ///
++    /// Async callers should use [`SigningContext::async_production`].
++    #[cfg(feature = "sigstore-trust-root")]
++    pub fn production() -> SigstoreResult<Self> {
++        let rt = tokio::runtime::Builder::new_current_thread()
++            .enable_all()
++            .build()?;
++
++        rt.block_on(Self::async_production())
++    }
++
+     /// Configures and returns a [`SigningSession`] with the held context.
+     pub async fn signer(&self, identity_token: IdentityToken) -> SigstoreResult<SigningSession> {
+         SigningSession::new(self, identity_token).await
+diff --git a/src/bundle/verify/models.rs b/src/bundle/verify/models.rs
+index 198e9c05ee..f75ea8affb 100644
+--- a/src/bundle/verify/models.rs
++++ b/src/bundle/verify/models.rs
+@@ -102,6 +102,9 @@ pub enum CertificateErrorKind {
+     #[error("certificate expired before time of signing")]
+     Expired,
+ 
++    #[error("certificate SCT verification failed")]
++    Sct(#[source] crate::crypto::transparency::SCTError),
++
+     #[error("certificate verification failed")]
+     VerificationFailed(#[source] webpki::Error),
+ }
+diff --git a/src/bundle/verify/verifier.rs b/src/bundle/verify/verifier.rs
+index 0f4a4a5526..8635bcb7c0 100644
+--- a/src/bundle/verify/verifier.rs
++++ b/src/bundle/verify/verifier.rs
+@@ -24,7 +24,11 @@ use x509_cert::der::Encode;
+ 
+ use crate::{
+     bundle::Bundle,
+-    crypto::{CertificatePool, CosignVerificationKey, Signature},
++    crypto::{
++        keyring::Keyring,
++        transparency::{verify_sct, CertificateEmbeddedSCT},
++        CertificatePool, CosignVerificationKey, Signature,
++    },
+     errors::Result as SigstoreResult,
+     rekor::apis::configuration::Configuration as RekorConfiguration,
+     trust::TrustRoot,
+@@ -46,6 +50,7 @@ pub struct Verifier {
+     #[allow(dead_code)]
+     rekor_config: RekorConfiguration,
+     cert_pool: CertificatePool,
++    ctfe_keyring: Keyring,
+ }
+ 
+ impl Verifier {
+@@ -57,10 +62,12 @@ impl Verifier {
+         trust_repo: R,
+     ) -> SigstoreResult<Self> {
+         let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
++        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?)?;
+ 
+         Ok(Self {
+             rekor_config,
+             cert_pool,
++            ctfe_keyring,
+         })
+     }
+ 
+@@ -110,14 +117,18 @@ impl Verifier {
+             .try_into()
+             .map_err(CertificateErrorKind::Malformed)?;
+ 
+-        let _trusted_chain = self
++        let trusted_chain = self
+             .cert_pool
+             .verify_cert_with_time(&ee_cert, UnixTime::since_unix_epoch(issued_at))
+             .map_err(CertificateErrorKind::VerificationFailed)?;
+ 
+         debug!("signing certificate chains back to trusted root");
+ 
+-        // TODO(tnytown): verify SCT here, sigstore-rs#326
++        let sct_context =
++            CertificateEmbeddedSCT::new_with_verified_path(&materials.certificate, &trusted_chain)
++                .map_err(CertificateErrorKind::Sct)?;
++        verify_sct(&sct_context, &self.ctfe_keyring).map_err(CertificateErrorKind::Sct)?;
++        debug!("signing certificate's SCT is valid");
+ 
+         // 2) Verify that the signing certificate belongs to the signer.
+         policy.verify(&materials.certificate)?;
+diff --git a/src/crypto/keyring.rs b/src/crypto/keyring.rs
+new file mode 100644
+index 0000000000..d24e36496e
+--- /dev/null
++++ b/src/crypto/keyring.rs
+@@ -0,0 +1,165 @@
++// Copyright 2023 The Sigstore Authors.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++use std::collections::HashMap;
++
++use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
++use digest::Digest;
++use ring::{signature as ring_signature, signature::UnparsedPublicKey};
++use thiserror::Error;
++use x509_cert::{
++    der,
++    der::{Decode, Encode},
++    spki::SubjectPublicKeyInfoOwned,
++};
++
++#[derive(Error, Debug)]
++pub enum KeyringError {
++    #[error("malformed key")]
++    KeyMalformed(#[from] x509_cert::der::Error),
++    #[error("unsupported algorithm")]
++    AlgoUnsupported,
++
++    #[error("requested key not in keyring")]
++    KeyNotFound,
++    #[error("verification failed")]
++    VerificationFailed,
++}
++type Result<T> = std::result::Result<T, KeyringError>;
++
++/// A CT signing key.
++struct Key {
++    inner: UnparsedPublicKey<Vec<u8>>,
++    /// The key's RFC 6962-style "key ID".
++    /// <https://datatracker.ietf.org/doc/html/rfc6962#section-3.2>
++    fingerprint: [u8; 32],
++}
++
++impl Key {
++    /// Creates a `Key` from a DER blob containing a SubjectPublicKeyInfo object.
++    pub fn new(spki_bytes: &[u8]) -> Result<Self> {
++        let spki = SubjectPublicKeyInfoOwned::from_der(spki_bytes)?;
++        let (algo, params) = if let Some(params) = &spki.algorithm.parameters {
++            // Special-case RSA keys, which don't have SPKI parameters.
++            if spki.algorithm.oid == RSA_ENCRYPTION && params == &der::Any::null() {
++                // TODO(tnytown): Do we need to support RSA keys?
++                return Err(KeyringError::AlgoUnsupported);
++            };
++
++            (spki.algorithm.oid, params.decode_as()?)
++        } else {
++            return Err(KeyringError::AlgoUnsupported);
++        };
++
++        match (algo, params) {
++            // TODO(tnytown): should we also accept ed25519, p384, ... ?
++            (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
++                inner: UnparsedPublicKey::new(
++                    &ring_signature::ECDSA_P256_SHA256_ASN1,
++                    spki.subject_public_key.raw_bytes().to_owned(),
++                ),
++                fingerprint: {
++                    let mut hasher = sha2::Sha256::new();
++                    spki.encode(&mut hasher).expect("failed to hash key!");
++                    hasher.finalize().into()
++                },
++            }),
++            _ => Err(KeyringError::AlgoUnsupported),
++        }
++    }
++}
++
++/// Represents a set of CT signing keys, each of which is potentially a valid signer for
++/// Signed Certificate Timestamps (SCTs) or Signed Tree Heads (STHs).
++pub struct Keyring(HashMap<[u8; 32], Key>);
++
++impl Keyring {
++    /// Creates a `Keyring` from DER encoded SPKI-format public keys.
++    pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
++        Ok(Self(
++            keys.into_iter()
++                .flat_map(Key::new)
++                .map(|k| Ok((k.fingerprint, k)))
++                .collect::<Result<_>>()?,
++        ))
++    }
++
++    /// Verifies `data` against a `signature` with a public key identified by `key_id`.
++    pub fn verify(&self, key_id: &[u8; 32], signature: &[u8], data: &[u8]) -> Result<()> {
++        let key = self.0.get(key_id).ok_or(KeyringError::KeyNotFound)?;
++
++        key.inner
++            .verify(data, signature)
++            .or(Err(KeyringError::VerificationFailed))?;
++
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::Keyring;
++    use crate::crypto::signing_key::ecdsa::{ECDSAKeys, EllipticCurve};
++    use digest::Digest;
++    use std::io::Write;
++
++    #[test]
++    fn verify_keyring() {
++        let message = b"some message";
++
++        // Create a key pair and a keyring containing the public key.
++        let key_pair = ECDSAKeys::new(EllipticCurve::P256).unwrap();
++        let signer = key_pair.to_sigstore_signer().unwrap();
++        let pub_key = key_pair.as_inner().public_key_to_der().unwrap();
++        let keyring = Keyring::new([pub_key.as_slice()]).unwrap();
++
++        // Generate the signature.
++        let signature = signer.sign(message).unwrap();
++
++        // Generate the key id.
++        let mut hasher = sha2::Sha256::new();
++        hasher.write(pub_key.as_slice()).unwrap();
++        let key_id: [u8; 32] = hasher.finalize().into();
++
++        // Check for success.
++        assert!(keyring
++            .verify(&key_id, signature.as_slice(), message)
++            .is_ok());
++
++        // Check for failure with incorrect key id.
++        assert!(keyring
++            .verify(&[0; 32], signature.as_slice(), message)
++            .is_err());
++
++        // Check for failure with incorrect payload.
++        let incorrect_message = b"another message";
++
++        assert!(keyring
++            .verify(&key_id, signature.as_slice(), incorrect_message)
++            .is_err());
++
++        // Check for failure with incorrect keyring.
++        let incorrect_key_pair = ECDSAKeys::new(EllipticCurve::P256).unwrap();
++        let incorrect_keyring = Keyring::new([incorrect_key_pair
++            .as_inner()
++            .public_key_to_der()
++            .unwrap()
++            .as_slice()])
++        .unwrap();
++
++        assert!(incorrect_keyring
++            .verify(&key_id, signature.as_slice(), message)
++            .is_err());
++    }
++}
+diff --git a/src/crypto/mod.rs b/src/crypto/mod.rs
+index 880088cbf9..92336ffa6d 100644
+--- a/src/crypto/mod.rs
++++ b/src/crypto/mod.rs
+@@ -177,6 +177,8 @@ pub(crate) mod certificate;
+ pub(crate) mod certificate_pool;
+ #[cfg(feature = "cert")]
+ pub(crate) use certificate_pool::CertificatePool;
++#[cfg(feature = "cert")]
++pub(crate) mod keyring;
+ 
+ pub mod verification_key;
+ 
+@@ -188,6 +190,9 @@ use self::signing_key::{
+ 
+ pub mod signing_key;
+ 
++#[cfg(any(feature = "sign", feature = "verify"))]
++pub(crate) mod transparency;
++
+ #[cfg(test)]
+ pub(crate) mod tests {
+     use chrono::{DateTime, TimeDelta, Utc};
+diff --git a/src/crypto/transparency.rs b/src/crypto/transparency.rs
+new file mode 100644
+index 0000000000..f4de034cb4
+--- /dev/null
++++ b/src/crypto/transparency.rs
+@@ -0,0 +1,404 @@
++// Copyright 2023 The Sigstore Authors.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++//! Types for Certificate Transparency validation.
++
++use const_oid::ObjectIdentifier;
++use digest::Digest;
++use thiserror::Error;
++use tls_codec::{SerializeBytes, TlsByteVecU16, TlsByteVecU24, TlsSerializeBytes, TlsSize};
++use tracing::debug;
++use x509_cert::{
++    der,
++    der::{Decode, Encode},
++    ext::pkix::{
++        sct::Version, ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList,
++    },
++    Certificate,
++};
++
++use super::{
++    certificate,
++    keyring::{Keyring, KeyringError},
++};
++use crate::fulcio::SigningCertificateDetachedSCT;
++
++// TODO(tnytown): Migrate to const-oid's CT_PRECERT_SCTS when a new release is cut.
++const CT_PRECERT_SCTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11129.2.4.2");
++const PRECERTIFICATE_SIGNING_CERTIFICATE: ObjectIdentifier =
++    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11129.2.4.4");
++
++fn cert_is_preissuer(cert: &Certificate) -> bool {
++    let eku: ExtendedKeyUsage = match cert.tbs_certificate.get() {
++        Ok(Some((_, ext))) => ext,
++        _ => return false,
++    };
++
++    eku.0.contains(&PRECERTIFICATE_SIGNING_CERTIFICATE)
++}
++
++// <https://github.com/sigstore/sigstore-python/blob/main/sigstore/_internal/sct.py>
++fn find_issuer_cert(chain: &[Certificate]) -> Option<&Certificate> {
++    let cert = if cert_is_preissuer(&chain[0]) {
++        &chain[1]
++    } else {
++        &chain[0]
++    };
++
++    certificate::is_ca(cert).ok()?;
++    Some(cert)
++}
++
++#[derive(Debug, Error)]
++pub enum CertificateErrorKind {
++    #[error("SCT list extension missing from leaf certificate")]
++    LeafSCTMissing,
++
++    #[error("cannot find leaf certificate's issuer")]
++    IssuerMissing,
++
++    #[error("cannot decode leaf certificate's issuer")]
++    IssuerMalformed,
++
++    #[error("cannot decode SCT")]
++    LeafSCTMalformed,
++
++    #[error(transparent)]
++    Der(#[from] der::Error),
++
++    #[error(transparent)]
++    Tls(#[from] tls_codec::Error),
++}
++
++impl From<x509_cert::ext::pkix::Error> for CertificateErrorKind {
++    fn from(value: x509_cert::ext::pkix::Error) -> Self {
++        match value {
++            x509_cert::ext::pkix::Error::Der(e) => CertificateErrorKind::Der(e),
++            x509_cert::ext::pkix::Error::Tls(e) => CertificateErrorKind::Tls(e),
++        }
++    }
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum SCTError {
++    #[error("failed to extract SCT from certificate")]
++    Parsing(#[from] CertificateErrorKind),
++
++    #[error("failed to reconstruct signed payload")]
++    Serialization(#[source] tls_codec::Error),
++
++    #[error("failed to verify SCT")]
++    Verification(#[from] KeyringError),
++}
++
++#[derive(PartialEq, Debug, TlsSerializeBytes, TlsSize)]
++#[repr(u8)]
++enum SignatureType {
++    CertificateTimestamp = 0,
++    TreeHash = 1,
++}
++
++#[derive(PartialEq, Debug)]
++#[repr(u16)]
++enum LogEntryType {
++    X509Entry = 0,
++    PrecertEntry = 1,
++}
++
++#[derive(PartialEq, Debug, TlsSerializeBytes, TlsSize)]
++struct PreCert {
++    // opaque issuer_key_hash[32];
++    issuer_key_hash: [u8; 32],
++    // opaque TBSCertificate<1..2^24-1>;
++    tbs_certificate: TlsByteVecU24,
++}
++
++#[derive(PartialEq, Debug, TlsSerializeBytes, TlsSize)]
++#[repr(u16)]
++enum SignedEntry {
++    // opaque ASN.1Cert<1..2^24-1>;
++    #[tls_codec(discriminant = "LogEntryType::X509Entry")]
++    X509Entry(TlsByteVecU24),
++    #[tls_codec(discriminant = "LogEntryType::PrecertEntry")]
++    PrecertEntry(PreCert),
++}
++
++#[derive(PartialEq, Debug, TlsSerializeBytes, TlsSize)]
++pub struct DigitallySigned {
++    version: Version,
++    signature_type: SignatureType,
++    timestamp: u64,
++    signed_entry: SignedEntry,
++    // opaque CtExtensions<0..2^16-1>;
++    extensions: TlsByteVecU16,
++
++    // XX(tnytown): pass in some useful context. These fields will not be encoded into the
++    // TLS DigitallySigned blob, but we need them to properly verify the reconstructed
++    // message.
++    #[tls_codec(skip)]
++    log_id: [u8; 32],
++    #[tls_codec(skip)]
++    signature: Vec<u8>,
++}
++
++#[derive(Debug)]
++pub struct CertificateEmbeddedSCT<'a> {
++    cert: &'a Certificate,
++    sct: SignedCertificateTimestamp,
++    issuer_id: [u8; 32],
++}
++
++impl<'a> CertificateEmbeddedSCT<'a> {
++    fn new_with_spki(cert: &'a Certificate, spki: &[u8]) -> Result<Self, SCTError> {
++        let scts: SignedCertificateTimestampList = match cert.tbs_certificate.get() {
++            Ok(Some((_, ext))) => ext,
++            _ => return Err(SCTError::Parsing(CertificateErrorKind::LeafSCTMissing))?,
++        };
++
++        // Parse SCT structures.
++        let sct = match scts
++            .parse_timestamps()
++            .map_err(CertificateErrorKind::from)?
++            .as_slice()
++        {
++            [e] => e,
++            // We expect exactly one element here. Fail if there are more or less.
++            _ => return Err(CertificateErrorKind::LeafSCTMissing)?,
++        }
++        .parse_timestamp()
++        .map_err(CertificateErrorKind::from)?;
++
++        let issuer_id = {
++            let mut hasher = sha2::Sha256::new();
++            hasher.update(spki);
++            hasher.finalize().into()
++        };
++
++        Ok(Self {
++            cert,
++            sct,
++            issuer_id,
++        })
++    }
++
++    pub fn new(leaf: &'a Certificate, chain: &[Certificate]) -> Result<Self, SCTError> {
++        // Traverse chain to find the issuer we're verifying against.
++        let issuer = find_issuer_cert(chain);
++        let spki = issuer
++            .ok_or(CertificateErrorKind::IssuerMissing)?
++            .tbs_certificate
++            .subject_public_key_info
++            .to_der()
++            .map_err(CertificateErrorKind::from)?;
++
++        Self::new_with_spki(leaf, &spki)
++    }
++
++    pub fn new_with_verified_path(
++        leaf: &'a Certificate,
++        chain: &webpki::VerifiedPath,
++    ) -> Result<Self, SCTError> {
++        let issuer_spki = if let Some(issuer) = chain.intermediate_certificates().next() {
++            debug!("intermediate is the leaf's issuer");
++
++            let issuer = Certificate::from_der(&issuer.der())
++                .map_err(CertificateErrorKind::from)?
++                .tbs_certificate;
++            issuer
++                .subject_public_key_info
++                .to_der()
++                .map_err(CertificateErrorKind::from)?
++        } else {
++            debug!("anchor is the leaf's issuer");
++
++            // Prefix the SPKI with the DER SEQUENCE tag and a short definite-form length.
++            let body = &chain.anchor().subject_public_key_info[..];
++            let body_len = body
++                .len()
++                .try_into()
++                .or(Err(CertificateErrorKind::IssuerMalformed))?;
++            let prefix = &[0x30u8, body_len];
++
++            [prefix, body].concat()
++        };
++
++        Self::new_with_spki(leaf, &issuer_spki)
++    }
++}
++
++impl From<&CertificateEmbeddedSCT<'_>> for DigitallySigned {
++    fn from(value: &CertificateEmbeddedSCT) -> Self {
++        // Construct the precert by filtering out the SCT extension.
++        let mut tbs_precert = value.cert.tbs_certificate.clone();
++        tbs_precert.extensions = tbs_precert.extensions.map(|exts| {
++            exts.iter()
++                .filter(|v| v.extn_id != CT_PRECERT_SCTS)
++                .cloned()
++                .collect()
++        });
++
++        let mut tbs_precert_der = Vec::new();
++        tbs_precert
++            .encode_to_vec(&mut tbs_precert_der)
++            .expect("failed to re-encode Precertificate!");
++
++        DigitallySigned {
++            // XX(tnytown): This match is needed because `sct::Version` does not implement Copy.
++            version: match value.sct.version {
++                Version::V1 => Version::V1,
++            },
++            signature_type: SignatureType::CertificateTimestamp,
++            timestamp: value.sct.timestamp,
++            signed_entry: SignedEntry::PrecertEntry(PreCert {
++                issuer_key_hash: value.issuer_id,
++                tbs_certificate: tbs_precert_der.as_slice().into(),
++            }),
++            extensions: value.sct.extensions.clone(),
++
++            log_id: value.sct.log_id.key_id,
++            signature: value.sct.signature.signature.clone().into(),
++        }
++    }
++}
++
++impl From<&SigningCertificateDetachedSCT> for DigitallySigned {
++    fn from(value: &SigningCertificateDetachedSCT) -> Self {
++        let sct = &value.signed_certificate_timestamp;
++
++        DigitallySigned {
++            version: Version::V1,
++            signature_type: SignatureType::CertificateTimestamp,
++            timestamp: sct.timestamp,
++            signed_entry: SignedEntry::X509Entry(value.chain.certificates[0].contents().into()),
++            extensions: sct.extensions.clone().into(),
++
++            log_id: sct.id,
++            signature: sct.signature.clone(),
++        }
++    }
++}
++
++/// Verifies a given signing certificate's Signed Certificate Timestamp.
++///
++/// SCT verification as defined by [RFC 6962] guarantees that a given certificate has been submitted
++/// to a Certificate Transparency log. Verification should be performed on the signing certificate
++/// in Sigstore verify and sign flows. Certificates that fail SCT verification are misissued and
++/// MUST NOT be trusted.
++///
++/// For more information on Certificate Transparency and the guarantees it provides, see <https://certificate.transparency.dev/howctworks/>.
++///
++/// [RFC 6962]: https://datatracker.ietf.org/doc/html/rfc6962
++pub fn verify_sct<S>(sct: S, keyring: &Keyring) -> Result<(), SCTError>
++where
++    S: Into<DigitallySigned>,
++{
++    let sct: DigitallySigned = sct.into();
++    let serialized = sct.tls_serialize().map_err(SCTError::Serialization)?;
++
++    keyring.verify(&sct.log_id, &sct.signature, &serialized)?;
++
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::{verify_sct, CertificateEmbeddedSCT};
++    use crate::crypto::keyring::Keyring;
++    use crate::fulcio::SigningCertificateDetachedSCT;
++    use p256::ecdsa::VerifyingKey;
++    use std::str::FromStr;
++    use x509_cert::der::DecodePem;
++    use x509_cert::spki::EncodePublicKey;
++    use x509_cert::Certificate;
++
++    #[test]
++    fn verify_embedded_sct() {
++        let cert_pem = r#"-----BEGIN CERTIFICATE-----
++MIICzDCCAlGgAwIBAgIUF96OLbM9/tDVHKCJliXLTFvnfjAwCgYIKoZIzj0EAwMw
++NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
++cm1lZGlhdGUwHhcNMjMxMjEzMDU1MDU1WhcNMjMxMjEzMDYwMDU1WjAAMFkwEwYH
++KoZIzj0CAQYIKoZIzj0DAQcDQgAEmir+Lah2291zCsLkmREQNLzf99z571BNB+fa
++rerSLGzcwLFK7GRLTGYcO0oStxCYavxRQPMo3JvB8vGtZbn/76OCAXAwggFsMA4G
++A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQU8U9M
++t9GMrRm8+gifPtc63nlP3OIwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
++ZD8wGwYDVR0RAQH/BBEwD4ENYXNjQHRldHN1by5zaDAsBgorBgEEAYO/MAEBBB5o
++dHRwczovL2dpdGh1Yi5jb20vbG9naW4vb2F1dGgwLgYKKwYBBAGDvzABCAQgDB5o
++dHRwczovL2dpdGh1Yi5jb20vbG9naW4vb2F1dGgwgYkGCisGAQQB1nkCBAIEewR5
++AHcAdQDdPTBqxscRMmMZHhyZZzcCokpeuN48rf+HinKALynujgAAAYxhumYsAAAE
++AwBGMEQCIHRRe20lRrNM4xd07mpjTtgaE6FGS3jjF++zW8ZMnth3AiAd6LVAAeVW
++hSW4T0XJRw9lGU6/EK9+ELZpEjrY03dJ1zAKBggqhkjOPQQDAwNpADBmAjEAiHqK
++W9PQ/5h7VROVIWPaxUo3LhrL2sZanw4bzTDBDY0dRR19ZFzjtAph1RzpQqppAjEA
++plAvxwkAIR2jurboJZ4Zm9rNAx8KvA+A5yQFzNkGgKDLjTJrKmSKoIcWV3j7WfdL
++-----END CERTIFICATE-----"#;
++
++        let chain_pem = [
++            r#"-----BEGIN CERTIFICATE-----
++MIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMw
++KjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y
++MjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3Jl
++LmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0C
++AQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV7
++7LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS
++0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYB
++BQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjp
++KFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZI
++zj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJR
++nZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsP
++mygUY7Ii2zbdCdliiow=
++-----END CERTIFICATE-----"#,
++            r#"-----BEGIN CERTIFICATE-----
++MIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMw
++KjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y
++MTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3Jl
++LmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7
++XeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxex
++X69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92j
++YzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRY
++wB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQ
++KsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCM
++WP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9
++TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
++-----END CERTIFICATE-----"#,
++        ];
++
++        let ctfe_pem = r#"-----BEGIN PUBLIC KEY-----
++MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiPSlFi0CmFTfEjCUqF9HuCEcYXNK
++AaYalIJmBZ8yyezPjTqhxrKBpMnaocVtLJBI1eM3uXnQzQGAJdJ4gs9Fyw==
++-----END PUBLIC KEY-----"#;
++
++        let cert = Certificate::from_pem(&cert_pem).unwrap();
++        let chain = chain_pem.map(|c| Certificate::from_pem(&c).unwrap());
++        let sct = CertificateEmbeddedSCT::new(&cert, &chain).unwrap();
++        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
++        let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
++
++        assert!(verify_sct(&sct, &keyring).is_ok());
++    }
++
++    #[test]
++    fn verify_detached_sct() {
++        let sct_json = r#"{"chain": {"certificates": ["-----BEGIN CERTIFICATE-----\nMIICUTCCAfigAwIBAgIUAafXe40Q5jthWJMo+JsJJCq09IAwCgYIKoZIzj0EAwIw\naDEMMAoGA1UEBhMDVVNBMQswCQYDVQQIEwJXQTERMA8GA1UEBxMIS2lya2xhbmQx\nFTATBgNVBAkTDDc2NyA2dGggU3QgUzEOMAwGA1UEERMFOTgwMzMxETAPBgNVBAoT\nCHNpZ3N0b3JlMB4XDTIzMTIxNDA3MDkzMFoXDTIzMTIxNDA3MTkzMFowADBZMBMG\nByqGSM49AgEGCCqGSM49AwEHA0IABDQT+qfW/VnHts0GSqI3kOc2z1lygSUWia3y\nIOx5qyWpXS1PwVcTbJnkcQEy1mnAES76NyfN5LsHHW2m53hF4WGjgecwgeQwDgYD\nVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBRpKUIe\nAqDxiw/GzKGRLFAvbaCnujAfBgNVHSMEGDAWgBTjGF7/fiITblnp3yIv3G1DETbS\ncTAbBgNVHREBAf8EETAPgQ1hc2NAdGV0c3VvLnNoMC4GCisGAQQBg78wAQEEIGh0\ndHBzOi8vb2F1dGgyLnNpZ3N0b3JlLmRldi9hdXRoMDAGCisGAQQBg78wAQgEIgwg\naHR0cHM6Ly9vYXV0aDIuc2lnc3RvcmUuZGV2L2F1dGgwCgYIKoZIzj0EAwIDRwAw\nRAIgOW+tCrt44rjWDCMSWhwC0zJRWpqH/qWRgSw2ndK7w3ICIGz0DDAXhvl6JFAz\nQp+40dnoUGKr+y0MF1zVaDOb1y+q\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----\nMIICFzCCAb2gAwIBAgIUbPNC2sKGpw8cOQfpv8yJii7c7TEwCgYIKoZIzj0EAwIw\naDEMMAoGA1UEBhMDVVNBMQswCQYDVQQIEwJXQTERMA8GA1UEBxMIS2lya2xhbmQx\nFTATBgNVBAkTDDc2NyA2dGggU3QgUzEOMAwGA1UEERMFOTgwMzMxETAPBgNVBAoT\nCHNpZ3N0b3JlMB4XDTIzMTIxNDA2NDIzNloXDTMzMTIxNDA2NDIzNlowaDEMMAoG\nA1UEBhMDVVNBMQswCQYDVQQIEwJXQTERMA8GA1UEBxMIS2lya2xhbmQxFTATBgNV\nBAkTDDc2NyA2dGggU3QgUzEOMAwGA1UEERMFOTgwMzMxETAPBgNVBAoTCHNpZ3N0\nb3JlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfe1ZllZHky68F3jRhY4Hxx7o\nPBoBaD1i9UJtyE8xfIYGVpD1+jSHctZRmiv2ZsDEE6WN3k5lc2O2GyemHJwULqNF\nMEMwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0OBBYE\nFOMYXv9+IhNuWenfIi/cbUMRNtJxMAoGCCqGSM49BAMCA0gAMEUCIDj5wbYN3ym8\nwY+Uy+FkKASpBQodXdgF+JR9tWhNDlc/AiEAwqMTyLa6Yr+5t1DvnUsR4lQNoXD7\nz8XmxcUnJTenEh4=\n-----END CERTIFICATE-----"]}, "signedCertificateTimestamp": "eyJzY3RfdmVyc2lvbiI6MCwiaWQiOiJla0ppei9acEcrVUVuNXcvR2FJcjYrYXdJK1JLZmtwdC9WOVRldTd2YTFrPSIsInRpbWVzdGFtcCI6MTcwMjUzNzc3MDQyNiwiZXh0ZW5zaW9ucyI6IiIsInNpZ25hdHVyZSI6IkJBTUFSakJFQWlBT28vdDZ4RDY0RkV2TWpGcGFsMUhVVkZxQU5nOXJ3ZEttd3NQU2wxNm5FZ0lnZmFNTlJHMTBxQVY1Z280MzU1WkxVNVVvdHRvWTAwK0l0YXhZYjRkZmV0Zz0ifQ=="}"#;
++
++        let ctfe_pem = r#"-----BEGIN PUBLIC KEY-----
++MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbbQiLx6GKy6ivhc11wJGbQjc2VX/
++mnuk5d670MTXR3p+LIAcxd5MhqIHpLmyYJ5mDKLEoZ/pC0nPuje3JueBcA==
++-----END PUBLIC KEY-----"#;
++
++        let sct: SigningCertificateDetachedSCT = serde_json::from_str(sct_json).unwrap();
++        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
++        let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
++
++        assert!(verify_sct(&sct, &keyring).is_ok());
++    }
++}
+diff --git a/src/errors.rs b/src/errors.rs
+index 56a3f93856..9cc6d620d4 100644
+--- a/src/errors.rs
++++ b/src/errors.rs
+@@ -133,6 +133,14 @@ pub enum SigstoreError {
+     #[error(transparent)]
+     JoinError(#[from] tokio::task::JoinError),
+ 
++    #[cfg(feature = "cert")]
++    #[error(transparent)]
++    KeyringError(#[from] crate::crypto::keyring::KeyringError),
++
++    #[cfg(any(feature = "sign", feature = "verify"))]
++    #[error(transparent)]
++    SCTError(#[from] crate::crypto::transparency::SCTError),
++
+     // HACK(tnytown): Remove when we rework the Fulcio V2 endpoint.
+     #[cfg(feature = "fulcio")]
+     #[error(transparent)]
+diff --git a/src/fulcio/mod.rs b/src/fulcio/mod.rs
+index 9166fa0a1d..406dc5bea5 100644
+--- a/src/fulcio/mod.rs
++++ b/src/fulcio/mod.rs
+@@ -1,4 +1,4 @@
+-mod models;
++pub(crate) mod models;
+ 
+ pub mod oauth;
+ 
+
+From e339b67ebafa8d66867dde95495d423395c4e8be Mon Sep 17 00:00:00 2001
+From: Andrew Pan <andrew.pan@trailofbits.com>
+Date: Mon, 22 Apr 2024 22:29:43 -0500
+Subject: [PATCH 2/4] Cargo.toml: remove patch version for `bundle` deps
+
+Signed-off-by: Andrew Pan <andrew.pan@trailofbits.com>
+---
+ Cargo.toml | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 39e9bf8833..f56feb2c2c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -77,7 +77,7 @@ base64 = "0.22.0"
+ cached = { version = "0.49.2", optional = true, features = ["async"] }
+ cfg-if = "1.0.0"
+ chrono = { version = "0.4.27", default-features = false, features = ["now", "serde"] }
+-const-oid = { version = "0.9.6", features = ["db"] }
++const-oid = { version = "0.9", features = ["db"] }
+ digest = { version = "0.10.3", default-features = false }
+ ecdsa = { version = "0.16.7", features = ["pkcs8", "digest", "der", "signing"] }
+ ed25519 = { version = "2.2.1", features = ["alloc"] }
+@@ -113,25 +113,25 @@ rsa = "0.9.2"
+ scrypt = "0.11.0"
+ serde = { version = "1.0.136", features = ["derive"] }
+ serde_json = "1.0.79"
+-serde_with = { version = "3.4.0", features = ["base64", "json"], optional = true }
++serde_with = { version = "3.4", features = ["base64", "json"], optional = true }
+ sha2 = { version = "0.10.6", features = ["oid"] }
+ signature = { version = "2.0" }
+-sigstore_protobuf_specs = { version = "0.3.2", optional = true }
++sigstore_protobuf_specs = { version = "0.3", optional = true }
+ thiserror = "1.0.30"
+ tokio = { version = "1.17.0", features = ["rt"] }
+ tokio-util = { version = "0.7.10", features = ["io-util"] }
+ tough = { version = "0.17.1", features = ["http"], optional = true }
+ tracing = "0.1.31"
+ url = "2.2.2"
+-x509-cert = { version = "0.2.5", features = ["builder", "pem", "std", "sct"] }
++x509-cert = { version = "0.2", features = ["builder", "pem", "std", "sct"] }
+ crypto_secretbox = "0.1.1"
+ zeroize = "1.5.7"
+-rustls-webpki = { version = "0.102.1", features = ["alloc"] }
+-serde_repr = "0.1.16"
++rustls-webpki = { version = "0.102", features = ["alloc"] }
++serde_repr = "0.1"
+ hex = "0.4.3"
+-json-syntax = { version = "0.12.2", features = ["canonicalize", "serde"] }
+-tls_codec = { version = "0.4.1", features = ["derive"] }
+-ring = "0.17.6"
++json-syntax = { version = "0.12", features = ["canonicalize", "serde"] }
++tls_codec = { version = "0.4", features = ["derive"] }
++ring = "0.17"
+ 
+ [dev-dependencies]
+ anyhow = { version = "1.0", features = ["backtrace"] }
+
+From 0989d6368c865c880a7791b1b66f38f04ce89259 Mon Sep 17 00:00:00 2001
+From: Andrew Pan <andrew.pan@trailofbits.com>
+Date: Wed, 24 Apr 2024 11:04:25 -0500
+Subject: [PATCH 3/4] conformance: staging, initial trustroot support
+
+Signed-off-by: Andrew Pan <andrew.pan@trailofbits.com>
+---
+ Cargo.toml                             |   8 +-
+ examples/cosign/verify/main.rs         |  26 +-
+ src/bundle/sign.rs                     |  98 +++----
+ src/bundle/verify/verifier.rs          |  72 ++---
+ src/cosign/client_builder.rs           |  53 ++--
+ src/crypto/certificate_pool.rs         |   4 +-
+ src/crypto/keyring.rs                  |  19 +-
+ src/crypto/transparency.rs             |   8 +-
+ src/errors.rs                          |   3 +
+ src/fulcio/mod.rs                      |   2 +-
+ src/lib.rs                             |   6 +-
+ src/oauth/token.rs                     |  25 +-
+ src/trust/mod.rs                       | 266 ++++++++++++++++--
+ src/trust/sigstore/constants.rs        |  36 ---
+ src/trust/sigstore/mod.rs              | 366 +++++++++++--------------
+ tests/conformance/Cargo.toml           |   5 +-
+ tests/conformance/conformance.rs       | 153 ++++++++---
+ trust_root/prod/root.json              | 106 +++----
+ trust_root/prod/signing_config.json    |   8 +
+ trust_root/prod/trusted_root.json      |  29 +-
+ trust_root/staging/root.json           |  65 +++++
+ trust_root/staging/signing_config.json |   8 +
+ trust_root/staging/trusted_root.json   | 112 ++++++++
+ 23 files changed, 951 insertions(+), 527 deletions(-)
+ delete mode 100644 src/trust/sigstore/constants.rs
+ create mode 100644 trust_root/prod/signing_config.json
+ create mode 100644 trust_root/staging/root.json
+ create mode 100644 trust_root/staging/signing_config.json
+ create mode 100644 trust_root/staging/trusted_root.json
+
+diff --git a/Cargo.toml b/Cargo.toml
+index f56feb2c2c..f849e9b7c1 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -40,11 +40,11 @@ rekor-native-tls = ["reqwest/native-tls", "rekor"]
+ rekor-rustls-tls = ["reqwest/rustls-tls", "rekor"]
+ rekor = ["reqwest"]
+ 
+-sign = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
+-verify = ["sigstore_protobuf_specs", "fulcio", "rekor", "cert"]
++sign = ["fulcio", "rekor", "cert"]
++verify = ["fulcio", "rekor", "cert"]
+ bundle = ["sign", "verify"]
+ 
+-sigstore-trust-root = ["sigstore_protobuf_specs", "futures-util", "tough", "regex", "tokio/sync"]
++sigstore-trust-root = ["futures-util", "tough", "regex", "tokio/sync"]
+ 
+ cosign-native-tls = [
+   "oci-distribution/native-tls",
+@@ -116,7 +116,7 @@ serde_json = "1.0.79"
+ serde_with = { version = "3.4", features = ["base64", "json"], optional = true }
+ sha2 = { version = "0.10.6", features = ["oid"] }
+ signature = { version = "2.0" }
+-sigstore_protobuf_specs = { version = "0.3", optional = true }
++sigstore_protobuf_specs = "0.3"
+ thiserror = "1.0.30"
+ tokio = { version = "1.17.0", features = ["rt"] }
+ tokio-util = { version = "0.7.10", features = ["io-util"] }
+diff --git a/examples/cosign/verify/main.rs b/examples/cosign/verify/main.rs
+index ad8b1555d9..ffe2011728 100644
+--- a/examples/cosign/verify/main.rs
++++ b/examples/cosign/verify/main.rs
+@@ -22,7 +22,7 @@ use sigstore::cosign::{CosignCapabilities, SignatureLayer};
+ use sigstore::crypto::SigningScheme;
+ use sigstore::errors::SigstoreVerifyConstraintsError;
+ use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
+-use sigstore::trust::sigstore::SigstoreTrustRoot;
++use sigstore::trust::sigstore::{Instance, TrustRootOptions};
+ use std::time::Instant;
+ 
+ extern crate anyhow;
+@@ -107,7 +107,7 @@ struct Cli {
+ 
+ async fn run_app(
+     cli: &Cli,
+-    frd: &dyn sigstore::trust::TrustRoot,
++    frd: &dyn sigstore::trust::RawTrustRoot,
+ ) -> anyhow::Result<(Vec<SignatureLayer>, VerificationConstraintVec)> {
+     // Note well: this a limitation deliberately introduced by this example.
+     if cli.cert_email.is_some() && cli.cert_url.is_some() {
+@@ -184,7 +184,7 @@ async fn run_app(
+     }
+     if let Some(path_to_cert) = cli.cert.as_ref() {
+         let cert = fs::read(path_to_cert).map_err(|e| anyhow!("Cannot read cert: {:?}", e))?;
+-        let require_rekor_bundle = if !frd.rekor_keys()?.is_empty() {
++        let require_rekor_bundle = if !frd.raw_tlog_keys().is_empty() {
+             true
+         } else {
+             warn!("certificate based verification is weaker when Rekor integration is disabled");
+@@ -225,21 +225,23 @@ async fn run_app(
+     Ok((trusted_layers, verification_constraints))
+ }
+ 
+-async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::trust::TrustRoot>> {
++async fn fulcio_and_rekor_data(
++    cli: &Cli,
++) -> anyhow::Result<Box<dyn sigstore::trust::RawTrustRoot>> {
+     if cli.use_sigstore_tuf_data {
+         info!("Downloading data from Sigstore TUF repository");
+ 
+-        let repo: sigstore::errors::Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
++        let repo = Instance::Prod
++            .trust_config(TrustRootOptions { cache_dir: None })
++            .await?;
+ 
+-        return Ok(Box::new(repo?));
++        return Ok(Box::new(repo.trust_root));
+     };
+ 
+     let mut data = sigstore::trust::ManualTrustRoot::default();
+     if let Some(path) = cli.rekor_pub_key.as_ref() {
+-        data.rekor_key = Some(
+-            fs::read(path)
+-                .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
+-        );
++        data.tlog_keys = vec![fs::read(path)
++            .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?];
+     }
+ 
+     if let Some(path) = cli.fulcio_cert.as_ref() {
+@@ -250,9 +252,7 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
+             encoding: sigstore::registry::CertificateEncoding::Pem,
+             data: cert_data,
+         };
+-        data.fulcio_certs
+-            .get_or_insert(Vec::new())
+-            .push(certificate.try_into()?);
++        data.ca_certs.push(certificate.try_into()?);
+     }
+ 
+     Ok(Box::new(data))
+diff --git a/src/bundle/sign.rs b/src/bundle/sign.rs
+index 8e7b0afc4f..e5b5fc0643 100644
+--- a/src/bundle/sign.rs
++++ b/src/bundle/sign.rs
+@@ -14,6 +14,7 @@
+ 
+ //! Types for signing artifacts and producing Sigstore bundles.
+ 
++use std::error::Error;
+ use std::io::{self, Read};
+ use std::time::SystemTime;
+ 
+@@ -39,19 +40,15 @@ use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
+ use x509_cert::ext::pkix as x509_ext;
+ 
+ use crate::bundle::models::Version;
+-use crate::crypto::keyring::Keyring;
+ use crate::crypto::transparency::{verify_sct, CertificateEmbeddedSCT};
+ use crate::errors::{Result as SigstoreResult, SigstoreError};
+ use crate::fulcio::oauth::OauthTokenProvider;
+-use crate::fulcio::{self, FulcioClient, FULCIO_ROOT};
++use crate::fulcio::{self, FulcioClient};
+ use crate::oauth::IdentityToken;
+ use crate::rekor::apis::configuration::Configuration as RekorConfiguration;
+ use crate::rekor::apis::entries_api::create_log_entry;
+ use crate::rekor::models::{hashedrekord, proposed_entry::ProposedEntry as ProposedLogEntry};
+-use crate::trust::TrustRoot;
+-
+-#[cfg(feature = "sigstore-trust-root")]
+-use crate::trust::sigstore::SigstoreTrustRoot;
++use crate::trust::{CTFEKeyring, TrustConfig, TrustRoot};
+ 
+ /// An asynchronous Sigstore signing session.
+ ///
+@@ -85,25 +82,27 @@ impl<'ctx> SigningSession<'ctx> {
+         fulcio: &FulcioClient,
+         token: &IdentityToken,
+     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
+-        let subject =
+-                // SEQUENCE OF RelativeDistinguishedName
+-                vec![
+-                    // SET OF AttributeTypeAndValue
+-                    vec![
+-                        // AttributeTypeAndValue, `emailAddress=...`
+-                        AttributeTypeAndValue {
+-                            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
+-                            value: AttributeValue::new(
+-                                pkcs8::der::Tag::Utf8String,
+-                                token.unverified_claims().email.as_ref(),
+-                            )?,
+-                        }
+-                    ].try_into()?
+-                ].into();
++        let subject = token
++            .unverified_claims()
++            .subject()
++            .ok_or(SigstoreError::UnexpectedError(
++                "OIDC token does not contain a subject".into(),
++            ))?;
++        // AttributeTypeAndValue, `emailAddress=...`
++        let subject_attr = AttributeTypeAndValue {
++            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
++            value: AttributeValue::new(pkcs8::der::Tag::Utf8String, subject.as_ref())?,
++        };
++        // SEQUENCE OF RelativeDistinguishedName
++        let subject_seq = vec![
++            // SET OF AttributeTypeAndValue
++            vec![subject_attr].try_into()?,
++        ]
++        .into();
+ 
+         let mut rng = rand::thread_rng();
+         let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rng));
+-        let mut builder = CertRequestBuilder::new(subject, &private_key)?;
++        let mut builder = CertRequestBuilder::new(subject_seq, &private_key)?;
+         builder.add_extension(&x509_ext::BasicConstraints {
+             ca: false,
+             path_len_constraint: None,
+@@ -258,49 +257,30 @@ pub mod blocking {
+ pub struct SigningContext {
+     fulcio: FulcioClient,
+     rekor_config: RekorConfiguration,
+-    ctfe_keyring: Keyring,
++    ctfe_keyring: CTFEKeyring,
+ }
+ 
+ impl SigningContext {
+-    /// Manually constructs a [`SigningContext`] from its constituent data.
+-    pub fn new(
+-        fulcio: FulcioClient,
+-        rekor_config: RekorConfiguration,
+-        ctfe_keyring: Keyring,
+-    ) -> Self {
+-        Self {
++    pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, Box<dyn Error + Send + Sync>>
++    where
++        R: TrustRoot,
++    {
++        let fulcio_url = Url::parse(&trust.signing_config.ca_url)?;
++        let oauth = OauthTokenProvider::default().with_issuer(&trust.signing_config.oidc_url);
++        let fulcio = FulcioClient::new(fulcio_url, crate::fulcio::TokenProvider::Oauth(oauth));
++
++        let mut rekor_config: RekorConfiguration = Default::default();
++        // XX: At the time of writing, the ecosystem only uses one log. In the future, we
++        // may want to check multiple logs to mitigate split-view attacks.
++        rekor_config.base_path = trust.signing_config.tlog_urls[0].clone();
++
++        let ctfe_keyring = trust.trust_root.ctfe_keys()?;
++
++        Ok(Self {
+             fulcio,
+             rekor_config,
+             ctfe_keyring,
+-        }
+-    }
+-
+-    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
+-    /// infrastructure.
+-    #[cfg(feature = "sigstore-trust-root")]
+-    pub async fn async_production() -> SigstoreResult<Self> {
+-        let trust_root = SigstoreTrustRoot::new(None).await?;
+-        Ok(Self::new(
+-            FulcioClient::new(
+-                Url::parse(FULCIO_ROOT).expect("constant FULCIO root fails to parse!"),
+-                crate::fulcio::TokenProvider::Oauth(OauthTokenProvider::default()),
+-            ),
+-            Default::default(),
+-            Keyring::new(trust_root.ctfe_keys()?)?,
+-        ))
+-    }
+-
+-    /// Returns a [`SigningContext`] configured against the public-good production Sigstore
+-    /// infrastructure.
+-    ///
+-    /// Async callers should use [`SigningContext::async_production`].
+-    #[cfg(feature = "sigstore-trust-root")]
+-    pub fn production() -> SigstoreResult<Self> {
+-        let rt = tokio::runtime::Builder::new_current_thread()
+-            .enable_all()
+-            .build()?;
+-
+-        rt.block_on(Self::async_production())
++        })
+     }
+ 
+     /// Configures and returns a [`SigningSession`] with the held context.
+diff --git a/src/bundle/verify/verifier.rs b/src/bundle/verify/verifier.rs
+index 8635bcb7c0..44c52b2d90 100644
+--- a/src/bundle/verify/verifier.rs
++++ b/src/bundle/verify/verifier.rs
+@@ -25,18 +25,13 @@ use x509_cert::der::Encode;
+ use crate::{
+     bundle::Bundle,
+     crypto::{
+-        keyring::Keyring,
+         transparency::{verify_sct, CertificateEmbeddedSCT},
+         CertificatePool, CosignVerificationKey, Signature,
+     },
+-    errors::Result as SigstoreResult,
+     rekor::apis::configuration::Configuration as RekorConfiguration,
+-    trust::TrustRoot,
++    trust::{CTFEKeyring, TrustConfig, TrustRoot, TrustRootError},
+ };
+ 
+-#[cfg(feature = "sigstore-trust-root")]
+-use crate::trust::sigstore::SigstoreTrustRoot;
+-
+ use super::{
+     models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
+     policy::VerificationPolicy,
+@@ -50,19 +45,16 @@ pub struct Verifier {
+     #[allow(dead_code)]
+     rekor_config: RekorConfiguration,
+     cert_pool: CertificatePool,
+-    ctfe_keyring: Keyring,
++    ctfe_keyring: CTFEKeyring,
+ }
+ 
+ impl Verifier {
+-    /// Constructs a [`Verifier`].
+-    ///
+-    /// For verifications against the public-good trust root, use [`Verifier::production()`].
+-    pub fn new<R: TrustRoot>(
++    fn new_with_rekor_config<R: TrustRoot>(
+         rekor_config: RekorConfiguration,
+         trust_repo: R,
+-    ) -> SigstoreResult<Self> {
+-        let cert_pool = CertificatePool::from_certificates(trust_repo.fulcio_certs()?, [])?;
+-        let ctfe_keyring = Keyring::new(trust_repo.ctfe_keys()?)?;
++    ) -> Result<Self, TrustRootError> {
++        let cert_pool = trust_repo.ca_certs()?;
++        let ctfe_keyring = trust_repo.ctfe_keys()?;
+ 
+         Ok(Self {
+             rekor_config,
+@@ -71,6 +63,21 @@ impl Verifier {
+         })
+     }
+ 
++    /// Constructs a [`Verifier`].
++    ///
++    pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, TrustRootError>
++    where
++        R: TrustRoot,
++    {
++        let mut rekor_config: RekorConfiguration = Default::default();
++
++        // XX: At the time of writing, the ecosystem only uses one log. In the future, we
++        // may want to check multiple logs to mitigate split-view attacks.
++        rekor_config.base_path = trust.signing_config.tlog_urls[0].clone();
++
++        Self::new_with_rekor_config(rekor_config, trust.trust_root)
++    }
++
+     /// Verifies an input digest against the given Sigstore Bundle, ensuring conformance to the
+     /// provided [`VerificationPolicy`].
+     pub async fn verify_digest<P>(
+@@ -214,17 +221,9 @@ impl Verifier {
+     }
+ }
+ 
+-impl Verifier {
+-    /// Constructs an [`Verifier`] against the public-good trust root.
+-    #[cfg(feature = "sigstore-trust-root")]
+-    pub async fn production() -> SigstoreResult<Verifier> {
+-        let updater = SigstoreTrustRoot::new(None).await?;
+-
+-        Verifier::new(Default::default(), updater)
+-    }
+-}
+-
+ pub mod blocking {
++    use std::error::Error;
++
+     use super::{Verifier as AsyncVerifier, *};
+ 
+     /// A synchronous Sigstore verifier.
+@@ -235,16 +234,14 @@ pub mod blocking {
+ 
+     impl Verifier {
+         /// Constructs a synchronous Sigstore verifier.
+-        ///
+-        /// For verifications against the public-good trust root, use [`Verifier::production()`].
+-        pub fn new<R: TrustRoot>(
+-            rekor_config: RekorConfiguration,
+-            trust_repo: R,
+-        ) -> SigstoreResult<Self> {
++        pub fn new<R>(trust: TrustConfig<R>) -> Result<Self, Box<dyn Error>>
++        where
++            R: TrustRoot,
++        {
+             let rt = tokio::runtime::Builder::new_current_thread()
+                 .enable_all()
+                 .build()?;
+-            let inner = AsyncVerifier::new(rekor_config, trust_repo)?;
++            let inner = AsyncVerifier::new(trust)?;
+ 
+             Ok(Self { rt, inner })
+         }
+@@ -286,17 +283,4 @@ pub mod blocking {
+             self.verify_digest(hasher, bundle, policy, offline)
+         }
+     }
+-
+-    impl Verifier {
+-        /// Constructs a synchronous [`Verifier`] against the public-good trust root.
+-        #[cfg(feature = "sigstore-trust-root")]
+-        pub fn production() -> SigstoreResult<Verifier> {
+-            let rt = tokio::runtime::Builder::new_current_thread()
+-                .enable_all()
+-                .build()?;
+-            let inner = rt.block_on(AsyncVerifier::production())?;
+-
+-            Ok(Verifier { inner, rt })
+-        }
+-    }
+ }
+diff --git a/src/cosign/client_builder.rs b/src/cosign/client_builder.rs
+index 1a688d9139..4ce5cf21b7 100644
+--- a/src/cosign/client_builder.rs
++++ b/src/cosign/client_builder.rs
+@@ -14,14 +14,13 @@
+ // limitations under the License.
+ 
+ use tracing::info;
+-use webpki::types::CertificateDer;
+ 
+ use super::client::Client;
+ use crate::crypto::SigningScheme;
+ use crate::crypto::{certificate_pool::CertificatePool, CosignVerificationKey};
+ use crate::errors::Result;
+ use crate::registry::ClientConfig;
+-use crate::trust::TrustRoot;
++use crate::trust::{RawTrustRoot, TrustRoot};
+ 
+ /// A builder that generates Client objects.
+ ///
+@@ -52,15 +51,15 @@ use crate::trust::TrustRoot;
+ ///
+ /// Each cached entry will automatically expire after 60 seconds.
+ #[derive(Default)]
+-pub struct ClientBuilder<'a> {
++pub struct ClientBuilder {
+     oci_client_config: ClientConfig,
+-    rekor_pub_key: Option<&'a [u8]>,
+-    fulcio_certs: Vec<CertificateDer<'a>>,
++    rekor_pub_key: Option<CosignVerificationKey>,
++    fulcio_cert_pool: CertificatePool,
+     #[cfg(feature = "cached-client")]
+     enable_registry_caching: bool,
+ }
+ 
+-impl<'a> ClientBuilder<'a> {
++impl ClientBuilder {
+     /// Enable caching of data returned from remote OCI registries
+     #[cfg(feature = "cached-client")]
+     pub fn enable_registry_caching(mut self) -> Self {
+@@ -71,13 +70,16 @@ impl<'a> ClientBuilder<'a> {
+     /// Optional - Configures the roots of trust.
+     ///
+     /// Enables Fulcio and Rekor integration with the given trust repository.
+-    /// See [crate::sigstore::TrustRoot] for more details on trust repositories.
+-    pub fn with_trust_repository<R: TrustRoot + ?Sized>(mut self, repo: &'a R) -> Result<Self> {
+-        let rekor_keys = repo.rekor_keys()?;
+-        if !rekor_keys.is_empty() {
+-            self.rekor_pub_key = Some(rekor_keys[0]);
+-        }
+-        self.fulcio_certs = repo.fulcio_certs()?;
++    /// See [`TrustRoot`] for more details on trust repositories.
++    pub fn with_trust_repository<R: TrustRoot + RawTrustRoot + ?Sized>(
++        mut self,
++        repo: &R,
++    ) -> Result<Self> {
++        self.rekor_pub_key = Some(CosignVerificationKey::from_der(
++            &repo.raw_tlog_keys()[0],
++            &SigningScheme::default(),
++        )?);
++        self.fulcio_cert_pool = repo.ca_certs()?;
+ 
+         Ok(self)
+     }
+@@ -92,24 +94,9 @@ impl<'a> ClientBuilder<'a> {
+     }
+ 
+     pub fn build(self) -> Result<Client> {
+-        let rekor_pub_key = match self.rekor_pub_key {
+-            None => {
+-                info!("Rekor public key not provided. Rekor integration disabled");
+-                None
+-            }
+-            Some(data) => Some(CosignVerificationKey::from_der(
+-                data,
+-                &SigningScheme::default(),
+-            )?),
+-        };
+-
+-        let fulcio_cert_pool = if self.fulcio_certs.is_empty() {
+-            info!("No Fulcio cert has been provided. Fulcio integration disabled");
+-            None
+-        } else {
+-            let cert_pool = CertificatePool::from_certificates(self.fulcio_certs, [])?;
+-            Some(cert_pool)
+-        };
++        if self.rekor_pub_key.is_none() {
++            info!("Rekor public key not provided. Rekor integration disabled");
++        }
+ 
+         let oci_client =
+             oci_distribution::client::Client::new(self.oci_client_config.clone().into());
+@@ -136,8 +123,8 @@ impl<'a> ClientBuilder<'a> {
+ 
+         Ok(Client {
+             registry_client,
+-            rekor_pub_key,
+-            fulcio_cert_pool,
++            rekor_pub_key: self.rekor_pub_key,
++            fulcio_cert_pool: Some(self.fulcio_cert_pool),
+         })
+     }
+ }
+diff --git a/src/crypto/certificate_pool.rs b/src/crypto/certificate_pool.rs
+index 1fddead331..2076fa8772 100644
+--- a/src/crypto/certificate_pool.rs
++++ b/src/crypto/certificate_pool.rs
+@@ -23,7 +23,7 @@ use crate::errors::{Result as SigstoreResult, SigstoreError};
+ 
+ /// A collection of trusted root certificates.
+ #[derive(Default, Debug)]
+-pub(crate) struct CertificatePool {
++pub struct CertificatePool {
+     trusted_roots: Vec<TrustAnchor<'static>>,
+     intermediates: Vec<CertificateDer<'static>>,
+ }
+@@ -33,7 +33,7 @@ impl CertificatePool {
+     pub(crate) fn from_certificates<'r, 'i, R, I>(
+         trusted_roots: R,
+         untrusted_intermediates: I,
+-    ) -> SigstoreResult<CertificatePool>
++    ) -> Result<CertificatePool, webpki::Error>
+     where
+         R: IntoIterator<Item = CertificateDer<'r>>,
+         I: IntoIterator<Item = CertificateDer<'i>>,
+diff --git a/src/crypto/keyring.rs b/src/crypto/keyring.rs
+index d24e36496e..943365b64d 100644
+--- a/src/crypto/keyring.rs
++++ b/src/crypto/keyring.rs
+@@ -86,13 +86,18 @@ pub struct Keyring(HashMap<[u8; 32], Key>);
+ 
+ impl Keyring {
+     /// Creates a `Keyring` from DER encoded SPKI-format public keys.
+-    pub fn new<'a>(keys: impl IntoIterator<Item = &'a [u8]>) -> Result<Self> {
+-        Ok(Self(
+-            keys.into_iter()
+-                .flat_map(Key::new)
+-                .map(|k| Ok((k.fingerprint, k)))
+-                .collect::<Result<_>>()?,
+-        ))
++    pub fn new<'a, I>(keys: I) -> Result<Self>
++    where
++        I: IntoIterator,
++        I::Item: AsRef<[u8]>,
++    {
++        keys.into_iter()
++            .map(|b| {
++                let k = Key::new(b.as_ref())?;
++                Ok((k.fingerprint, k))
++            })
++            .collect::<Result<_>>()
++            .map(Self)
+     }
+ 
+     /// Verifies `data` against a `signature` with a public key identified by `key_id`.
+diff --git a/src/crypto/transparency.rs b/src/crypto/transparency.rs
+index f4de034cb4..bf4c4da4cd 100644
+--- a/src/crypto/transparency.rs
++++ b/src/crypto/transparency.rs
+@@ -377,10 +377,10 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiPSlFi0CmFTfEjCUqF9HuCEcYXNK
+ AaYalIJmBZ8yyezPjTqhxrKBpMnaocVtLJBI1eM3uXnQzQGAJdJ4gs9Fyw==
+ -----END PUBLIC KEY-----"#;
+ 
+-        let cert = Certificate::from_pem(&cert_pem).unwrap();
+-        let chain = chain_pem.map(|c| Certificate::from_pem(&c).unwrap());
++        let cert = Certificate::from_pem(cert_pem).unwrap();
++        let chain = chain_pem.map(|c| Certificate::from_pem(c).unwrap());
+         let sct = CertificateEmbeddedSCT::new(&cert, &chain).unwrap();
+-        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
++        let ctfe_key: VerifyingKey = VerifyingKey::from_str(ctfe_pem).unwrap();
+         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
+ 
+         assert!(verify_sct(&sct, &keyring).is_ok());
+@@ -396,7 +396,7 @@ mnuk5d670MTXR3p+LIAcxd5MhqIHpLmyYJ5mDKLEoZ/pC0nPuje3JueBcA==
+ -----END PUBLIC KEY-----"#;
+ 
+         let sct: SigningCertificateDetachedSCT = serde_json::from_str(sct_json).unwrap();
+-        let ctfe_key: VerifyingKey = VerifyingKey::from_str(&ctfe_pem).unwrap();
++        let ctfe_key: VerifyingKey = VerifyingKey::from_str(ctfe_pem).unwrap();
+         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
+ 
+         assert!(verify_sct(&sct, &keyring).is_ok());
+diff --git a/src/errors.rs b/src/errors.rs
+index 9cc6d620d4..15981c4164 100644
+--- a/src/errors.rs
++++ b/src/errors.rs
+@@ -170,6 +170,9 @@ pub enum SigstoreError {
+     #[error("No Signature Layer passed verification")]
+     SigstoreNoVerifiedLayer,
+ 
++    #[error(transparent)]
++    TrustRootError(#[from] crate::trust::TrustRootError),
++
+     #[cfg(feature = "sigstore-trust-root")]
+     #[error(transparent)]
+     TufError(#[from] Box<tough::error::Error>),
+diff --git a/src/fulcio/mod.rs b/src/fulcio/mod.rs
+index 406dc5bea5..c2daed7d54 100644
+--- a/src/fulcio/mod.rs
++++ b/src/fulcio/mod.rs
+@@ -237,7 +237,7 @@ impl FulcioClient {
+             })
+             .send()
+             .await?;
+-        let response = response.json().await?;
++        let response = response.error_for_status()?.json().await?;
+ 
+         let (certs, detached_sct) = match response {
+             SigningCertificate::SignedCertificateDetachedSct(ref sc) => {
+diff --git a/src/lib.rs b/src/lib.rs
+index fa336c1029..6123196b4d 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -93,8 +93,8 @@
+ //!   };
+ //!
+ //!   let mut repo = sigstore::trust::ManualTrustRoot {
+-//!     fulcio_certs: Some(vec![fulcio_cert.try_into().unwrap()]),
+-//!     rekor_key: Some(rekor_pub_key),
++//!     ca_certs: vec![fulcio_cert.try_into().unwrap()],
++//!     ctfe_keys: vec![rekor_pub_key],
+ //!     ..Default::default()
+ //!   };
+ //!
+@@ -284,3 +284,5 @@ pub mod rekor;
+ 
+ #[cfg(any(feature = "sign", feature = "verify"))]
+ pub mod bundle;
++
++pub use sigstore_protobuf_specs as protobuf_specs;
+diff --git a/src/oauth/token.rs b/src/oauth/token.rs
+index e916a30003..0cbdf61ed4 100644
+--- a/src/oauth/token.rs
++++ b/src/oauth/token.rs
+@@ -22,13 +22,30 @@ use crate::errors::SigstoreError;
+ 
+ #[derive(Deserialize)]
+ pub struct Claims {
+-    pub aud: String,
++    aud: String,
++    iss: String,
+     #[serde(with = "chrono::serde::ts_seconds")]
+-    pub exp: DateTime<Utc>,
++    exp: DateTime<Utc>,
+     #[serde(with = "chrono::serde::ts_seconds_option")]
+     #[serde(default)]
+-    pub nbf: Option<DateTime<Utc>>,
+-    pub email: String,
++    nbf: Option<DateTime<Utc>>,
++    email: Option<String>,
++    sub: Option<String>,
++}
++
++impl Claims {
++    /// Returns the subject of the token.
++    ///
++    /// <https://github.com/sigstore/fulcio/blob/b2186c0/pkg/config/config.go#L182-L201>
++    pub fn subject(&self) -> Option<&str> {
++        match self.iss.as_str() {
++            "https://accounts.google.com"
++            | "https://oauth2.sigstore.dev/auth"
++            | "https://oauth2.sigstage.dev/auth" => self.email.as_deref(),
++            "https://token.actions.githubusercontent.com" => self.sub.as_deref(),
++            _ => self.sub.as_deref(),
++        }
++    }
+ }
+ 
+ pub type UnverifiedClaims = Claims;
+diff --git a/src/trust/mod.rs b/src/trust/mod.rs
+index 966bb238fc..cdc8aed73e 100644
+--- a/src/trust/mod.rs
++++ b/src/trust/mod.rs
+@@ -13,43 +13,271 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
++use sigstore_protobuf_specs::dev::sigstore::{
++    common::v1::TimeRange,
++    trustroot::v1::{
++        CertificateAuthority, ClientTrustConfig, SigningConfig, TransparencyLogInstance,
++        TrustedRoot,
++    },
++};
++use thiserror::Error;
+ use webpki::types::CertificateDer;
+ 
++use crate::crypto::{
++    keyring::{Keyring, KeyringError},
++    CertificatePool,
++};
++
+ #[cfg(feature = "sigstore-trust-root")]
+ pub mod sigstore;
+ 
++#[derive(Error, Debug)]
++#[error(transparent)]
++pub enum TrustRootError {
++    #[error("trust bundle malformed")]
++    BundleMalformed,
++
++    #[error("cert(s) malformed: {0}")]
++    CertMalformed(#[from] webpki::Error),
++
++    #[error("key(s) malformed: {0}")]
++    KeyMalformed(#[from] KeyringError),
++
++    #[cfg(feature = "sigstore-trust-root")]
++    RootUpdate(#[from] sigstore::RootUpdateError),
++}
++
++type Result<T> = std::result::Result<T, TrustRootError>;
++
++pub type TLogKeyring = Keyring;
++pub type CTFEKeyring = Keyring;
++
+ /// A `TrustRoot` owns all key material necessary for establishing a root of trust.
+ pub trait TrustRoot {
+-    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>>;
+-    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
+-    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
++    fn ca_certs(&self) -> Result<CertificatePool>;
++    fn tlog_keys(&self) -> Result<TLogKeyring>;
++    fn ctfe_keys(&self) -> Result<CTFEKeyring>;
+ }
+ 
+-/// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
++// HACK(tnytown): Remove when cosign moves to Keyring for signature verification.
++#[deprecated]
++pub trait RawTrustRoot: TrustRoot {
++    fn raw_tlog_keys(&self) -> Vec<Vec<u8>>;
++}
++
++/// A `ManualTrustRoot` is a [`TrustRoot`] with out-of-band trust materials.
+ /// As it does not establish a trust root with TUF, users must initialize its materials themselves.
+ #[derive(Debug, Default)]
+-pub struct ManualTrustRoot<'a> {
+-    pub fulcio_certs: Option<Vec<CertificateDer<'a>>>,
+-    pub rekor_key: Option<Vec<u8>>,
++pub struct ManualTrustRoot {
++    /// Certificate Authority (Fulcio) certs.
++    pub ca_certs: Vec<CertificateDer<'static>>,
++    /// Artifact Transparency (Rekor) keys.
++    pub tlog_keys: Vec<Vec<u8>>,
++    /// Certificate Transparency (Fulcio) keys.
+     pub ctfe_keys: Vec<Vec<u8>>,
+ }
+ 
+-impl TrustRoot for ManualTrustRoot<'_> {
+-    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer>> {
+-        Ok(match &self.fulcio_certs {
+-            Some(certs) => certs.clone(),
+-            None => Vec::new(),
+-        })
++impl TrustRoot for ManualTrustRoot {
++    fn ca_certs(&self) -> Result<CertificatePool> {
++        Ok(CertificatePool::from_certificates(
++            self.ca_certs.clone(),
++            [],
++        )?)
++    }
++
++    fn tlog_keys(&self) -> Result<TLogKeyring> {
++        Ok(TLogKeyring::new(&self.tlog_keys)?)
++    }
++
++    fn ctfe_keys(&self) -> Result<CTFEKeyring> {
++        Ok(CTFEKeyring::new(&self.ctfe_keys)?)
+     }
++}
++
++#[allow(deprecated)]
++impl RawTrustRoot for ManualTrustRoot {
++    fn raw_tlog_keys(&self) -> Vec<Vec<u8>> {
++        self.tlog_keys.clone()
++    }
++}
++
++/// A `BundledTrustRoot` is a [`TrustRoot`] backed by a [`TrustedRoot`] Protobuf message, typically
++/// encoded as a JSON blob and distributed through TUF.
++pub struct BundledTrustRoot {
++    trusted_root: TrustedRoot,
++}
++
++impl From<TrustedRoot> for BundledTrustRoot {
++    fn from(trusted_root: TrustedRoot) -> Self {
++        Self { trusted_root }
++    }
++}
++
++impl BundledTrustRoot {
++    #[inline]
++    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
++        tlogs
++            .iter()
++            .filter_map(|tlog| tlog.public_key.as_ref())
++            .filter(|key| is_timerange_valid(key.valid_for.as_ref(), false))
++            .filter_map(|key| key.raw_bytes.as_ref())
++            .map(|key_bytes| key_bytes.as_slice())
++    }
++
++    #[inline]
++    fn ca_keys(
++        cas: &[CertificateAuthority],
++        allow_expired: bool,
++    ) -> impl Iterator<Item = &'_ [u8]> {
++        cas.iter()
++            .filter(move |ca| is_timerange_valid(ca.valid_for.as_ref(), allow_expired))
++            .flat_map(|ca| ca.cert_chain.as_ref())
++            .flat_map(|chain| chain.certificates.iter())
++            .map(|cert| cert.raw_bytes.as_slice())
++    }
++}
++
++impl TrustRoot for BundledTrustRoot {
++    /// Fetch Fulcio certificates from the given TUF repository or reuse
++    /// the local cache if its contents are not outdated.
++    ///
++    /// The contents of the local cache are updated when they are outdated.
++    fn ca_certs(&self) -> Result<CertificatePool> {
++        // Allow expired certificates: they may have been active when the
++        // certificate was used to sign.
++        let certs = Self::ca_keys(&self.trusted_root.certificate_authorities, true);
++        let certs: Vec<_> = certs
++            .map(|c| CertificateDer::from(c).into_owned())
++            .collect();
+ 
+-    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
+-        Ok(match &self.rekor_key {
+-            Some(key) => vec![&key[..]],
+-            None => Vec::new(),
++        if certs.is_empty() {
++            Err(TrustRootError::BundleMalformed)
++        } else {
++            Ok(CertificatePool::from_certificates(certs, [])?)
++        }
++    }
++
++    /// Fetch Rekor public keys from the given TUF repository or reuse
++    /// the local cache if it's not outdated.
++    ///
++    /// The contents of the local cache are updated when they are outdated.
++    fn tlog_keys(&self) -> Result<TLogKeyring> {
++        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
++
++        if keys.len() != 1 {
++            Err(TrustRootError::BundleMalformed)
++        } else {
++            Ok(TLogKeyring::new(keys)?)
++        }
++    }
++
++    /// Fetch CTFE public keys from the given TUF repository or reuse
++    /// the local cache if it's not outdated.
++    ///
++    /// The contents of the local cache are updated when they are outdated.
++    fn ctfe_keys(&self) -> Result<CTFEKeyring> {
++        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
++
++        if keys.is_empty() {
++            Err(TrustRootError::BundleMalformed)
++        } else {
++            Ok(CTFEKeyring::new(keys)?)
++        }
++    }
++}
++
++#[allow(deprecated)]
++impl RawTrustRoot for BundledTrustRoot {
++    fn raw_tlog_keys(&self) -> Vec<Vec<u8>> {
++        Self::tlog_keys(&self.trusted_root.tlogs)
++            .map(|k| k.to_owned())
++            .collect()
++    }
++}
++
++/// `TrustConfig` manages necessary information necessary to contact and establish
++/// trust in a Sigstore instance.
++///
++/// This type roughly mirrors [`ClientTrustConfig`] from `sigstore-protobuf-specs`.
++///
++/// [`ClientTrustConfig`]: sigstore_protobuf_specs::dev::sigstore::trustroot::v1::ClientTrustConfig
++pub struct TrustConfig<R> {
++    pub trust_root: R,
++    pub signing_config: SigningConfig,
++}
++
++impl TryFrom<ClientTrustConfig> for TrustConfig<BundledTrustRoot> {
++    type Error = TrustRootError;
++
++    fn try_from(value: ClientTrustConfig) -> Result<Self> {
++        let trusted_root = value.trusted_root.ok_or(TrustRootError::BundleMalformed)?;
++        let signing_config = value
++            .signing_config
++            .ok_or(TrustRootError::BundleMalformed)?;
++
++        Ok(TrustConfig {
++            trust_root: BundledTrustRoot { trusted_root },
++            signing_config,
+         })
+     }
++}
++
++/// Given a `range`, checks that the the current time is not before `start`. If
++/// `allow_expired` is `false`, also checks that the current time is not after
++/// `end`.
++fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
++    let now = chrono::Utc::now().timestamp();
++
++    let start = range.and_then(|r| r.start.as_ref()).map(|t| t.seconds);
++    let end = range.and_then(|r| r.end.as_ref()).map(|t| t.seconds);
++
++    match (start, end) {
++        // If there was no validity period specified, the key is always valid.
++        (None, _) => true,
++        // Active: if the current time is before the starting period, we are not yet valid.
++        (Some(start), _) if now < start => false,
++        // If we want Expired keys, then we don't need to check the end.
++        _ if allow_expired => true,
++        // If there is no expiry date, the key is valid.
++        (_, None) => true,
++        // If we have an expiry date, check it.
++        (_, Some(end)) => now <= end,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::time::SystemTime;
++
++    #[test]
++    fn test_is_timerange_valid() {
++        fn range_from(start: i64, end: i64) -> TimeRange {
++            let base = chrono::Utc::now();
++            let start: SystemTime = (base + chrono::TimeDelta::seconds(start)).into();
++            let end: SystemTime = (base + chrono::TimeDelta::seconds(end)).into();
++
++            TimeRange {
++                start: Some(start.into()),
++                end: Some(end.into()),
++            }
++        }
++
++        assert!(is_timerange_valid(None, true));
++        assert!(is_timerange_valid(None, false));
++
++        // Test lower bound conditions
++
++        // Valid: 1 ago, 1 from now
++        assert!(is_timerange_valid(Some(&range_from(-1, 1)), false));
++        // Invalid: 1 from now, 1 from now
++        assert!(!is_timerange_valid(Some(&range_from(1, 1)), false));
++
++        // Test upper bound conditions
+ 
+-    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
+-        Ok(self.ctfe_keys.iter().map(|v| &v[..]).collect())
++        // Invalid: 1 ago, 1 ago
++        assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
++        // Valid: 1 ago, 1 ago
++        assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
+     }
+ }
+diff --git a/src/trust/sigstore/constants.rs b/src/trust/sigstore/constants.rs
+deleted file mode 100644
+index d4630aaf12..0000000000
+--- a/src/trust/sigstore/constants.rs
++++ /dev/null
+@@ -1,36 +0,0 @@
+-//
+-// Copyright 2021 The Sigstore Authors.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-pub(crate) const SIGSTORE_METADATA_BASE: &str = "https://tuf-repo-cdn.sigstore.dev";
+-pub(crate) const SIGSTORE_TARGET_BASE: &str = "https://tuf-repo-cdn.sigstore.dev/targets";
+-
+-macro_rules! impl_static_resource {
+-    {$($name:literal,)+} => {
+-        #[inline]
+-        pub(crate) fn static_resource<N>(name: N) -> Option<&'static [u8]> where N: AsRef<str> {
+-            match name.as_ref() {
+-            $(
+-                $name => Some(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/trust_root/prod/", $name)))
+-            ),+,
+-                    _ => None,
+-            }
+-        }
+-    };
+-}
+-
+-impl_static_resource! {
+-    "root.json",
+-    "trusted_root.json",
+-}
+diff --git a/src/trust/sigstore/mod.rs b/src/trust/sigstore/mod.rs
+index 9ee9f02cce..1efbb706f8 100644
+--- a/src/trust/sigstore/mod.rs
++++ b/src/trust/sigstore/mod.rs
+@@ -13,7 +13,7 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-//! Helper Structs to interact with the Sigstore TUF repository.
++//! Helper structs to interact with the Sigstore TUF repository.
+ //!
+ //! The main interaction point is [`SigstoreTrustRoot`], which fetches Rekor's
+ //! public key and Fulcio's certificate.
+@@ -22,76 +22,171 @@
+ //! to enable Fulcio and Rekor integrations.
+ use futures_util::TryStreamExt;
+ use sha2::{Digest, Sha256};
+-use std::path::Path;
++use sigstore_protobuf_specs::dev::sigstore::trustroot::v1::SigningConfig;
++use std::{fmt::Debug, path::PathBuf};
+ use tokio_util::bytes::BytesMut;
+-
+-use sigstore_protobuf_specs::dev::sigstore::{
+-    common::v1::TimeRange,
+-    trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
+-};
+ use tough::TargetName;
+ use tracing::debug;
+-use webpki::types::CertificateDer;
+ 
+-mod constants;
++use super::{BundledTrustRoot, Result, TrustConfig, TrustRootError};
++
++macro_rules! trust_root_resource {
++    ($dir:literal, $match_on:ident) => {
++        trust_root_resource!(@with_resources $dir, $match_on, [
++            "root.json",
++            "trusted_root.json",
++            "signing_config.json",
++        ])
++    };
++    (@with_resources $dir:literal, $match_on:ident, [$($rsrc:literal,)+]) => {
++        match $match_on.as_ref() {
++        $(
++            $rsrc => Some(include_bytes!(concat!(
++                env!("CARGO_MANIFEST_DIR"),
++                "/trust_root/",
++                $dir,
++                "/",
++                $rsrc
++            )))
++        ),+,
++            _ => None,
++        }
++    };
++}
+ 
+-use crate::errors::{Result, SigstoreError};
+-pub use crate::trust::{ManualTrustRoot, TrustRoot};
++/// Configuration used in fetching the root of trust.
++#[derive(Default, Debug)]
++pub struct TrustRootOptions {
++    /// A directory for caching the root of trust and related artifacts. If `None`, the caching
++    /// mechanism is disabled.
++    pub cache_dir: Option<PathBuf>,
++}
+ 
+-/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
+-#[derive(Debug)]
+-pub struct SigstoreTrustRoot {
+-    trusted_root: TrustedRoot,
++#[derive(thiserror::Error, Debug)]
++pub enum RootUpdateError {
++    #[error("TUF target not found")]
++    NotFound,
++
++    #[error("failed to parse target data: {0}")]
++    Parse(#[source] serde_json::Error),
++
++    #[error("TUF returned error on repository fetch: {0}")]
++    Fetch(#[source] tough::error::Error),
++
++    #[error("failed to cache target: {0}")]
++    Cache(#[source] std::io::Error),
+ }
+ 
+-impl SigstoreTrustRoot {
+-    /// Constructs a new trust root from a [`tough::Repository`].
+-    async fn from_tough(
+-        repository: &tough::Repository,
+-        checkout_dir: Option<&Path>,
+-    ) -> Result<Self> {
+-        let trusted_root = {
+-            let data = Self::fetch_target(repository, checkout_dir, "trusted_root.json").await?;
+-            serde_json::from_slice(&data[..])?
++type UpdateResult<T> = std::result::Result<T, RootUpdateError>;
++
++/// An instance of the Sigstore Public Good Infrastructure.
++#[derive(Copy, Clone, Debug)]
++pub enum Instance {
++    Prod,
++    Staging,
++}
++
++impl Instance {
++    /// Returns the [`TrustConfig`] of the Sigstore instance, which encapsulates all data necessary
++    /// for Sigstore signing ([`SigningConfig`]) and verification ([`BundledTrustRoot`]).
++    pub async fn trust_config(
++        &self,
++        trust_root_options: TrustRootOptions,
++    ) -> Result<TrustConfig<BundledTrustRoot>> {
++        let tuf_url: url::Url = match self {
++            Instance::Prod => "https://tuf-repo-cdn.sigstore.dev",
++            Instance::Staging => "https://tuf-repo-cdn.sigstage.dev",
++        }
++        .parse()
++        .expect("failed to parse constant URL!");
++
++        let targets_url = tuf_url
++            .clone()
++            .join("targets")
++            .expect("failed to construct constant URL!");
++
++        let tuf_root = &self
++            .static_resource("root.json")
++            .expect("failed to fetch embedded TUF root!");
++
++        let repository = tough::RepositoryLoader::new(tuf_root, tuf_url, targets_url)
++            .expiration_enforcement(tough::ExpirationEnforcement::Safe)
++            .load()
++            .await
++            .map_err(|e| TrustRootError::RootUpdate(RootUpdateError::Fetch(e)))?;
++
++        let trust_root = BundledTrustRoot::from_tough(trust_root_options, &repository, |name| {
++            self.static_resource(name)
++        })
++        .await?;
++
++        let signing_config: SigningConfig = {
++            let data = self
++                .static_resource("signing_config.json")
++                .expect("failed to read static signing config!");
++            serde_json::from_slice(data).expect("failed to parse static signing config!")
+         };
+ 
+-        Ok(Self { trusted_root })
++        Ok(TrustConfig {
++            trust_root,
++            signing_config,
++        })
+     }
+ 
+-    /// Constructs a new trust root backed by the Sigstore Public Good Instance.
+-    pub async fn new(cache_dir: Option<&Path>) -> Result<Self> {
+-        // These are statically defined and should always parse correctly.
+-        let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
+-        let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
+-
+-        let repository = tough::RepositoryLoader::new(
+-            &constants::static_resource("root.json").expect("Failed to fetch embedded TUF root!"),
+-            metadata_base,
+-            target_base,
+-        )
+-        .expiration_enforcement(tough::ExpirationEnforcement::Safe)
+-        .load()
+-        .await
+-        .map_err(Box::new)?;
+-
+-        Self::from_tough(&repository, cache_dir).await
++    #[inline]
++    pub fn static_resource<N>(&self, name: N) -> Option<&'static [u8]>
++    where
++        N: AsRef<str>,
++    {
++        match self {
++            Instance::Prod => trust_root_resource!("prod", name),
++            Instance::Staging => trust_root_resource!("staging", name),
++        }
+     }
++}
+ 
+-    async fn fetch_target<N>(
++/// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
++impl BundledTrustRoot {
++    /// Constructs a new trust root from a [`tough::Repository`].
++    async fn from_tough<F>(
++        options: TrustRootOptions,
++        repository: &tough::Repository,
++        static_reader: F,
++    ) -> UpdateResult<Self>
++    where
++        F: Fn(&str) -> Option<&'static [u8]>,
++    {
++        let TrustRootOptions { cache_dir } = options;
++        let trusted_root =
++            Self::fetch_target(cache_dir, static_reader, repository, "trusted_root.json")
++                .await
++                .map(|x: Vec<u8>| serde_json::from_slice(&x[..]))?
++                .map_err(RootUpdateError::Parse)?;
++
++        Ok(Self { trusted_root })
++    }
++
++    async fn fetch_target<N, F>(
++        cache_dir: Option<PathBuf>,
++        static_reader: F,
+         repository: &tough::Repository,
+-        checkout_dir: Option<&Path>,
+         name: N,
+-    ) -> Result<Vec<u8>>
++    ) -> UpdateResult<Vec<u8>>
+     where
++        F: Fn(&str) -> Option<&'static [u8]>,
+         N: TryInto<TargetName, Error = tough::error::Error>,
+     {
+-        let name: TargetName = name.try_into().map_err(Box::new)?;
+-        let local_path = checkout_dir.as_ref().map(|d| d.join(name.raw()));
++        let name: TargetName = name.try_into().map_err(RootUpdateError::Fetch)?;
++        let local_path = cache_dir.as_ref().map(|d| d.join(name.raw()));
+ 
+         let read_remote_target = || async {
+             match repository.read_target(&name).await {
+-                Ok(Some(s)) => Ok(s.try_collect::<BytesMut>().await.map_err(Box::new)?),
+-                _ => Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned())),
++                Ok(Some(s)) => Ok(s
++                    .try_collect::<BytesMut>()
++                    .await
++                    .map_err(RootUpdateError::Fetch)?),
++                Err(e) => Err(RootUpdateError::Fetch(e)),
++                _ => Err(RootUpdateError::NotFound),
+             }
+         };
+ 
+@@ -100,7 +195,7 @@ impl SigstoreTrustRoot {
+             debug!("{}: reading from disk cache", name.raw());
+             local_data.to_vec()
+         // Try reading the target embedded into the binary.
+-        } else if let Some(embedded_data) = constants::static_resource(name.raw()) {
++        } else if let Some(embedded_data) = static_reader(name.raw()) {
+             debug!("{}: reading from embedded resources", name.raw());
+             embedded_data.to_vec()
+         // If all else fails, read the data from the TUF repo.
+@@ -108,15 +203,12 @@ impl SigstoreTrustRoot {
+             debug!("{}: reading from remote", name.raw());
+             remote_data.to_vec()
+         } else {
+-            return Err(SigstoreError::TufTargetNotFoundError(name.raw().to_owned()));
++            return Err(RootUpdateError::NotFound);
+         };
+ 
+         // Get metadata (hash) of the target and update the disk copy if it doesn't match.
+         let Some(target) = repository.targets().signed.targets.get(&name) else {
+-            return Err(SigstoreError::TufMetadataError(format!(
+-                "couldn't get metadata for {}",
+-                name.raw()
+-            )));
++            return Err(RootUpdateError::NotFound);
+         };
+ 
+         let data = if Sha256::digest(&data)[..] != target.hashes.sha256[..] {
+@@ -128,123 +220,24 @@ impl SigstoreTrustRoot {
+ 
+         // Write our updated data back to the disk.
+         if let Some(local_path) = local_path {
+-            std::fs::write(local_path, &data)?;
++            std::fs::write(local_path, &data).map_err(RootUpdateError::Cache)?;
+         }
+ 
+         Ok(data)
+     }
+-
+-    #[inline]
+-    fn tlog_keys(tlogs: &[TransparencyLogInstance]) -> impl Iterator<Item = &[u8]> {
+-        tlogs
+-            .iter()
+-            .filter_map(|tlog| tlog.public_key.as_ref())
+-            .filter(|key| is_timerange_valid(key.valid_for.as_ref(), false))
+-            .filter_map(|key| key.raw_bytes.as_ref())
+-            .map(|key_bytes| key_bytes.as_slice())
+-    }
+-
+-    #[inline]
+-    fn ca_keys(
+-        cas: &[CertificateAuthority],
+-        allow_expired: bool,
+-    ) -> impl Iterator<Item = &'_ [u8]> {
+-        cas.iter()
+-            .filter(move |ca| is_timerange_valid(ca.valid_for.as_ref(), allow_expired))
+-            .flat_map(|ca| ca.cert_chain.as_ref())
+-            .flat_map(|chain| chain.certificates.iter())
+-            .map(|cert| cert.raw_bytes.as_slice())
+-    }
+-}
+-
+-impl crate::trust::TrustRoot for SigstoreTrustRoot {
+-    /// Fetch Fulcio certificates from the given TUF repository or reuse
+-    /// the local cache if its contents are not outdated.
+-    ///
+-    /// The contents of the local cache are updated when they are outdated.
+-    fn fulcio_certs(&self) -> Result<Vec<CertificateDer>> {
+-        // Allow expired certificates: they may have been active when the
+-        // certificate was used to sign.
+-        let certs = Self::ca_keys(&self.trusted_root.certificate_authorities, true);
+-        let certs: Vec<_> = certs
+-            .map(|c| CertificateDer::from(c).into_owned())
+-            .collect();
+-
+-        if certs.is_empty() {
+-            Err(SigstoreError::TufMetadataError(
+-                "Fulcio certificates not found".into(),
+-            ))
+-        } else {
+-            Ok(certs)
+-        }
+-    }
+-
+-    /// Fetch Rekor public keys from the given TUF repository or reuse
+-    /// the local cache if it's not outdated.
+-    ///
+-    /// The contents of the local cache are updated when they are outdated.
+-    fn rekor_keys(&self) -> Result<Vec<&[u8]>> {
+-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.tlogs).collect();
+-
+-        if keys.len() != 1 {
+-            Err(SigstoreError::TufMetadataError(
+-                "Did not find exactly 1 active Rekor key".into(),
+-            ))
+-        } else {
+-            Ok(keys)
+-        }
+-    }
+-
+-    /// Fetch CTFE public keys from the given TUF repository or reuse
+-    /// the local cache if it's not outdated.
+-    ///
+-    /// The contents of the local cache are updated when they are outdated.
+-    fn ctfe_keys(&self) -> Result<Vec<&[u8]>> {
+-        let keys: Vec<_> = Self::tlog_keys(&self.trusted_root.ctlogs).collect();
+-
+-        if keys.is_empty() {
+-            Err(SigstoreError::TufMetadataError(
+-                "CTFE keys not found".into(),
+-            ))
+-        } else {
+-            Ok(keys)
+-        }
+-    }
+-}
+-
+-/// Given a `range`, checks that the the current time is not before `start`. If
+-/// `allow_expired` is `false`, also checks that the current time is not after
+-/// `end`.
+-fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
+-    let now = chrono::Utc::now().timestamp();
+-
+-    let start = range.and_then(|r| r.start.as_ref()).map(|t| t.seconds);
+-    let end = range.and_then(|r| r.end.as_ref()).map(|t| t.seconds);
+-
+-    match (start, end) {
+-        // If there was no validity period specified, the key is always valid.
+-        (None, _) => true,
+-        // Active: if the current time is before the starting period, we are not yet valid.
+-        (Some(start), _) if now < start => false,
+-        // If we want Expired keys, then we don't need to check the end.
+-        _ if allow_expired => true,
+-        // If there is no expiry date, the key is valid.
+-        (_, None) => true,
+-        // If we have an expiry date, check it.
+-        (_, Some(end)) => now <= end,
+-    }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
++    use crate::trust::TrustRoot;
++
+     use super::*;
+     use rstest::{fixture, rstest};
+     use std::fs;
+     use std::path::Path;
+-    use std::time::SystemTime;
+     use tempfile::TempDir;
+ 
+-    fn verify(root: &SigstoreTrustRoot, cache_dir: Option<&Path>) {
++    fn verify(root: &BundledTrustRoot, cache_dir: Option<&Path>) {
+         if let Some(cache_dir) = cache_dir {
+             assert!(
+                 cache_dir.join("trusted_root.json").exists(),
+@@ -252,18 +245,9 @@ mod tests {
+             );
+         }
+ 
+-        assert!(
+-            root.fulcio_certs().is_ok_and(|v| !v.is_empty()),
+-            "no Fulcio certs established"
+-        );
+-        assert!(
+-            root.rekor_keys().is_ok_and(|v| !v.is_empty()),
+-            "no Rekor keys established"
+-        );
+-        assert!(
+-            root.ctfe_keys().is_ok_and(|v| !v.is_empty()),
+-            "no CTFE keys established"
+-        );
++        assert!(root.ca_certs().is_ok(), "no Fulcio certs established");
++        assert!(root.tlog_keys().is_ok(), "no Rekor keys established");
++        assert!(root.ctfe_keys().is_ok(), "no CTFE keys established");
+     }
+ 
+     #[fixture]
+@@ -271,10 +255,15 @@ mod tests {
+         TempDir::new().expect("cannot create temp cache dir")
+     }
+ 
+-    async fn trust_root(cache: Option<&Path>) -> SigstoreTrustRoot {
+-        SigstoreTrustRoot::new(cache)
++    async fn trust_root(cache: Option<&Path>) -> BundledTrustRoot {
++        let trust_config = Instance::Prod
++            .trust_config(TrustRootOptions {
++                cache_dir: cache.map(|p| p.to_owned()),
++            })
+             .await
+-            .expect("failed to construct SigstoreTrustRoot")
++            .expect("failed to construct prod trust config");
++
++        trust_config.trust_root
+     }
+ 
+     #[rstest]
+@@ -301,35 +290,4 @@ mod tests {
+         let data = fs::read(&trusted_root_path).expect("failed to read from trusted root cache");
+         assert_ne!(data, outdated_data, "TUF cache was not properly updated");
+     }
+-
+-    #[test]
+-    fn test_is_timerange_valid() {
+-        fn range_from(start: i64, end: i64) -> TimeRange {
+-            let base = chrono::Utc::now();
+-            let start: SystemTime = (base + chrono::TimeDelta::seconds(start)).into();
+-            let end: SystemTime = (base + chrono::TimeDelta::seconds(end)).into();
+-
+-            TimeRange {
+-                start: Some(start.into()),
+-                end: Some(end.into()),
+-            }
+-        }
+-
+-        assert!(is_timerange_valid(None, true));
+-        assert!(is_timerange_valid(None, false));
+-
+-        // Test lower bound conditions
+-
+-        // Valid: 1 ago, 1 from now
+-        assert!(is_timerange_valid(Some(&range_from(-1, 1)), false));
+-        // Invalid: 1 from now, 1 from now
+-        assert!(!is_timerange_valid(Some(&range_from(1, 1)), false));
+-
+-        // Test upper bound conditions
+-
+-        // Invalid: 1 ago, 1 ago
+-        assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
+-        // Valid: 1 ago, 1 ago
+-        assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
+-    }
+ }
+diff --git a/tests/conformance/Cargo.toml b/tests/conformance/Cargo.toml
+index 1f2cc3d92e..b89f2a50fc 100644
+--- a/tests/conformance/Cargo.toml
++++ b/tests/conformance/Cargo.toml
+@@ -9,9 +9,12 @@ license = "Apache-2.0"
+ [dependencies]
+ clap = { version = "4.0.8", features = ["derive"] }
+ anyhow = "1.0.75"
+-serde_json = "1.0.107"
++serde_json = "1.0"
++serde = "1.0"
+ sigstore = { path = "../../", default-features = false, features = ["bundle", "sigstore-trust-root", "full-native-tls"] }
+ tracing-subscriber = "0.3"
++tokio = { version = "1.17", features = ["rt-multi-thread", "rt"] }
++tokio-util = { version = "0.7", features = ["io"] }
+ 
+ [[bin]]
+ name = "sigstore"
+diff --git a/tests/conformance/conformance.rs b/tests/conformance/conformance.rs
+index cccc0fcf7c..36d1688424 100644
+--- a/tests/conformance/conformance.rs
++++ b/tests/conformance/conformance.rs
+@@ -13,20 +13,33 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-// CLI implemented to specification:
+-// https://github.com/sigstore/sigstore-conformance/blob/main/docs/cli_protocol.md
++//! CLI implemented to specification:
++//! <https://github.com/sigstore/sigstore-conformance/blob/main/docs/cli_protocol.md>
+ 
+-use std::{fs, process::exit};
++use std::{path::Path, process::exit};
+ 
+ use clap::{Parser, Subcommand};
+ use sigstore::{
+-    bundle::sign::SigningContext,
+-    bundle::verify::{blocking::Verifier, policy},
++    bundle::{
++        sign::SigningContext,
++        verify::{policy, Verifier},
++    },
+     oauth::IdentityToken,
++    protobuf_specs::dev::sigstore::trustroot::v1::TrustedRoot,
++    trust::{
++        sigstore::{Instance, TrustRootOptions},
++        BundledTrustRoot, TrustConfig,
++    },
+ };
++use tokio::fs;
++use tokio_util::io::SyncIoBridge;
+ 
+ #[derive(Parser, Debug)]
+ struct Cli {
++    /// Presence indicates client should use Sigstore staging infrastructure
++    #[clap(long, global(true))]
++    staging: bool,
++
+     #[command(subcommand)]
+     command: Commands,
+ }
+@@ -39,85 +52,135 @@ enum Commands {
+     VerifyBundle(VerifyBundle),
+ }
+ 
++/// Sign with the signature and certificate flow
+ #[derive(Parser, Debug)]
+ struct Sign {
+-    // The OIDC identity token to use
++    /// The OIDC identity token to use
+     #[clap(long)]
+     identity_token: String,
+ 
+-    // The path to write the signature to
++    /// The path to write the signature to
+     #[clap(long)]
+     signature: String,
+ 
+-    // The path to write the signing certificate to
++    /// The path to write the signing certificate to
+     #[clap(long)]
+     certificate: String,
+ 
+-    // The artifact to sign
++    /// The artifact to sign
+     artifact: String,
+ }
+ 
++/// Sign with the bundle flow
+ #[derive(Parser, Debug)]
+ struct SignBundle {
+-    // The OIDC identity token to use
++    /// The OIDC identity token to use
+     #[clap(long)]
+     identity_token: String,
+ 
+-    // The path to write the bundle to
++    /// The path to write the bundle to
+     #[clap(long)]
+     bundle: String,
+ 
+-    // The artifact to sign
++    /// The artifact to sign
+     artifact: String,
+ }
+ 
++/// Verify with the signature and certificate flow
+ #[derive(Parser, Debug)]
+ struct Verify {
+-    // The path to the signature to verify
++    /// The path to the signature to verify
+     #[clap(long)]
+     signature: String,
+ 
+-    // The path to the signing certificate to verify
++    /// The path to the signing certificate to verify
+     #[clap(long)]
+     certificate: String,
+ 
+-    // The expected identity in the signing certificate's SAN extension
++    /// The expected identity in the signing certificate's SAN extension
+     #[clap(long)]
+     certificate_identity: String,
+ 
+-    // The expected OIDC issuer for the signing certificate
++    /// The expected OIDC issuer for the signing certificate
+     #[clap(long)]
+     certificate_oidc_issuer: String,
+ 
+-    // The path to the artifact to verify
++    /// The path of the custom trusted root to use to verify the bundle
++    #[clap(long)]
++    trusted_root: String,
++
++    /// The path to the artifact to verify
+     artifact: String,
+ }
+ 
++/// Verify with the bundle flow
+ #[derive(Parser, Debug)]
+ struct VerifyBundle {
+-    // The path to the Sigstore bundle to verify
++    /// The path to the Sigstore bundle to verify
+     #[clap(long)]
+     bundle: String,
+ 
+-    // The expected identity in the signing certificate's SAN extension
++    /// The expected identity in the signing certificate's SAN extension
+     #[clap(long)]
+     certificate_identity: String,
+ 
+-    // The expected OIDC issuer for the signing certificate
++    /// The expected OIDC issuer for the signing certificate
+     #[clap(long)]
+     certificate_oidc_issuer: String,
+ 
+-    // The path to the artifact to verify
++    /// The path of the custom trusted root to use to verify the bundle
++    #[clap(long)]
++    trusted_root: Option<String>,
++
++    /// The path to the artifact to verify
+     artifact: String,
+ }
+ 
+-fn main() {
++async fn read<P, T>(path: P) -> anyhow::Result<T>
++where
++    P: AsRef<Path>,
++    T: for<'de> serde::Deserialize<'de> + Send + 'static,
++{
++    let file = fs::File::open(path.as_ref()).await?;
++
++    Ok(tokio::task::spawn_blocking(move || -> _ {
++        serde_json::from_reader(SyncIoBridge::new(file))
++    })
++    .await??)
++}
++
++async fn write<P, T>(path: P, data: T) -> anyhow::Result<()>
++where
++    T: serde::Serialize + Send + 'static,
++    P: AsRef<Path>,
++{
++    let file = fs::File::create(path.as_ref()).await?;
++
++    Ok(tokio::task::spawn_blocking(move || -> _ {
++        serde_json::to_writer(SyncIoBridge::new(file), &data)
++    })
++    .await??)
++}
++
++#[tokio::main]
++async fn main() {
+     tracing_subscriber::fmt::init();
+     let cli = Cli::parse();
+ 
++    let instance = if cli.staging {
++        Instance::Staging
++    } else {
++        Instance::Prod
++    };
++
++    let trust = instance
++        .trust_config(TrustRootOptions { cache_dir: None })
++        .await
++        .unwrap();
++
+     let result = match cli.command {
+-        Commands::SignBundle(args) => sign_bundle(args),
+-        Commands::VerifyBundle(args) => verify_bundle(args),
++        Commands::SignBundle(args) => sign_bundle(args, trust).await,
++        Commands::VerifyBundle(args) => verify_bundle(args, trust).await,
+         _ => unimplemented!("sig/cert commands"),
+     };
+ 
+@@ -129,46 +192,52 @@ fn main() {
+     eprintln!("Operation succeeded!");
+ }
+ 
+-fn sign_bundle(args: SignBundle) -> anyhow::Result<()> {
++async fn sign_bundle(args: SignBundle, trust: TrustConfig<BundledTrustRoot>) -> anyhow::Result<()> {
+     let SignBundle {
+         identity_token,
+         bundle,
+         artifact,
+     } = args;
+     let identity_token = IdentityToken::try_from(identity_token.as_str())?;
+-    let bundle = fs::File::create(bundle)?;
+-    let mut artifact = fs::File::open(artifact)?;
++    let artifact = fs::File::open(artifact).await?;
+ 
+-    let context = SigningContext::production()?;
+-    let signer = context.blocking_signer(identity_token);
++    let context = SigningContext::new(trust).unwrap();
++    let signer = context.signer(identity_token).await?;
+ 
+-    let signing_artifact = signer?.sign(&mut artifact)?;
++    let signing_artifact = signer.sign(artifact).await?;
+     let bundle_data = signing_artifact.to_bundle();
+ 
+-    serde_json::to_writer(bundle, &bundle_data)?;
++    write(bundle, bundle_data).await?;
+ 
+     Ok(())
+ }
+ 
+-fn verify_bundle(args: VerifyBundle) -> anyhow::Result<()> {
++async fn verify_bundle(
++    args: VerifyBundle,
++    mut trust: TrustConfig<BundledTrustRoot>,
++) -> anyhow::Result<()> {
+     let VerifyBundle {
+         bundle,
+         certificate_identity,
+         certificate_oidc_issuer,
+         artifact,
++        trusted_root,
+     } = args;
+-    let bundle = fs::File::open(bundle)?;
+-    let mut artifact = fs::File::open(artifact)?;
++    let mut artifact = fs::File::open(artifact).await?;
+ 
+-    let bundle: sigstore::bundle::Bundle = serde_json::from_reader(bundle)?;
+-    let verifier = Verifier::production()?;
++    let bundle: sigstore::bundle::Bundle = read(bundle).await?;
+ 
+-    verifier.verify(
+-        &mut artifact,
+-        bundle,
+-        &policy::Identity::new(certificate_identity, certificate_oidc_issuer),
+-        true,
+-    )?;
++    if let Some(trusted_root) = trusted_root {
++        let tr_bundle: TrustedRoot = read(trusted_root).await?;
++        trust.trust_root = tr_bundle.into();
++    }
++
++    let verifier = Verifier::new(trust)?;
++    let policy = policy::Identity::new(certificate_identity, certificate_oidc_issuer);
++
++    verifier
++        .verify(&mut artifact, bundle, &policy, true)
++        .await?;
+ 
+     Ok(())
+ }
+diff --git a/trust_root/prod/root.json b/trust_root/prod/root.json
+index 38f80f9404..c0c228a21c 100644
+--- a/trust_root/prod/root.json
++++ b/trust_root/prod/root.json
+@@ -2,117 +2,117 @@
+ 	"signed": {
+ 		"_type": "root",
+ 		"spec_version": "1.0",
+-		"version": 5,
+-		"expires": "2023-04-18T18:13:43Z",
++		"version": 9,
++		"expires": "2024-09-12T06:53:10Z",
+ 		"keys": {
+-			"25a0eb450fd3ee2bd79218c963dce3f1cc6118badf251bf149f0bd07d5cabe99": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"1e1d65ce98b10addad4764febf7dda2d0436b3d3a3893579c0dddaea20e54849": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEXsz3SZXFb8jMV42j6pJlyjbjR8K\nN3Bwocexq6LMIb5qsWKOQvLN16NUefLc4HswOoumRsVVaajSpQS6fobkRw==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzBzVOmHCPojMVLSI364WiiV8NPrD\n6IgRxVliskz/v+y3JER5mcVGcONliDcWMC5J2lfHmjPNPhb4H7xm8LzfSA==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"2e61cd0cbf4a8f45809bda9f7f78c0d33ad11842ff94ae340873e2664dc843de": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"230e212616274a4195cdc28e9fce782c20e6c720f1a811b40f98228376bdd3ac": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE0ghrh92Lw1Yr3idGV5WqCtMDB8Cx\n+D8hdC4w2ZLNIplVRoVGLskYa3gheMyOjiJ8kPi15aQ2//7P+oj7UvJPGw==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELrWvNt94v4R085ELeeCMxHp7PldF\n0/T1GxukUh2ODuggLGJE0pc1e8CSBf6CS91Fwo9FUOuRsjBUld+VqSyCdQ==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"45b283825eb184cabd582eb17b74fc8ed404f68cf452acabdad2ed6f90ce216b": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"3c344aa068fd4cc4e87dc50b612c02431fbc771e95003993683a2b0bf260cf0e": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELrWvNt94v4R085ELeeCMxHp7PldF\n0/T1GxukUh2ODuggLGJE0pc1e8CSBf6CS91Fwo9FUOuRsjBUld+VqSyCdQ==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEy8XKsmhBYDI8Jc0GwzBxeKax0cm5\nSTKEU65HPFunUn41sT8pi0FjM4IkHz/YUmwmLUO0Wt7lxhj6BkLIK4qYAw==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"7f7513b25429a64473e10ce3ad2f3da372bbdd14b65d07bbaf547e7c8bbbe62b": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"923bb39e60dd6fa2c31e6ea55473aa93b64dd4e53e16fbe42f6a207d3f97de2d": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEinikSsAQmYkNeH5eYq/CnIzLaacO\nxlSaawQDOwqKy/tCqxq5xxPSJc21K4WIhs9GyOkKfzueY3GILzcMJZ4cWw==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRiGr5+j+3J5SsH+Ztr5nE2H2wO7\nBV+nO3s93gLca18qTOzHY1oWyAGDykMSsGTUBSt9D+An0KfKsD2mfSM42Q==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"e1863ba02070322ebc626dcecf9d881a3a38c35c3b41a83765b6ad6c37eaec2a": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"e2f59acb9488519407e18cbfc9329510be03c04aca9929d2f0301343fec85523": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRiGr5+j+3J5SsH+Ztr5nE2H2wO7\nBV+nO3s93gLca18qTOzHY1oWyAGDykMSsGTUBSt9D+An0KfKsD2mfSM42Q==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEinikSsAQmYkNeH5eYq/CnIzLaacO\nxlSaawQDOwqKy/tCqxq5xxPSJc21K4WIhs9GyOkKfzueY3GILzcMJZ4cWw==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"f5312f542c21273d9485a49394386c4575804770667f2ddb59b3bf0669fddd2f": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"ec81669734e017996c5b85f3d02c3de1dd4637a152019fe1af125d2f9368b95e": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzBzVOmHCPojMVLSI364WiiV8NPrD\n6IgRxVliskz/v+y3JER5mcVGcONliDcWMC5J2lfHmjPNPhb4H7xm8LzfSA==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEXsz3SZXFb8jMV42j6pJlyjbjR8K\nN3Bwocexq6LMIb5qsWKOQvLN16NUefLc4HswOoumRsVVaajSpQS6fobkRw==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			},
+-			"ff51e17fcf253119b7033f6f57512631da4a0969442afcf9fc8b141c7f2be99c": {
+-				"keytype": "ecdsa-sha2-nistp256",
++			"fdfa83a07b5a83589b87ded41f77f39d232ad91f7cce52868dacd06ba089849f": {
++				"keytype": "ecdsa",
+ 				"scheme": "ecdsa-sha2-nistp256",
+ 				"keyid_hash_algorithms": [
+ 					"sha256",
+ 					"sha512"
+ 				],
+ 				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEy8XKsmhBYDI8Jc0GwzBxeKax0cm5\nSTKEU65HPFunUn41sT8pi0FjM4IkHz/YUmwmLUO0Wt7lxhj6BkLIK4qYAw==\n-----END PUBLIC KEY-----\n"
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE0ghrh92Lw1Yr3idGV5WqCtMDB8Cx\n+D8hdC4w2ZLNIplVRoVGLskYa3gheMyOjiJ8kPi15aQ2//7P+oj7UvJPGw==\n-----END PUBLIC KEY-----\n"
+ 				}
+ 			}
+ 		},
+ 		"roles": {
+ 			"root": {
+ 				"keyids": [
+-					"ff51e17fcf253119b7033f6f57512631da4a0969442afcf9fc8b141c7f2be99c",
+-					"25a0eb450fd3ee2bd79218c963dce3f1cc6118badf251bf149f0bd07d5cabe99",
+-					"f5312f542c21273d9485a49394386c4575804770667f2ddb59b3bf0669fddd2f",
+-					"7f7513b25429a64473e10ce3ad2f3da372bbdd14b65d07bbaf547e7c8bbbe62b",
+-					"2e61cd0cbf4a8f45809bda9f7f78c0d33ad11842ff94ae340873e2664dc843de"
++					"3c344aa068fd4cc4e87dc50b612c02431fbc771e95003993683a2b0bf260cf0e",
++					"ec81669734e017996c5b85f3d02c3de1dd4637a152019fe1af125d2f9368b95e",
++					"1e1d65ce98b10addad4764febf7dda2d0436b3d3a3893579c0dddaea20e54849",
++					"e2f59acb9488519407e18cbfc9329510be03c04aca9929d2f0301343fec85523",
++					"fdfa83a07b5a83589b87ded41f77f39d232ad91f7cce52868dacd06ba089849f"
+ 				],
+ 				"threshold": 3
+ 			},
+ 			"snapshot": {
+ 				"keyids": [
+-					"45b283825eb184cabd582eb17b74fc8ed404f68cf452acabdad2ed6f90ce216b"
++					"230e212616274a4195cdc28e9fce782c20e6c720f1a811b40f98228376bdd3ac"
+ 				],
+ 				"threshold": 1
+ 			},
+ 			"targets": {
+ 				"keyids": [
+-					"ff51e17fcf253119b7033f6f57512631da4a0969442afcf9fc8b141c7f2be99c",
+-					"25a0eb450fd3ee2bd79218c963dce3f1cc6118badf251bf149f0bd07d5cabe99",
+-					"f5312f542c21273d9485a49394386c4575804770667f2ddb59b3bf0669fddd2f",
+-					"7f7513b25429a64473e10ce3ad2f3da372bbdd14b65d07bbaf547e7c8bbbe62b",
+-					"2e61cd0cbf4a8f45809bda9f7f78c0d33ad11842ff94ae340873e2664dc843de"
++					"3c344aa068fd4cc4e87dc50b612c02431fbc771e95003993683a2b0bf260cf0e",
++					"ec81669734e017996c5b85f3d02c3de1dd4637a152019fe1af125d2f9368b95e",
++					"1e1d65ce98b10addad4764febf7dda2d0436b3d3a3893579c0dddaea20e54849",
++					"e2f59acb9488519407e18cbfc9329510be03c04aca9929d2f0301343fec85523",
++					"fdfa83a07b5a83589b87ded41f77f39d232ad91f7cce52868dacd06ba089849f"
+ 				],
+ 				"threshold": 3
+ 			},
+ 			"timestamp": {
+ 				"keyids": [
+-					"e1863ba02070322ebc626dcecf9d881a3a38c35c3b41a83765b6ad6c37eaec2a"
++					"923bb39e60dd6fa2c31e6ea55473aa93b64dd4e53e16fbe42f6a207d3f97de2d"
+ 				],
+ 				"threshold": 1
+ 			}
+@@ -122,35 +122,43 @@
+ 	"signatures": [
+ 		{
+ 			"keyid": "ff51e17fcf253119b7033f6f57512631da4a0969442afcf9fc8b141c7f2be99c",
+-			"sig": "3045022100fc1c2be509ce50ea917bbad1d9efe9d96c8c2ebea04af2717aa3d9c6fe617a75022012eef282a19f2d8bd4818aa333ef48a06489f49d4d34a20b8fe8fc867bb25a7a"
++			"sig": "30450221008b78f894c3cfed3bd486379c4e0e0dfb3e7dd8cbc4d5598d2818eea1ba3c7550022029d3d06e89d04d37849985dc46c0e10dc5b1fc68dc70af1ec9910303a1f3ee2f"
+ 		},
+ 		{
+ 			"keyid": "25a0eb450fd3ee2bd79218c963dce3f1cc6118badf251bf149f0bd07d5cabe99",
+-			"sig": "30450221008a4392ae5057fc00778b651e61fea244766a4ae58db84d9f1d3810720ab0f3b702207c49e59e8031318caf02252ecea1281cecc1e5986c309a9cef61f455ecf7165d"
++			"sig": "30450221009e6b90b935e09b837a90d4402eaa27d5ea26eb7891948ba0ed7090841248f436022003dc2251c4d4a7999b91e9ad0868765ae09ac7269279f2a7899bafef7a2d9260"
+ 		},
+ 		{
+-			"keyid": "7f7513b25429a64473e10ce3ad2f3da372bbdd14b65d07bbaf547e7c8bbbe62b",
+-			"sig": "3046022100da1b8dc5d53aaffbbfac98de3e23ee2d2ad3446a7bed09fac0f88bae19be2587022100b681c046afc3919097dfe794e0d819be891e2e850aade315bec06b0c4dea221b"
++			"keyid": "f5312f542c21273d9485a49394386c4575804770667f2ddb59b3bf0669fddd2f",
++			"sig": "30440220099e907dcf90b7b6e109fd1d6e442006fccbb48894aaaff47ab824b03fb35d0d02202aa0a06c21a4233f37900a48bc8777d3b47f59e3a38616ce631a04df57f96736"
+ 		},
+ 		{
+-			"keyid": "2e61cd0cbf4a8f45809bda9f7f78c0d33ad11842ff94ae340873e2664dc843de",
+-			"sig": "3046022100b534e0030e1b271133ecfbdf3ba9fbf3becb3689abea079a2150afbb63cdb7c70221008c39a718fd9495f249b4ab8788d5b9dc269f0868dbe38b272f48207359d3ded9"
++			"keyid": "3c344aa068fd4cc4e87dc50b612c02431fbc771e95003993683a2b0bf260cf0e",
++			"sig": "30450221008b78f894c3cfed3bd486379c4e0e0dfb3e7dd8cbc4d5598d2818eea1ba3c7550022029d3d06e89d04d37849985dc46c0e10dc5b1fc68dc70af1ec9910303a1f3ee2f"
+ 		},
+ 		{
+-			"keyid": "2f64fb5eac0cf94dd39bb45308b98920055e9a0d8e012a7220787834c60aef97",
+-			"sig": "3045022100fc1c2be509ce50ea917bbad1d9efe9d96c8c2ebea04af2717aa3d9c6fe617a75022012eef282a19f2d8bd4818aa333ef48a06489f49d4d34a20b8fe8fc867bb25a7a"
++			"keyid": "ec81669734e017996c5b85f3d02c3de1dd4637a152019fe1af125d2f9368b95e",
++			"sig": "30450221009e6b90b935e09b837a90d4402eaa27d5ea26eb7891948ba0ed7090841248f436022003dc2251c4d4a7999b91e9ad0868765ae09ac7269279f2a7899bafef7a2d9260"
+ 		},
+ 		{
+-			"keyid": "eaf22372f417dd618a46f6c627dbc276e9fd30a004fc94f9be946e73f8bd090b",
+-			"sig": "30450221008a4392ae5057fc00778b651e61fea244766a4ae58db84d9f1d3810720ab0f3b702207c49e59e8031318caf02252ecea1281cecc1e5986c309a9cef61f455ecf7165d"
++			"keyid": "e2f59acb9488519407e18cbfc9329510be03c04aca9929d2f0301343fec85523",
++			"sig": "304502200e5613b901e0f3e08eceabddc73f98b50ddf892e998d0b369c6e3d451ac48875022100940cf92d1f43ee2e5cdbb22572bb52925ed3863a688f7ffdd4bd2e2e56f028b3"
+ 		},
+ 		{
+-			"keyid": "f505595165a177a41750a8e864ed1719b1edfccd5a426fd2c0ffda33ce7ff209",
+-			"sig": "3046022100da1b8dc5d53aaffbbfac98de3e23ee2d2ad3446a7bed09fac0f88bae19be2587022100b681c046afc3919097dfe794e0d819be891e2e850aade315bec06b0c4dea221b"
++			"keyid": "2e61cd0cbf4a8f45809bda9f7f78c0d33ad11842ff94ae340873e2664dc843de",
++			"sig": "304502202cff44f2215d7a47b28b8f5f580c2cfbbd1bfcfcbbe78de323045b2c0badc5e9022100c743949eb3f4ea5a4b9ae27ac6eddea1f0ff9bfd004f8a9a9d18c6e4142b6e75"
+ 		},
+ 		{
+-			"keyid": "75e867ab10e121fdef32094af634707f43ddd79c6bab8ad6c5ab9f03f4ea8c90",
+-			"sig": "3046022100b534e0030e1b271133ecfbdf3ba9fbf3becb3689abea079a2150afbb63cdb7c70221008c39a718fd9495f249b4ab8788d5b9dc269f0868dbe38b272f48207359d3ded9"
++			"keyid": "1e1d65ce98b10addad4764febf7dda2d0436b3d3a3893579c0dddaea20e54849",
++			"sig": "30440220099e907dcf90b7b6e109fd1d6e442006fccbb48894aaaff47ab824b03fb35d0d02202aa0a06c21a4233f37900a48bc8777d3b47f59e3a38616ce631a04df57f96736"
++		},
++		{
++			"keyid": "fdfa83a07b5a83589b87ded41f77f39d232ad91f7cce52868dacd06ba089849f",
++			"sig": "304502202cff44f2215d7a47b28b8f5f580c2cfbbd1bfcfcbbe78de323045b2c0badc5e9022100c743949eb3f4ea5a4b9ae27ac6eddea1f0ff9bfd004f8a9a9d18c6e4142b6e75"
++		},
++		{
++			"keyid": "7f7513b25429a64473e10ce3ad2f3da372bbdd14b65d07bbaf547e7c8bbbe62b",
++			"sig": "304502200e5613b901e0f3e08eceabddc73f98b50ddf892e998d0b369c6e3d451ac48875022100940cf92d1f43ee2e5cdbb22572bb52925ed3863a688f7ffdd4bd2e2e56f028b3"
+ 		}
+ 	]
+ }
+\ No newline at end of file
+diff --git a/trust_root/prod/signing_config.json b/trust_root/prod/signing_config.json
+new file mode 100644
+index 0000000000..2d7aae2038
+--- /dev/null
++++ b/trust_root/prod/signing_config.json
+@@ -0,0 +1,8 @@
++{
++  "ca_url": "https://fulcio.sigstore.dev",
++  "oidc_url": "oauth2.sigstore.dev/auth",
++  "tlog_urls": [
++    "https://rekor.sigstore.dev"
++  ],
++  "tsa_urls": []
++}
+diff --git a/trust_root/prod/trusted_root.json b/trust_root/prod/trusted_root.json
+index bb4e6fcd88..5ed62811e1 100644
+--- a/trust_root/prod/trusted_root.json
++++ b/trust_root/prod/trusted_root.json
+@@ -44,10 +44,10 @@
+       "certChain": {
+         "certificates": [
+           {
+-            "rawBytes": "MIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMwKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0yMTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3JlLmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7XeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxexX69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92jYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRYwB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQKsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCMWP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ"
++            "rawBytes": "MIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMwKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0yMjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3JlLmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV77LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYBBQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjpKFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZIzj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJRnZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsPmygUY7Ii2zbdCdliiow="
+           },
+           {
+-            "rawBytes": "MIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMwKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0yMjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3JlLmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV77LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYBBQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjpKFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZIzj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJRnZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsPmygUY7Ii2zbdCdliiow="
++            "rawBytes": "MIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMwKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0yMTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3JlLmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7XeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxexX69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92jYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRYwB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQKsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCMWP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ"
+           }
+         ]
+       },
+@@ -87,5 +87,28 @@
+       }
+     }
+   ],
+-  "timestampAuthorities": []
++  "timestampAuthorities": [
++    {
++      "subject": {
++        "organization": "GitHub, Inc.",
++        "commonName": "Internal Services Root"
++      },
++      "certChain": {
++        "certificates": [
++          {
++            "rawBytes": "MIIB3DCCAWKgAwIBAgIUchkNsH36Xa04b1LqIc+qr9DVecMwCgYIKoZIzj0EAwMwMjEVMBMGA1UEChMMR2l0SHViLCBJbmMuMRkwFwYDVQQDExBUU0EgaW50ZXJtZWRpYXRlMB4XDTIzMDQxNDAwMDAwMFoXDTI0MDQxMzAwMDAwMFowMjEVMBMGA1UEChMMR2l0SHViLCBJbmMuMRkwFwYDVQQDExBUU0EgVGltZXN0YW1waW5nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEUD5ZNbSqYMd6r8qpOOEX9ibGnZT9GsuXOhr/f8U9FJugBGExKYp40OULS0erjZW7xV9xV52NnJf5OeDq4e5ZKqNWMFQwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMIMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUaW1RudOgVt0leqY0WKYbuPr47wAwCgYIKoZIzj0EAwMDaAAwZQIwbUH9HvD4ejCZJOWQnqAlkqURllvu9M8+VqLbiRK+zSfZCZwsiljRn8MQQRSkXEE5AjEAg+VxqtojfVfu8DhzzhCx9GKETbJHb19iV72mMKUbDAFmzZ6bQ8b54Zb8tidy5aWe"
++          },
++          {
++            "rawBytes": "MIICEDCCAZWgAwIBAgIUX8ZO5QXP7vN4dMQ5e9sU3nub8OgwCgYIKoZIzj0EAwMwODEVMBMGA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2aWNlcyBSb290MB4XDTIzMDQxNDAwMDAwMFoXDTI4MDQxMjAwMDAwMFowMjEVMBMGA1UEChMMR2l0SHViLCBJbmMuMRkwFwYDVQQDExBUU0EgaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEvMLY/dTVbvIJYANAuszEwJnQE1llftynyMKIMhh48HmqbVr5ygybzsLRLVKbBWOdZ21aeJz+gZiytZetqcyF9WlER5NEMf6JV7ZNojQpxHq4RHGoGSceQv/qvTiZxEDKo2YwZDAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQUaW1RudOgVt0leqY0WKYbuPr47wAwHwYDVR0jBBgwFoAU9NYYlobnAG4c0/qjxyH/lq/wz+QwCgYIKoZIzj0EAwMDaQAwZgIxAK1B185ygCrIYFlIs3GjswjnwSMG6LY8woLVdakKDZxVa8f8cqMs1DhcxJ0+09w95QIxAO+tBzZk7vjUJ9iJgD4R6ZWTxQWKqNm74jO99o+o9sv4FI/SZTZTFyMn0IJEHdNmyA=="
++          },
++          {
++            "rawBytes": "MIIB9DCCAXqgAwIBAgIUa/JAkdUjK4JUwsqtaiRJGWhqLSowCgYIKoZIzj0EAwMwODEVMBMGA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2aWNlcyBSb290MB4XDTIzMDQxNDAwMDAwMFoXDTMzMDQxMTAwMDAwMFowODEVMBMGA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2aWNlcyBSb290MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEf9jFAXxz4kx68AHRMOkFBhflDcMTvzaXz4x/FCcXjJ/1qEKon/qPIGnaURskDtyNbNDOpeJTDDFqt48iMPrnzpx6IZwqemfUJN4xBEZfza+pYt/iyod+9tZr20RRWSv/o0UwQzAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBAjAdBgNVHQ4EFgQU9NYYlobnAG4c0/qjxyH/lq/wz+QwCgYIKoZIzj0EAwMDaAAwZQIxALZLZ8BgRXzKxLMMN9VIlO+e4hrBnNBgF7tz7Hnrowv2NetZErIACKFymBlvWDvtMAIwZO+ki6ssQ1bsZo98O8mEAf2NZ7iiCgDDU0Vwjeco6zyeh0zBTs9/7gV6AHNQ53xD"
++          }
++        ]
++      },
++      "validFor": {
++        "start": "2023-04-14T00:00:00.000Z"
++      }
++    }
++  ]
+ }
+diff --git a/trust_root/staging/root.json b/trust_root/staging/root.json
+new file mode 100644
+index 0000000000..e506177b8e
+--- /dev/null
++++ b/trust_root/staging/root.json
+@@ -0,0 +1,65 @@
++{
++	"signed": {
++		"_type": "root",
++		"spec_version": "1.0",
++		"version": 4,
++		"expires": "2029-03-05T22:50:21Z",
++		"keys": {
++			"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600": {
++				"keytype": "ecdsa-sha2-nistp256",
++				"scheme": "ecdsa-sha2-nistp256",
++				"keyid_hash_algorithms": [
++					"sha256",
++					"sha512"
++				],
++				"keyval": {
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXMZ7rD8tWDE4lK/+naJN7INMxNC7\nbMMANDqTQE7WpzyzffWOg59hc/MwbvJtvuxhO9mEu3GD3Cn0HffFlmVRiA==\n-----END PUBLIC KEY-----\n"
++				}
++			},
++			"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda": {
++				"keytype": "ecdsa-sha2-nistp256",
++				"scheme": "ecdsa-sha2-nistp256",
++				"keyid_hash_algorithms": [
++					"sha256",
++					"sha512"
++				],
++				"keyval": {
++					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL3vL/VeaH6nBbo4rekyO4cc/QthS\n+nlyJXCXSnyIMAtLmVTa8Pf0qG6YIVaR0TmLkyk9YoSVsZakxuMTuaEwrg==\n-----END PUBLIC KEY-----\n"
++				}
++			}
++		},
++		"roles": {
++			"root": {
++				"keyids": [
++					"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda"
++				],
++				"threshold": 1
++			},
++			"snapshot": {
++				"keyids": [
++					"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600"
++				],
++				"threshold": 1
++			},
++			"targets": {
++				"keyids": [
++					"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda"
++				],
++				"threshold": 1
++			},
++			"timestamp": {
++				"keyids": [
++					"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600"
++				],
++				"threshold": 1
++			}
++		},
++		"consistent_snapshot": true
++	},
++	"signatures": [
++		{
++			"keyid": "c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda",
++			"sig": "3044022006fe8fff51d18753aeff141f81a962b8ac33f49831bbbec1334b2733ea96890002206e6f343c9c7b98a2ebd1f0b51aa5286ed3a4d48e271c77d88ea77499231bff5c"
++		}
++	]
++}
+\ No newline at end of file
+diff --git a/trust_root/staging/signing_config.json b/trust_root/staging/signing_config.json
+new file mode 100644
+index 0000000000..724b9aca80
+--- /dev/null
++++ b/trust_root/staging/signing_config.json
+@@ -0,0 +1,8 @@
++{
++  "ca_url": "https://fulcio.sigstage.dev",
++  "oidc_url": "oauth2.sigstage.dev/auth",
++  "tlog_urls": [
++    "https://rekor.sigstage.dev"
++  ],
++  "tsa_urls": []
++}
+diff --git a/trust_root/staging/trusted_root.json b/trust_root/staging/trusted_root.json
+new file mode 100644
+index 0000000000..f5b8853e75
+--- /dev/null
++++ b/trust_root/staging/trusted_root.json
+@@ -0,0 +1,112 @@
++{
++  "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
++  "tlogs": [
++    {
++      "baseUrl": "https://rekor.sigstage.dev",
++      "hashAlgorithm": "SHA2_256",
++      "publicKey": {
++        "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDODRU688UYGuy54mNUlaEBiQdTE9nYLr0lg6RXowI/QV/RE1azBn4Eg5/2uTOMbhB1/gfcHzijzFi9Tk+g1Prg==",
++        "keyDetails": "PKIX_ECDSA_P256_SHA_256",
++        "validFor": {
++          "start": "2021-01-12T11:53:27.000Z"
++        }
++      },
++      "logId": {
++        "keyId": "0y8wo8MtY5wrdiIFohx7sHeI5oKDpK5vQhGHI6G+pJY="
++      }
++    }
++  ],
++  "certificateAuthorities": [
++    {
++      "subject": {
++        "organization": "sigstore.dev",
++        "commonName": "sigstore"
++      },
++      "uri": "https://fulcio.sigstage.dev",
++      "certChain": {
++        "certificates": [
++          {
++            "rawBytes": "MIICGTCCAaCgAwIBAgITJta/okfgHvjabGm1BOzuhrwA1TAKBggqhkjOPQQDAzAqMRUwEwYDVQQKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIyMDQxNDIxMzg0MFoXDTMyMDMyMjE2NTA0NVowNzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRlcm1lZGlhdGUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAASosAySWJQ/tK5r8T5aHqavk0oI+BKQbnLLdmOMRXHQF/4Hx9KtNfpcdjH9hNKQSBxSlLFFN3tvFCco0qFBzWYwZtsYsBe1l91qYn/9VHFTaEVwYQWIJEEvrs0fvPuAqjajezB5MA4GA1UdDwEB/wQEAwIBBjATBgNVHSUEDDAKBggrBgEFBQcDAzASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBRxhjCmFHxib/n31vQFGn9f/+tvrDAfBgNVHSMEGDAWgBT/QjK6aH2rOnCv3AzUGuI+h49mZTAKBggqhkjOPQQDAwNnADBkAjAM1lbKkcqQlE/UspMTbWNo1y2TaJ44tx3l/FJFceTSdDZ+0W1OHHeU4twie/lq8XgCMHQxgEv26xNNiAGyPXbkYgrDPvbOqp0UeWX4mJnLSrBr3aN/KX1SBrKQu220FmVL0Q=="
++          },
++          {
++            "rawBytes": "MIIB9jCCAXugAwIBAgITDdEJvluliE0AzYaIE4jTMdnFTzAKBggqhkjOPQQDAzAqMRUwEwYDVQQKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIyMDMyNTE2NTA0NloXDTMyMDMyMjE2NTA0NVowKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTB2MBAGByqGSM49AgEGBSuBBAAiA2IABMo9BUNk9QIYisYysC24+2OytoV72YiLonYcqR3yeVnYziPt7Xv++CYE8yoCTiwedUECCWKOcvQKRCJZb9ht4Hzy+VvBx36hK+C6sECCSR0x6pPSiz+cTk1f788ZjBlUZaNjMGEwDgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFP9CMrpofas6cK/cDNQa4j6Hj2ZlMB8GA1UdIwQYMBaAFP9CMrpofas6cK/cDNQa4j6Hj2ZlMAoGCCqGSM49BAMDA2kAMGYCMQD+kojuzMwztNay9Ibzjuk//ZL5m6T2OCsm45l1lY004pcb984L926BowodoirFMcMCMQDIJtFHhP/1D3a+M3dAGomOb6O4CmTry3TTPbPsAFnv22YA0Y+P21NVoxKDjdu0tkw="
++          }
++        ]
++      },
++      "validFor": {
++        "start": "2022-04-14T21:38:40.000Z"
++      }
++    }
++  ],
++  "ctlogs": [
++    {
++      "baseUrl": "https://ctfe.sigstage.dev/test",
++      "hashAlgorithm": "SHA2_256",
++      "publicKey": {
++        "rawBytes": "MIICCgKCAgEA27A2MPQXm0I0v7/Ly5BIauDjRZF5Jor9vU+QheoE2UIIsZHcyYq3slHzSSHy2lLj1ZD2d91CtJ492ZXqnBmsr4TwZ9jQ05tW2mGIRI8u2DqN8LpuNYZGz/f9SZrjhQQmUttqWmtu3UoLfKz6NbNXUnoo+NhZFcFRLXJ8VporVhuiAmL7zqT53cXR3yQfFPCUDeGnRksnlhVIAJc3AHZZSHQJ8DEXMhh35TVv2nYhTI3rID7GwjXXw4ocz7RGDD37ky6p39Tl5NB71gT1eSqhZhGHEYHIPXraEBd5+3w9qIuLWlp5Ej/K6Mu4ELioXKCUimCbwy+Cs8UhHFlqcyg4AysOHJwIadXIa8LsY51jnVSGrGOEBZevopmQPNPtyfFY3dmXSS+6Z3RD2Gd6oDnNGJzpSyEk410Ag5uvNDfYzJLCWX9tU8lIxNwdFYmIwpd89HijyRyoGnoJ3entd63cvKfuuix5r+GHyKp1Xm1L5j5AWM6P+z0xigwkiXnt+adexAl1J9wdDxv/pUFEESRF4DG8DFGVtbdH6aR1A5/vD4krO4tC1QYUSeyL5Mvsw8WRqIFHcXtgybtxylljvNcGMV1KXQC8UFDmpGZVDSHx6v3e/BHMrZ7gjoCCfVMZ/cFcQi0W2AIHPYEMH/C95J2r4XbHMRdYXpovpOoT5Ca78gsCAwEAAQ==",
++        "keyDetails": "PKCS1_RSA_PKCS1V5",
++        "validFor": {
++          "start": "2021-03-14T00:00:00.000Z",
++          "end": "2022-07-31T00:00:00.000Z"
++        }
++      },
++      "logId": {
++        "keyId": "G3wUKk6ZK6ffHh/FdCRUE2wVekyzHEEIpSG4savnv0w="
++      }
++    },
++    {
++      "baseUrl": "https://ctfe.sigstage.dev/2022",
++      "hashAlgorithm": "SHA2_256",
++      "publicKey": {
++        "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEh99xuRi6slBFd8VUJoK/rLigy4bYeSYWO/fE6Br7r0D8NpMI94+A63LR/WvLxpUUGBpY8IJA3iU2telag5CRpA==",
++        "keyDetails": "PKIX_ECDSA_P256_SHA_256",
++        "validFor": {
++          "start": "2022-07-01T00:00:00.000Z",
++          "end": "2022-07-31T00:00:00.000Z"
++        }
++      },
++      "logId": {
++        "keyId": "++JKOMQt7SJ3ynUHnCfnDhcKP8/58J4TueMqXuk3HmA="
++      }
++    },
++    {
++      "baseUrl": "https://ctfe.sigstage.dev/2022-2",
++      "hashAlgorithm": "SHA2_256",
++      "publicKey": {
++        "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8gEDKNme8AnXuPBgHjrtXdS6miHqc24CRblNEOFpiJRngeq8Ko73Y+K18yRYVf1DXD4AVLwvKyzdNdl5n0jUSQ==",
++        "keyDetails": "PKIX_ECDSA_P256_SHA_256",
++        "validFor": {
++          "start": "2022-07-01T00:00:00.000Z"
++        }
++      },
++      "logId": {
++        "keyId": "KzC83GiIyeLh2CYpXnQfSDkxlgLynDPLXkNA/rKshno="
++      }
++    }
++  ],
++  "timestampAuthorities": [
++    {
++      "subject": {
++        "organization": "GitHub, Inc.",
++        "commonName": "Internal Services Root - staging"
++      },
++      "uri": "tsa.github.internal",
++      "certChain": {
++        "certificates": [
++          {
++            "rawBytes": "MIICEzCCAZigAwIBAgIUMpRykCcZaSOBipYce6r2DlnM7vUwCgYIKoZIzj0EAwMwPDEVMBMGA1UEChMMR2l0SHViLCBJbmMuMSMwIQYDVQQDExpUU0EgaW50ZXJtZWRpYXRlIC0gc3RhZ2luZzAeFw0yMzA2MTQxMjAwMDBaFw0yNDA2MTMxMjAwMDBaMDwxFTATBgNVBAoTDEdpdEh1YiwgSW5jLjEjMCEGA1UEAxMaVFNBIFRpbWVzdGFtcGluZyAtIHN0YWdpbmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATWAMg1BEHAzb03PHUKJiRJZdXcKIL0K/ks3Ylq5F5YDRIxUN4o8yeIaCWXa6i16zi8nXMFsa+3XrYM8mUyi9F6o3gwdjAOBgNVHQ8BAf8EBAMCB4AwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUr+RZdcTNo31p3FuR0pajelcnr40wHwYDVR0jBBgwFoAUCmpQzrB6hAnlizGx37LrhKEzsT4wFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgwCgYIKoZIzj0EAwMDaQAwZgIxAIPUlZB2/p5rpCM3HCn1R8G5TIIW6aZPKtfPWDkNQY0bpFu6e8Dkm2TV3jfgYExuBgIxAOA+vTlDDJoz/qTMMs8VSpw3AMgktlMEhd8V0E+aLW5OizfphuiidkqkqkbCwRSW1w=="
++          },
++          {
++            "rawBytes": "MIICNzCCAb6gAwIBAgIUUXRsBKgGXjrJbdJCQPJMsjfyJcYwCgYIKoZIzj0EAwMwQjEVMBMGA1UEChMMR2l0SHViLCBJbmMuMSkwJwYDVQQDEyBJbnRlcm5hbCBTZXJ2aWNlcyBSb290IC0gc3RhZ2luZzAeFw0yMzA2MTQwMDAwMDBaFw0yODA2MTIwMDAwMDBaMDwxFTATBgNVBAoTDEdpdEh1YiwgSW5jLjEjMCEGA1UEAxMaVFNBIGludGVybWVkaWF0ZSAtIHN0YWdpbmcwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAS/upihrvu/9+w1Ybfog3B1a8KfQa1bn7DLcJz2iumo+oCfg2bcbyRWygu8zRmrzJKp4HgQHC4LZJEEWm/MNIN1o6wVVmiDTZw01tk4aInmRVF13VKMscdzW5Ho4sYaeOejezB5MA4GA1UdDwEB/wQEAwIBBjATBgNVHSUEDDAKBggrBgEFBQcDCDASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBQKalDOsHqECeWLMbHfsuuEoTOxPjAfBgNVHSMEGDAWgBR04GYtT79vaQmAEPPEte8q+W1KRTAKBggqhkjOPQQDAwNnADBkAjBOTWZP1QYnmHpFqL73eSzhmSLiHs9pXsQghK0p8pvlAg0R9bxAyXGIZ8qx+k2iIGcCMDRQIScz0gu2Xef3++p2vFYouBsIKbqxv0raJuIlmGiYEvb22MDpAitevKAgqNVMEg=="
++          },
++          {
++            "rawBytes": "MIICCDCCAY6gAwIBAgIULHHP/UhbXJbdyZfT6gHgTzIYF4EwCgYIKoZIzj0EAwMwQjEVMBMGA1UEChMMR2l0SHViLCBJbmMuMSkwJwYDVQQDEyBJbnRlcm5hbCBTZXJ2aWNlcyBSb290IC0gc3RhZ2luZzAeFw0yMzA2MTQwMDAwMDBaFw0zMzA2MTEwMDAwMDBaMEIxFTATBgNVBAoTDEdpdEh1YiwgSW5jLjEpMCcGA1UEAxMgSW50ZXJuYWwgU2VydmljZXMgUm9vdCAtIHN0YWdpbmcwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAASocByKBUdzgtqRXcpe/AE5oPoDMWTQqz1/jUQOA8qoEjYBXg9gfGU5KHK/UdwQc4lxbZEA9nJS9vUQAMVV5Es9B4thNHThKR4hFmCL8kKIEoMzXx282Qr6x4ZHYk4tQsCjRTBDMA4GA1UdDwEB/wQEAwIBBjASBgNVHRMBAf8ECDAGAQH/AgECMB0GA1UdDgQWBBR04GYtT79vaQmAEPPEte8q+W1KRTAKBggqhkjOPQQDAwNoADBlAjBBOu3RtlH1FLvfHPhyoWJHgm+PSNrsWQLRkmWQgAfNPYsfO5fWyhAebMV3FpKVPBICMQCVaie4NAsGi+AHLDhGnPn4Qptz0LBH2So6AVJS24ICeDUDQxKeUTNkUsy6Qgg97/4="
++          }
++        ]
++      },
++      "validFor": {
++        "start": "2023-06-15T00:00:00Z"
++      }
++    }
++  ]
++}
+
+From d64858339ce287076797b72eac09c886272d7464 Mon Sep 17 00:00:00 2001
+From: Andrew Pan <andrew.pan@trailofbits.com>
+Date: Fri, 21 Jun 2024 16:16:10 -0500
+Subject: [PATCH 4/4] Cargo: add conformance harness to workspace
+
+Signed-off-by: Andrew Pan <andrew.pan@trailofbits.com>
+---
+ Cargo.toml                   |   4 +
+ trust_root/staging/root.json | 168 ++++++++++++++++++++++-------------
+ 2 files changed, 109 insertions(+), 63 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index f849e9b7c1..3240081260 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8,6 +8,10 @@ license = "Apache-2.0"
+ readme = "README.md"
+ repository = "https://github.com/sigstore/sigstore-rs"
+ 
++[workspace]
++members = ["tests/conformance"]
++resolver = "2"
++
+ [features]
+ default = ["full-native-tls", "cached-client", "sigstore-trust-root", "bundle"]
+ wasm = ["getrandom/js", "ring/wasm32_unknown_unknown_js", "chrono/wasmbind"]
+diff --git a/trust_root/staging/root.json b/trust_root/staging/root.json
+index e506177b8e..a9174b1f18 100644
+--- a/trust_root/staging/root.json
++++ b/trust_root/staging/root.json
+@@ -1,65 +1,107 @@
+ {
+-	"signed": {
+-		"_type": "root",
+-		"spec_version": "1.0",
+-		"version": 4,
+-		"expires": "2029-03-05T22:50:21Z",
+-		"keys": {
+-			"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600": {
+-				"keytype": "ecdsa-sha2-nistp256",
+-				"scheme": "ecdsa-sha2-nistp256",
+-				"keyid_hash_algorithms": [
+-					"sha256",
+-					"sha512"
+-				],
+-				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXMZ7rD8tWDE4lK/+naJN7INMxNC7\nbMMANDqTQE7WpzyzffWOg59hc/MwbvJtvuxhO9mEu3GD3Cn0HffFlmVRiA==\n-----END PUBLIC KEY-----\n"
+-				}
+-			},
+-			"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda": {
+-				"keytype": "ecdsa-sha2-nistp256",
+-				"scheme": "ecdsa-sha2-nistp256",
+-				"keyid_hash_algorithms": [
+-					"sha256",
+-					"sha512"
+-				],
+-				"keyval": {
+-					"public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL3vL/VeaH6nBbo4rekyO4cc/QthS\n+nlyJXCXSnyIMAtLmVTa8Pf0qG6YIVaR0TmLkyk9YoSVsZakxuMTuaEwrg==\n-----END PUBLIC KEY-----\n"
+-				}
+-			}
+-		},
+-		"roles": {
+-			"root": {
+-				"keyids": [
+-					"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda"
+-				],
+-				"threshold": 1
+-			},
+-			"snapshot": {
+-				"keyids": [
+-					"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600"
+-				],
+-				"threshold": 1
+-			},
+-			"targets": {
+-				"keyids": [
+-					"c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda"
+-				],
+-				"threshold": 1
+-			},
+-			"timestamp": {
+-				"keyids": [
+-					"314ae73abd3012fc73bfcc3783e31d03852716597642b891d6a33155c4baf600"
+-				],
+-				"threshold": 1
+-			}
+-		},
+-		"consistent_snapshot": true
+-	},
+-	"signatures": [
+-		{
+-			"keyid": "c8e09a68b5821b75462ae0df52151c81deb7f1838246dc1da8c34cc91ec12bda",
+-			"sig": "3044022006fe8fff51d18753aeff141f81a962b8ac33f49831bbbec1334b2733ea96890002206e6f343c9c7b98a2ebd1f0b51aa5286ed3a4d48e271c77d88ea77499231bff5c"
+-		}
+-	]
++ "signatures": [
++  {
++   "keyid": "762cb22caca65de5e9b7b6baecb84ca989d337280ce6914b6440aea95769ad93",
++   "sig": "3045022100ac48110076c9264a95e9cfdb7dc72fdf2aeefa6f0c06919f6780933ef00d8f33022040bcef86bfbe246a603b4d6def14ba9b3bd245b134257d570dd79ef52e8de134"
++  },
++  {
++   "keyid": "d7d2d47a3f644fc3a685bac7b39c81ed9f9cee48ff861b44fbd86b91e34e7829",
++   "sig": "3046022100872bef41303c3ca2a7174f9b62c3999c05a2f4f79f0eb6a11d0196bc7e2b5068022100ecd664cf3cd5d280dd1ce479b3a9175ea4347e67e18f44db3f9872267cc20c5e"
++  },
++  {
++   "keyid": "b78c9e4ff9048a1d9876a20f97fa1b3cb03223a0c520c7de730cfa9f5c7b77e5",
++   "sig": "3045022100c2e73ee944df991aa88fc9bdb6caaa94e0ca3b7d8c963bf3460eafc23f6ac1ce02202dfcf29fd52c768f9482511ed8382d42634a255e3ac435ca36928db81667e81d"
++  },
++  {
++   "keyid": "afd6a6ebad62a0dd091db368c1806eeb172c893c80bece1098fed116e985ba35",
++   "sig": "30440220594071728ae3cc8751caf2f506f4a594b0b38d14eb0f244fc96bd54eba345f0d022069c155f8c98ada28ccf28a1420bb6e4fbed13689ac028c13d23142fd6799cd69"
++  }
++ ],
++ "signed": {
++  "_type": "root",
++  "consistent_snapshot": true,
++  "expires": "2024-06-26T12:37:39Z",
++  "keys": {
++   "5416a7a35ef827abc651e200ac11f3d23e9db74ef890b1fedb69fb2a152ebac5": {
++    "keytype": "ecdsa",
++    "keyval": {
++     "public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExxmEtmhF5U+i+v/6he4BcSLzCgMx\n/0qSrvDg6bUWwUrkSKS2vDpcJrhGy5fmmhRrGawjPp1ALpC3y1kqFTpXDg==\n-----END PUBLIC KEY-----\n"
++    },
++    "scheme": "ecdsa-sha2-nistp256",
++    "x-tuf-on-ci-online-uri": "gcpkms:projects/projectsigstore-staging/locations/global/keyRings/tuf-keyring/cryptoKeys/tuf-key/cryptoKeyVersions/2"
++   },
++   "762cb22caca65de5e9b7b6baecb84ca989d337280ce6914b6440aea95769ad93": {
++    "keytype": "ecdsa",
++    "keyval": {
++     "public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEohqIdE+yTl4OxpX8ZxNUPrg3SL9H\nBDnhZuceKkxy2oMhUOxhWweZeG3bfM1T4ZLnJimC6CAYVU5+F5jZCoftRw==\n-----END PUBLIC KEY-----\n"
++    },
++    "scheme": "ecdsa-sha2-nistp256",
++    "x-tuf-on-ci-keyowner": "@jku"
++   },
++   "afd6a6ebad62a0dd091db368c1806eeb172c893c80bece1098fed116e985ba35": {
++    "keytype": "ecdsa",
++    "keyval": {
++     "public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoxkvDOmtGEknB3M+ZkPts8joDM0X\nIH5JZwPlgC2CXs/eqOuNF8AcEWwGYRiDhV/IMlQw5bg8PLICQcgsbrDiKg==\n-----END PUBLIC KEY-----\n"
++    },
++    "scheme": "ecdsa-sha2-nistp256",
++    "x-tuf-on-ci-keyowner": "@mnm678"
++   },
++   "b78c9e4ff9048a1d9876a20f97fa1b3cb03223a0c520c7de730cfa9f5c7b77e5": {
++    "keytype": "ecdsa",
++    "keyval": {
++     "public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFHDb85JH+JYR1LQmxiz4UMokVMnP\nxKoWpaEnFCKXH8W4Fc/DfIxMnkpjCuvWUBdJXkO0aDIxwsij8TOFh2R7dw==\n-----END PUBLIC KEY-----\n"
++    },
++    "scheme": "ecdsa-sha2-nistp256",
++    "x-tuf-on-ci-keyowner": "@joshuagl"
++   },
++   "d7d2d47a3f644fc3a685bac7b39c81ed9f9cee48ff861b44fbd86b91e34e7829": {
++    "keytype": "ecdsa",
++    "keyval": {
++     "public": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE++Wv+DcLRk+mfkmlpCwl1GUi9EMh\npBUTz8K0fH7bE4mQuViGSyWA/eyMc0HvzZi6Xr0diHw0/lUPBvok214YQw==\n-----END PUBLIC KEY-----\n"
++    },
++    "scheme": "ecdsa-sha2-nistp256",
++    "x-tuf-on-ci-keyowner": "@kommendorkapten"
++   }
++  },
++  "roles": {
++   "root": {
++    "keyids": [
++     "762cb22caca65de5e9b7b6baecb84ca989d337280ce6914b6440aea95769ad93",
++     "d7d2d47a3f644fc3a685bac7b39c81ed9f9cee48ff861b44fbd86b91e34e7829",
++     "b78c9e4ff9048a1d9876a20f97fa1b3cb03223a0c520c7de730cfa9f5c7b77e5",
++     "afd6a6ebad62a0dd091db368c1806eeb172c893c80bece1098fed116e985ba35"
++    ],
++    "threshold": 2
++   },
++   "snapshot": {
++    "keyids": [
++     "5416a7a35ef827abc651e200ac11f3d23e9db74ef890b1fedb69fb2a152ebac5"
++    ],
++    "threshold": 1,
++    "x-tuf-on-ci-expiry-period": 3650,
++    "x-tuf-on-ci-signing-period": 365
++   },
++   "targets": {
++    "keyids": [
++     "762cb22caca65de5e9b7b6baecb84ca989d337280ce6914b6440aea95769ad93",
++     "d7d2d47a3f644fc3a685bac7b39c81ed9f9cee48ff861b44fbd86b91e34e7829",
++     "b78c9e4ff9048a1d9876a20f97fa1b3cb03223a0c520c7de730cfa9f5c7b77e5",
++     "afd6a6ebad62a0dd091db368c1806eeb172c893c80bece1098fed116e985ba35"
++    ],
++    "threshold": 1
++   },
++   "timestamp": {
++    "keyids": [
++     "5416a7a35ef827abc651e200ac11f3d23e9db74ef890b1fedb69fb2a152ebac5"
++    ],
++    "threshold": 1,
++    "x-tuf-on-ci-expiry-period": 7,
++    "x-tuf-on-ci-signing-period": 4
++   }
++  },
++  "spec_version": "1.0",
++  "version": 7,
++  "x-tuf-on-ci-expiry-period": 91,
++  "x-tuf-on-ci-signing-period": 35
++ }
+ }
+\ No newline at end of file

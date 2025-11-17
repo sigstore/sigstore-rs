@@ -1,0 +1,4117 @@
+From 0d3fc0263e295b4f822ba11c13c03be734b4395a Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Wed, 19 Jul 2023 10:20:31 +0200
+Subject: [PATCH 01/13] Added implementations for Merkle proofs.
+
+Relates to: #283
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ Cargo.toml                              |   2 +
+ src/crypto/merkle/mod.rs                |   6 +
+ src/crypto/merkle/proof_verification.rs | 857 ++++++++++++++++++++++++
+ src/crypto/merkle/rfc6962.rs            | 111 +++
+ src/crypto/mod.rs                       |   1 +
+ src/errors.rs                           |  10 +
+ src/rekor/models/checkpoint.rs          | 422 ++++++++++++
+ src/rekor/models/consistency_proof.rs   |  43 ++
+ src/rekor/models/inclusion_proof.rs     |  71 ++
+ src/rekor/models/log_entry.rs           |  25 +-
+ src/rekor/models/log_info.rs            |  11 +-
+ src/rekor/models/mod.rs                 |   1 +
+ 12 files changed, 1556 insertions(+), 4 deletions(-)
+ create mode 100644 src/crypto/merkle/mod.rs
+ create mode 100644 src/crypto/merkle/proof_verification.rs
+ create mode 100644 src/crypto/merkle/rfc6962.rs
+ create mode 100644 src/rekor/models/checkpoint.rs
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 6cc4023360..4c9f5cbc74 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -140,6 +140,8 @@ tempfile = "3.3.0"
+ testcontainers = "0.15"
+ tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread"] }
+ tracing-subscriber = { version = "0.3.9", features = ["env-filter"] }
++hex = "0.4.3"
++hex-literal = "0.4"
+ 
+ # cosign example mappings
+ 
+diff --git a/src/crypto/merkle/mod.rs b/src/crypto/merkle/mod.rs
+new file mode 100644
+index 0000000000..c53cf0548d
+--- /dev/null
++++ b/src/crypto/merkle/mod.rs
+@@ -0,0 +1,6 @@
++pub mod proof_verification;
++pub mod rfc6962;
++
++pub use proof_verification::MerkleProofError;
++pub(crate) use proof_verification::MerkleProofVerifier;
++pub(crate) use rfc6962::{Rfc6269Default, Rfc6269HasherTrait};
+diff --git a/src/crypto/merkle/proof_verification.rs b/src/crypto/merkle/proof_verification.rs
+new file mode 100644
+index 0000000000..21a076c896
+--- /dev/null
++++ b/src/crypto/merkle/proof_verification.rs
+@@ -0,0 +1,857 @@
++use super::rfc6962::Rfc6269HasherTrait;
++use digest::{Digest, Output};
++use hex::ToHex;
++use std::cmp::Ordering;
++use std::fmt::Debug;
++use MerkleProofError::*;
++
++#[derive(Debug)]
++pub enum MerkleProofError {
++    MismatchedRoot { expected: String, got: String },
++    IndexGtTreeSize,
++    UnexpectedNonEmptyProof,
++    UnexpectedEmptyProof,
++    NewTreeSmaller { new: usize, old: usize },
++    WrongProofSize { got: usize, want: usize },
++    WrongEmptyTreeHash,
++}
++
++pub(crate) trait MerkleProofVerifier<O>: Rfc6269HasherTrait<O>
++where
++    O: Eq + AsRef<[u8]> + Clone + Debug,
++{
++    /// Used to verify hashes.
++    fn verify_match(a: &O, b: &O) -> Result<(), ()> {
++        (a == b).then_some(()).ok_or(())
++    }
++
++    /// `verify_inclusion` verifies the correctness of the inclusion proof for the leaf
++    /// with the specified `leaf_hash` and `index`, relatively to the tree of the given `tree_size`
++    /// and `root_hash`. Requires `0 <= index < tree_size`.
++    fn verify_inclusion(
++        index: usize,
++        leaf_hash: &O,
++        tree_size: usize,
++        proof_hashes: &[O],
++        root_hash: &O,
++    ) -> Result<(), MerkleProofError> {
++        if index >= tree_size {
++            return Err(IndexGtTreeSize);
++        }
++        Self::root_from_inclusion_proof(index, leaf_hash, tree_size, proof_hashes).and_then(
++            |calc_root| {
++                Self::verify_match(calc_root.as_ref(), root_hash).map_err(|_| MismatchedRoot {
++                    got: root_hash.encode_hex(),
++                    expected: calc_root.encode_hex(),
++                })
++            },
++        )
++    }
++
++    /// `root_from_inclusion_proof` calculates the expected root hash for a tree of the
++    /// given size, provided a leaf index and hash with the corresponding inclusion
++    /// proof. Requires `0 <= index < tree_size`.
++    fn root_from_inclusion_proof(
++        index: usize,
++        leaf_hash: &O,
++        tree_size: usize,
++        proof_hashes: &[O],
++    ) -> Result<Box<O>, MerkleProofError> {
++        if index >= tree_size {
++            return Err(IndexGtTreeSize);
++        }
++        let (inner, border) = Self::decomp_inclusion_proof(index, tree_size);
++        match (proof_hashes.len(), inner + border) {
++            (got, want) if got != want => {
++                return Err(WrongProofSize {
++                    got: proof_hashes.len(),
++                    want: inner + border,
++                });
++            }
++            _ => {}
++        }
++        let res_left = Self::chain_inner(leaf_hash, &proof_hashes[..inner], index);
++        let res = Self::chain_border_right(&res_left, &proof_hashes[inner..]);
++        Ok(Box::new(res))
++    }
++
++    // `verify_consistency` checks that the passed-in consistency proof is valid
++    // between the passed in tree sizes, with respect to the corresponding root
++    // hashes. Requires `0 <= old_size <= new_size`..
++    fn verify_consistency(
++        old_size: usize,
++        new_size: usize,
++        proof_hashes: &[O],
++        old_root: &O,
++        new_root: &O,
++    ) -> Result<(), MerkleProofError> {
++        match (
++            Ord::cmp(&old_size, &new_size),
++            old_size == 0,
++            proof_hashes.is_empty(),
++        ) {
++            (Ordering::Greater, _, _) => {
++                return Err(NewTreeSmaller {
++                    new: new_size,
++                    old: old_size,
++                });
++            }
++            // when sizes are equal and the proof is empty we can just verify the roots
++            (Ordering::Equal, _, true) => {
++                return Self::verify_match(old_root, new_root).map_err(|_| MismatchedRoot {
++                    got: new_root.encode_hex(),
++                    expected: old_root.encode_hex(),
++                })
++            }
++
++            // the proof cannot be empty if the sizes are equal or the previous size was zero
++            (Ordering::Equal, _, false) | (Ordering::Less, true, false) => {
++                return Err(UnexpectedNonEmptyProof)
++            }
++            // any proof is accepted if old_size == 0 and the hash is the expected empty hash
++            (Ordering::Less, true, true) => {
++                return Self::verify_match(old_root, &Self::empty_root())
++                    .map_err(|_| WrongEmptyTreeHash)
++            }
++            (Ordering::Less, false, true) => return Err(UnexpectedEmptyProof),
++            (Ordering::Less, false, false) => {}
++        }
++
++        let shift = old_size.trailing_zeros() as usize;
++        let (inner, border) = Self::decomp_inclusion_proof(old_size - 1, new_size);
++        let inner = inner - shift;
++
++        // The proof includes the root hash for the sub-tree of size 2^shift.
++        // Unless size1 is that very 2^shift.
++        let (seed, start) = if old_size == 1 << shift {
++            (old_root, 0)
++        } else {
++            (&proof_hashes[0], 1)
++        };
++
++        match (proof_hashes.len(), start + inner + border) {
++            (got, want) if got != want => return Err(WrongProofSize { got, want }),
++            _ => {}
++        }
++
++        let proof = &proof_hashes[start..];
++        let mask = (old_size - 1) >> shift;
++
++        // verify the old hash is correct
++        let hash1 = Self::chain_inner_right(seed, &proof[..inner], mask);
++        let hash1 = Self::chain_border_right(&hash1, &proof[inner..]);
++        Self::verify_match(&hash1, old_root).map_err(|_| MismatchedRoot {
++            got: old_root.encode_hex(),
++            expected: hash1.encode_hex(),
++        })?;
++        // verify the new hash is correct
++        let hash2 = Self::chain_inner(seed, &proof[..inner], mask);
++        let hash2 = Self::chain_border_right(&hash2, &proof[inner..]);
++        Self::verify_match(&hash2, new_root).map_err(|_| MismatchedRoot {
++            got: new_root.encode_hex(),
++            expected: hash2.encode_hex(),
++        })?;
++        Ok(())
++    }
++
++    /// `chain_inner` computes a subtree hash for a node on or below the tree's right
++    /// border. Assumes `proof_hashes` are ordered from lower levels to upper, and
++    /// `seed` is the initial subtree/leaf hash on the path located at the specified
++    /// `index` on its level.
++    fn chain_inner(seed: &O, proof_hashes: &[O], index: usize) -> O {
++        proof_hashes
++            .iter()
++            .enumerate()
++            .fold(seed.clone(), |seed, (i, h)| {
++                let (left, right) = if ((index >> i) & 1) == 0 {
++                    (&seed, h)
++                } else {
++                    (h, &seed)
++                };
++                Self::hash_children(left, right)
++            })
++    }
++
++    /// `chain_inner_right` computes a subtree hash like `chain_inner`, but only takes
++    /// hashes to the left from the path into consideration, which effectively means
++    /// the result is a hash of the corresponding earlier version of this subtree.
++    fn chain_inner_right(seed: &O, proof_hashes: &[O], index: usize) -> O {
++        proof_hashes
++            .iter()
++            .enumerate()
++            .fold(seed.clone(), |seed, (i, h)| {
++                if ((index >> i) & 1) == 1 {
++                    Self::hash_children(h, seed)
++                } else {
++                    seed
++                }
++            })
++    }
++
++    /// `chain_border_right` chains proof hashes along tree borders. This differs from
++    /// inner chaining because `proof` contains only left-side subtree hashes.
++    fn chain_border_right(seed: &O, proof_hashes: &[O]) -> O {
++        proof_hashes
++            .iter()
++            .fold(seed.clone(), |seed, h| Self::hash_children(h, seed))
++    }
++
++    /// `decomp_inclusion_proof` breaks down inclusion proof for a leaf at the specified
++    /// `index` in a tree of the specified `size` into 2 components. The splitting
++    /// point between them is where paths to leaves `index` and `tree_size-1` diverge.
++    /// Returns lengths of the bottom and upper proof parts correspondingly. The sum
++    /// of the two determines the correct length of the inclusion proof.
++    fn decomp_inclusion_proof(index: usize, tree_size: usize) -> (usize, usize) {
++        let inner: usize = Self::inner_proof_size(index, tree_size);
++        let border = (index >> inner).count_ones() as usize;
++        (inner, border)
++    }
++
++    fn inner_proof_size(index: usize, tree_size: usize) -> usize {
++        u64::BITS as usize - ((index ^ (tree_size - 1)).leading_zeros() as usize)
++    }
++}
++
++impl<T> MerkleProofVerifier<Output<T>> for T where T: Digest {}
++
++#[cfg(test)]
++mod test_verify {
++    use crate::crypto::merkle::rfc6962::Rfc6269HasherTrait;
++    use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
++    use hex_literal::hex;
++
++    #[derive(Debug)]
++    struct InclusionProofTestVector<'a> {
++        leaf: usize,
++        size: usize,
++        proof: &'a [[u8; 32]],
++    }
++
++    #[derive(Debug)]
++    struct ConsistencyTestVector<'a> {
++        size1: usize,
++        size2: usize,
++        proof: &'a [[u8; 32]],
++    }
++
++    // InclusionProbe is a parameter set for inclusion proof verification.
++    #[derive(Debug)]
++    struct InclusionProbe {
++        leaf_index: usize,
++        tree_size: usize,
++        root: [u8; 32],
++        leaf_hash: [u8; 32],
++        proof: Vec<[u8; 32]>,
++        desc: &'static str,
++    }
++
++    // ConsistencyProbe is a parameter set for consistency proof verification.
++    #[derive(Debug)]
++    struct ConsistencyProbe<'a> {
++        size1: usize,
++        size2: usize,
++        root1: &'a [u8; 32],
++        root2: &'a [u8; 32],
++        proof: Vec<[u8; 32]>,
++        desc: &'static str,
++    }
++
++    const SHA256_SOME_HASH: [u8; 32] =
++        hex!("abacaba000000000000000000000000000000000000000000060061e00123456");
++
++    const SHA256_EMPTY_TREE_HASH: [u8; 32] =
++        hex!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
++
++    const ZERO_HASH: [u8; 32] = [0; 32];
++
++    const INCLUSION_PROOFS: [InclusionProofTestVector; 6] = [
++        InclusionProofTestVector {
++            leaf: 0,
++            size: 0,
++            proof: &[],
++        },
++        InclusionProofTestVector {
++            leaf: 1,
++            size: 1,
++            proof: &[],
++        },
++        InclusionProofTestVector {
++            leaf: 1,
++            size: 8,
++            proof: &[
++                hex!("96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7"),
++                hex!("5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e"),
++                hex!("6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4"),
++            ],
++        },
++        InclusionProofTestVector {
++            leaf: 6,
++            size: 8,
++            proof: &[
++                hex!("bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b"),
++                hex!("ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0"),
++                hex!("d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7"),
++            ],
++        },
++        InclusionProofTestVector {
++            leaf: 3,
++            size: 3,
++            proof: &[hex!(
++                "fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125"
++            )],
++        },
++        InclusionProofTestVector {
++            leaf: 2,
++            size: 5,
++            proof: &[
++                hex!("6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"),
++                hex!("5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e"),
++                hex!("bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b"),
++            ],
++        },
++    ];
++
++    const CONSISTENCY_PROOFS: [ConsistencyTestVector; 5] = [
++        ConsistencyTestVector {
++            size1: 1,
++            size2: 1,
++            proof: &[],
++        },
++        ConsistencyTestVector {
++            size1: 1,
++            size2: 8,
++            proof: &[
++                hex!("96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7"),
++                hex!("5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e"),
++                hex!("6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4"),
++            ],
++        },
++        ConsistencyTestVector {
++            size1: 6,
++            size2: 8,
++            proof: &[
++                hex!("0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a"),
++                hex!("ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0"),
++                hex!("d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7"),
++            ],
++        },
++        ConsistencyTestVector {
++            size1: 2,
++            size2: 5,
++            proof: &[
++                hex!("5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e"),
++                hex!("bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b"),
++            ],
++        },
++        ConsistencyTestVector {
++            size1: 6,
++            size2: 7,
++            proof: &[
++                hex!("0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a"),
++                hex!("b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f"),
++                hex!("d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7"),
++            ],
++        },
++    ];
++
++    const ROOTS: [[u8; 32]; 8] = [
++        hex!("6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"),
++        hex!("fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125"),
++        hex!("aeb6bcfe274b70a14fb067a5e5578264db0fa9b51af5e0ba159158f329e06e77"),
++        hex!("d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7"),
++        hex!("4e3bbb1f7b478dcfe71fb631631519a3bca12c9aefca1612bfce4c13a86264d4"),
++        hex!("76e67dadbcdf1e10e1b74ddc608abd2f98dfb16fbce75277b5232a127f2087ef"),
++        hex!("ddb89be403809e325750d3d263cd78929c2942b7942a34b77e122c9594a74c8c"),
++        hex!("5dc9da79a70659a9ad559cb701ded9a2ab9d823aad2f4960cfe370eff4604328"),
++    ];
++
++    const LEAVES: &[&[u8]] = &[
++        &hex!(""),
++        &hex!("00"),
++        &hex!("10"),
++        &hex!("2021"),
++        &hex!("3031"),
++        &hex!("40414243"),
++        &hex!("5051525354555657"),
++        &hex!("606162636465666768696a6b6c6d6e6f"),
++    ];
++
++    fn corrupt_inclusion_proof(
++        leaf_index: usize,
++        tree_size: usize,
++        proof: &[[u8; 32]],
++        root: &[u8; 32],
++        leaf_hash: &[u8; 32],
++    ) -> Vec<InclusionProbe> {
++        let ret = vec![
++            // Wrong leaf index.
++            InclusionProbe {
++                leaf_index: leaf_index.wrapping_sub(1), // avoid panic due to underflow
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "leaf_index - 1",
++            },
++            InclusionProbe {
++                leaf_index: leaf_index + 1,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "leaf_index + 1",
++            },
++            InclusionProbe {
++                leaf_index: leaf_index ^ 2,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "leaf_index ^ 2",
++            }, // Wrong tree height.
++            InclusionProbe {
++                leaf_index,
++                tree_size: tree_size / 2,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "tree_size / 2",
++            }, // Wrong leaf or root.
++            InclusionProbe {
++                leaf_index,
++                tree_size: tree_size * 2,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "tree_size * 2",
++            },
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: *root,
++                leaf_hash: *b"WrongLeafWrongLeafWrongLeafWrong",
++                proof: proof.to_vec(),
++                desc: "wrong leaf",
++            },
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: SHA256_EMPTY_TREE_HASH,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "empty root",
++            },
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: SHA256_SOME_HASH,
++                leaf_hash: *leaf_hash,
++                proof: proof.to_vec(),
++                desc: "random root",
++            }, // Add garbage at the end.
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: [proof.to_vec(), [[0 as u8; 32]].to_vec()].concat(),
++                desc: "trailing garbage",
++            },
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: [proof.to_vec(), [root.clone()].to_vec()].concat(),
++                desc: "trailing root",
++            }, // Add garbage at the front.
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: [[[0 as u8; 32]].to_vec(), proof.to_vec()].concat(),
++                desc: "preceding garbage",
++            },
++            InclusionProbe {
++                leaf_index,
++                tree_size,
++                root: *root,
++                leaf_hash: *leaf_hash,
++                proof: [[root.clone()].to_vec(), proof.to_vec()].concat(),
++                desc: "preceding root",
++            },
++        ];
++
++        return ret;
++    }
++
++    fn verifier_check(
++        leaf_index: usize,
++        tree_size: usize,
++        proof_hashes: &[[u8; 32]],
++        root: &[u8; 32],
++        leaf_hash: &[u8; 32],
++    ) -> Result<(), String> {
++        let probes =
++            corrupt_inclusion_proof(leaf_index, tree_size, &proof_hashes, &root, &leaf_hash);
++        let leaf_hash = leaf_hash.into();
++        let root_hash = root.into();
++        let proof_hashes = proof_hashes.iter().map(|&h| h.into()).collect::<Vec<_>>();
++        let got = Rfc6269Default::root_from_inclusion_proof(
++            leaf_index,
++            leaf_hash,
++            tree_size,
++            &proof_hashes,
++        )
++        .map_err(|err| format!("{err:?}"))?;
++        Rfc6269Default::verify_match(got.as_ref().into(), root_hash)
++            .map_err(|_| format!("roots did not match got: {got:x?} expected: {root:x?}"))?;
++        Rfc6269Default::verify_inclusion(
++            leaf_index,
++            leaf_hash,
++            tree_size,
++            &proof_hashes,
++            root_hash,
++        )
++        .map_err(|err| format!("{err:?}"))?;
++
++        // returns Err if any probe is accepted
++        probes
++            .into_iter()
++            .map(|p| {
++                Rfc6269Default::verify_inclusion(
++                    p.leaf_index,
++                    (&p.leaf_hash).into(),
++                    p.tree_size,
++                    &p.proof.iter().map(|&h| h.into()).collect::<Vec<_>>(),
++                    (&p.root).into(),
++                )
++                .err()
++                .ok_or(format!("accepted incorrect inclusion proof: {:?}", p.desc))
++            })
++            .collect::<Result<Vec<_>, _>>()?;
++        Ok(())
++    }
++
++    fn verifier_consistency_check(
++        size1: usize,
++        size2: usize,
++        proof: &[[u8; 32]],
++        root1: &[u8; 32],
++        root2: &[u8; 32],
++    ) -> Result<(), String> {
++        // Verify original consistency proof.
++        let proof_hashes = proof.iter().map(|&h| h.into()).collect::<Vec<_>>();
++        Rfc6269Default::verify_consistency(size1, size2, &proof_hashes, root1.into(), root2.into())
++            .map_err(|err| format!("incorrectly rejected with {err:?}"))?;
++        // For simplicity test only non-trivial proofs that have root1 != root2, size1 != 0 and size1 != size2.
++        if proof.len() == 0 {
++            return Ok(());
++        }
++        for (i, p) in corrupt_consistency_proof(size1, size2, root1, root2, proof)
++            .iter()
++            .enumerate()
++        {
++            Rfc6269Default::verify_consistency(
++                p.size1,
++                p.size2,
++                &p.proof.iter().map(|&h| h.into()).collect::<Vec<_>>(),
++                p.root1.as_slice().into(),
++                p.root2.as_slice().into(),
++            )
++            .err()
++            .ok_or(format!("[{i} incorrectly accepted: {:?}", p.desc))?;
++        }
++
++        Ok(())
++    }
++
++    fn corrupt_consistency_proof<'a>(
++        size1: usize,
++        size2: usize,
++        root1: &'a [u8; 32],
++        root2: &'a [u8; 32],
++        proof: &[[u8; 32]],
++    ) -> Vec<ConsistencyProbe<'a>> {
++        let ln = proof.len();
++        let mut ret = vec![
++            // Wrong size1.
++            ConsistencyProbe {
++                size1: size1 - 1,
++                size2,
++                root1,
++                root2,
++                proof: proof.to_vec(),
++                desc: "size1 - 1",
++            },
++            ConsistencyProbe {
++                size1: size1 + 1,
++                size2,
++                root1,
++                root2,
++                proof: proof.to_vec(),
++                desc: "size1 + 1",
++            },
++            ConsistencyProbe {
++                size1: size1 ^ 2,
++                size2,
++                root1,
++                root2,
++                proof: proof.to_vec(),
++                desc: "size1 ^ 2",
++            },
++            // Wrong tree height.
++            ConsistencyProbe {
++                size1,
++                size2: size2 * 2,
++                root1,
++                root2,
++                proof: proof.to_vec(),
++                desc: "size2 * 2",
++            },
++            ConsistencyProbe {
++                size1,
++                size2: size2 / 2,
++                root1,
++                root2,
++                proof: proof.to_vec(),
++                desc: "size2 / 2",
++            },
++            // Wrong root.
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1: &ZERO_HASH,
++                root2,
++                proof: proof.to_vec(),
++                desc: "wrong root1",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2: &ZERO_HASH,
++                proof: proof.to_vec(),
++                desc: "wrong root2",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1: root2,
++                root2: root1,
++                proof: proof.to_vec(),
++                desc: "swapped roots",
++            },
++            // Empty proof.
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: vec![],
++                desc: "empty proof",
++            },
++            // Add garbage at the end.
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [proof, &[ZERO_HASH]].concat(),
++                desc: "trailing garbage",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [proof, &[*root1]].concat(),
++                desc: "trailing root1",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [proof, &[*root2]].concat(),
++                desc: "trailing root2",
++            },
++            // Add garbage at the front.
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [&[ZERO_HASH], proof].concat(),
++                desc: "preceding garbage",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [&[*root1], proof].concat(),
++                desc: "preceding root1",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [&[*root2], proof].concat(),
++                desc: "preceding root2",
++            },
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: [&[proof[0]], proof].concat(),
++                desc: "preceding proof[0]",
++            },
++        ];
++        if ln > 0 {
++            ret.push(ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: proof[..ln - 1].to_vec(),
++                desc: "truncated proof",
++            });
++        }
++        // add probes with proves that have a flipped 4th bit of i-th byte of the i-th hash
++        ret.extend((0..ln).map(|i| {
++            let mut wrong_proof = proof.to_vec();
++            wrong_proof[i][i] ^= 4;
++            ConsistencyProbe {
++                size1,
++                size2,
++                root1,
++                root2,
++                proof: wrong_proof,
++                desc: "proof with flipped bit",
++            }
++        }));
++
++        return ret;
++    }
++
++    #[test]
++    fn test_verify_inclusion_single_entry() {
++        let data = b"data";
++        let hash = &Rfc6269Default::hash_leaf(data);
++        let proof = [];
++        let zero_hash = ZERO_HASH.as_slice().into();
++        let test_cases = [
++            (hash, hash, false),
++            (hash, zero_hash, true),
++            (zero_hash, hash, true),
++        ];
++        for (i, (root, leaf, want_err)) in test_cases.into_iter().enumerate() {
++            let res = Rfc6269Default::verify_inclusion(0, leaf, 1, &proof, root);
++            assert_eq!(
++                res.is_err(),
++                want_err,
++                "unexpected inclusion proof result {res:?} for case {i:?}"
++            )
++        }
++    }
++
++    #[test]
++    fn test_verify_inclusion() {
++        let proof = [];
++        let probes = [(0, 0), (0, 1), (1, 0), (2, 1)];
++        probes.into_iter().for_each(|(index, size)| {
++            let result = Rfc6269Default::verify_inclusion(
++                index,
++                SHA256_SOME_HASH.as_slice().into(),
++                size,
++                &proof,
++                ZERO_HASH.as_slice().into(),
++            );
++            assert_eq!(
++                result.is_err(),
++                true,
++                "Incorrectly verified invalid root/leaf",
++            );
++            let result = Rfc6269Default::verify_inclusion(
++                index,
++                ZERO_HASH.as_slice().into(),
++                size,
++                &proof,
++                SHA256_EMPTY_TREE_HASH.as_slice().into(),
++            );
++            assert_eq!(
++                result.is_err(),
++                true,
++                "Incorrectly verified invalid root/leaf",
++            );
++            let result = Rfc6269Default::verify_inclusion(
++                index,
++                SHA256_SOME_HASH.as_slice().into(),
++                size,
++                &proof,
++                SHA256_EMPTY_TREE_HASH.as_slice().into(),
++            );
++            assert!(result.is_err(), "Incorrectly verified invalid root/leaf");
++        });
++        for i in 1..6 {
++            let p = &INCLUSION_PROOFS[i];
++            let leaf_hash = &Rfc6269Default::hash_leaf(LEAVES[i]).into();
++            let result =
++                verifier_check(p.leaf - 1, p.size, &p.proof, &ROOTS[p.size - 1], leaf_hash);
++            assert!(result.is_err(), "{result:?}")
++        }
++    }
++
++    #[test]
++    fn test_verify_consistency() {
++        let root1 = &[0; 32].into();
++        let root2 = &[1; 32].into();
++        let proof1 = [].as_slice();
++        let proof2 = [SHA256_EMPTY_TREE_HASH.into()];
++        let empty_tree_hash = &SHA256_EMPTY_TREE_HASH.into();
++        let test_cases = [
++            (0, 0, root1, root2, proof1, true),
++            (1, 1, root1, root2, proof1, true),
++            // Sizes that are always consistent.
++            (0, 0, empty_tree_hash, empty_tree_hash, proof1, false),
++            (0, 1, empty_tree_hash, root2, proof1, false),
++            (1, 1, root2, root2, proof1, false),
++            // Time travel to the past.
++            (1, 0, root1, root2, proof1, true),
++            (2, 1, root1, root2, proof1, true),
++            // Empty proof.
++            (1, 2, root1, root2, proof1, true),
++            // Roots don't match.
++            (0, 0, empty_tree_hash, root2, proof1, true),
++            (1, 1, empty_tree_hash, root2, proof1, true),
++            // Roots match but the proof is not empty.
++            (0, 0, empty_tree_hash, empty_tree_hash, &proof2, true),
++            (0, 1, empty_tree_hash, empty_tree_hash, &proof2, true),
++            (1, 1, empty_tree_hash, empty_tree_hash, &proof2, true),
++        ];
++        for (i, (size1, size2, root1, root2, proof, want_err)) in test_cases.into_iter().enumerate()
++        {
++            let res = Rfc6269Default::verify_consistency(size1, size2, proof, root1, root2);
++            assert_eq!(
++                res.is_err(),
++                want_err,
++                "unexpected proof result {res:?}, case {i}"
++            );
++        }
++
++        for (_, p) in CONSISTENCY_PROOFS.into_iter().enumerate() {
++            let result = verifier_consistency_check(
++                p.size1,
++                p.size2,
++                p.proof,
++                &ROOTS[p.size1 - 1],
++                &ROOTS[p.size2 - 1],
++            );
++            assert!(result.is_ok(), "failed with error: {result:?}");
++        }
++    }
++}
+diff --git a/src/crypto/merkle/rfc6962.rs b/src/crypto/merkle/rfc6962.rs
+new file mode 100644
+index 0000000000..1cd926b063
+--- /dev/null
++++ b/src/crypto/merkle/rfc6962.rs
+@@ -0,0 +1,111 @@
++use super::rfc6962::Rfc6269HashPrefix::{RFC6962LeafHashPrefix, RFC6962NodeHashPrefix};
++use digest::Output;
++use sha2::{Digest, Sha256};
++
++/// This is the prefix that gets added to the data before the hash is calculated.
++#[repr(u8)]
++enum Rfc6269HashPrefix {
++    RFC6962LeafHashPrefix = 0,
++    RFC6962NodeHashPrefix = 1,
++}
++
++/// Trait that represents the [Merkle tree operations as defined in RFC6962](https://www.rfc-editor.org/rfc/rfc6962.html#section-2.1).
++pub(crate) trait Rfc6269HasherTrait<O> {
++    /// Hashing an empty root is equivalent to hashing an empty string.
++    fn empty_root() -> O;
++    /// Leaf hashes are calculated the following way: `hash(0x00 || leaf)`.
++    fn hash_leaf(leaf: impl AsRef<[u8]>) -> O;
++    /// The hash of nodes with children is calculated recursively as: `hash(0x01 || left || right)`.
++    fn hash_children(left: impl AsRef<[u8]>, right: impl AsRef<[u8]>) -> O;
++}
++
++impl<T> Rfc6269HasherTrait<Output<T>> for T
++where
++    T: Digest,
++{
++    fn empty_root() -> Output<T> {
++        T::new().finalize()
++    }
++    fn hash_leaf(leaf: impl AsRef<[u8]>) -> Output<T> {
++        T::new()
++            .chain_update([RFC6962LeafHashPrefix as u8])
++            .chain_update(leaf)
++            .finalize()
++    }
++    fn hash_children(left: impl AsRef<[u8]>, right: impl AsRef<[u8]>) -> Output<T> {
++        T::new()
++            .chain_update([RFC6962NodeHashPrefix as u8])
++            .chain_update(left)
++            .chain_update(right)
++            .finalize()
++    }
++}
++
++/// RFC6962 uses SHA-256 as the default hash-function.
++pub(crate) type Rfc6269Default = Sha256;
++
++/// These tests were taken from the [transparency-dev Merkle implementation](https://github.com/transparency-dev/merkle/blob/036047b5d2f7faf3b1ee643d391e60fe5b1defcf/rfc6962/rfc6962_test.go).
++#[cfg(test)]
++mod test_rfc6962 {
++    use crate::crypto::merkle::rfc6962::Rfc6269HasherTrait;
++    use crate::crypto::merkle::Rfc6269Default;
++    use hex_literal::hex;
++
++    #[derive(Debug, PartialEq)]
++    struct TestCase {
++        pub desc: String,
++        pub got: [u8; 32],
++        pub want: [u8; 32],
++    }
++
++    #[test]
++    fn test_hasher() {
++        let leaf_hash = Rfc6269Default::hash_leaf(b"L123456");
++        let empty_leaf_hash = Rfc6269Default::hash_leaf(b"");
++        let test_cases: Vec<_> = [
++            TestCase {
++                desc: "RFC6962 Empty".to_string(),
++                want: hex!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
++                got: Rfc6269Default::empty_root().into(),
++            },
++            TestCase {
++                desc: "RFC6962 Empty Leaf".to_string(),
++                want: hex!("6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"),
++                got: empty_leaf_hash.into(),
++            },
++            TestCase {
++                desc: "RFC6962 Leaf".to_string(),
++                want: hex!("395aa064aa4c29f7010acfe3f25db9485bbd4b91897b6ad7ad547639252b4d56"),
++                got: leaf_hash.into(),
++            },
++            TestCase {
++                desc: "RFC6962 Node".to_string(),
++                want: hex!("aa217fe888e47007fa15edab33c2b492a722cb106c64667fc2b044444de66bbb"),
++                got: Rfc6269Default::hash_children(b"N123", b"N456").into(),
++            },
++        ]
++        .into_iter()
++        .filter(|tc| tc.got != tc.want)
++        .collect();
++        assert_eq!(test_cases.len(), 0, "failed tests: {test_cases:?}")
++    }
++
++    #[test]
++    fn test_collisions() {
++        let l1 = b"Hello".to_vec();
++        let l2 = b"World".to_vec();
++        let hash1 = Rfc6269Default::hash_leaf(&l1);
++        let hash2 = Rfc6269Default::hash_leaf(&l2);
++        assert_ne!(hash1, hash2, "got identical hashes for different leafs");
++
++        let sub_hash1 = Rfc6269Default::hash_children(&l1, &l2);
++        let sub_hash2 = Rfc6269Default::hash_children(&l2, &l1);
++        assert_ne!(sub_hash1, sub_hash2, "got same hash for different order");
++
++        let forged_hash = Rfc6269Default::hash_leaf(&[l1, l2].concat());
++        assert_ne!(
++            sub_hash1, forged_hash,
++            "hasher is not second-preimage resistant"
++        );
++    }
++}
+diff --git a/src/crypto/mod.rs b/src/crypto/mod.rs
+index 3db1461c7f..619632b551 100644
+--- a/src/crypto/mod.rs
++++ b/src/crypto/mod.rs
+@@ -22,6 +22,7 @@ use crate::errors::*;
+ 
+ pub use signing_key::SigStoreSigner;
+ pub use verification_key::CosignVerificationKey;
++pub(crate) mod merkle;
+ 
+ /// Different digital signature algorithms.
+ /// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256
+diff --git a/src/errors.rs b/src/errors.rs
+index 5ba05393cb..50d2ad3d89 100644
+--- a/src/errors.rs
++++ b/src/errors.rs
+@@ -21,6 +21,7 @@ use thiserror::Error;
+ use crate::cosign::{
+     constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
+ };
++use crate::crypto::merkle::MerkleProofError;
+ 
+ #[cfg(feature = "cosign")]
+ #[derive(Error, Debug)]
+@@ -67,6 +68,9 @@ pub enum SigstoreError {
+     #[error(transparent)]
+     Base64DecodeError(#[from] base64::DecodeError),
+ 
++    #[error(transparent)]
++    HexDecodeError(#[from] hex::FromHexError),
++
+     #[error("Public key with unsupported algorithm: {0}")]
+     PublicKeyUnsupportedAlgorithmError(String),
+ 
+@@ -109,6 +113,12 @@ pub enum SigstoreError {
+     #[error("Certificate pool error: {0}")]
+     CertificatePoolError(String),
+ 
++    #[error("Consistency proof error: {0:?}")]
++    ConsistencyProofError(MerkleProofError),
++
++    #[error("Inclusion Proof error: {0:?}")]
++    InclusionProofError(MerkleProofError),
++
+     #[error("Signing session expired")]
+     ExpiredSigningSession(),
+ 
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+new file mode 100644
+index 0000000000..ec3593ef0f
+--- /dev/null
++++ b/src/rekor/models/checkpoint.rs
+@@ -0,0 +1,422 @@
++use crate::crypto::{CosignVerificationKey, Signature};
++use crate::errors::SigstoreError;
++use crate::rekor::models::checkpoint::ParseCheckpointError::*;
++use base64::prelude::BASE64_STANDARD;
++use base64::Engine;
++use serde::{Deserialize, Deserializer, Serialize, Serializer};
++use std::fmt::{Display, Formatter};
++use std::str::FromStr;
++
++/// A checkpoint (also known as a signed tree head) that served by the log.
++/// It represents the log state at a point in time.
++/// The `note` field stores this data,
++/// and its authenticity can be verified with the data in `signature`.
++#[derive(Debug, PartialEq, Clone, Eq)]
++pub struct SignedCheckpoint {
++    pub note: CheckpointNote,
++    pub signature: CheckpointSignature,
++}
++
++/// The metadata that is contained in a checkpoint.
++#[derive(Debug, PartialEq, Clone, Eq)]
++pub struct CheckpointNote {
++    /// origin is the unique identifier/version string
++    pub origin: String,
++    /// merkle tree size
++    pub size: u64,
++    /// merkle tree root hash
++    pub hash: [u8; 32],
++    /// catches the rest of the content
++    pub other_content: Vec<OtherContent>,
++}
++
++/// The signature that is contained in a checkpoint.
++/// The `key_fingerprint` are the first four bytes of the key hash of the corresponding log public key.
++/// This can be used to identity the key which should be used to verify the checkpoint.
++/// The actual signature is stored in `raw`.
++#[derive(Debug, PartialEq, Clone, Eq)]
++pub struct CheckpointSignature {
++    pub key_fingerprint: [u8; 4],
++    pub raw: Vec<u8>,
++    pub name: String,
++}
++
++/// Checkpoints can contain additional data.
++/// The `KeyValue` variant is for lines that are in the format `<KEY>: <VALUE>`.
++/// Everything else is stored in the `Value` variant.
++#[derive(Debug, PartialEq, Clone, Eq)]
++pub enum OtherContent {
++    KeyValue(String, String),
++    Value(String),
++}
++
++impl Display for OtherContent {
++    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
++        match self {
++            OtherContent::KeyValue(k, v) => write!(f, "{k}: {v}"),
++            OtherContent::Value(v) => write!(f, "{v}"),
++        }
++    }
++}
++
++#[derive(Debug, Eq, PartialEq)]
++pub enum ParseCheckpointError {
++    DecodeError(String),
++}
++
++impl FromStr for SignedCheckpoint {
++    type Err = ParseCheckpointError;
++
++    fn from_str(s: &str) -> Result<Self, Self::Err> {
++        // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
++
++        let checkpoint = s.trim_start_matches('"').trim_end_matches('"');
++
++        let Some((note, signature)) = checkpoint.split_once("\n\n") else {
++            return Err(DecodeError("unexpected checkpoint format".to_string()));
++        };
++
++        let signature = signature.parse()?;
++        let note = CheckpointNote::unmarshal(note)?;
++
++        Ok(SignedCheckpoint { note, signature })
++    }
++}
++
++impl CheckpointNote {
++    // Output is the part of the checkpoint that is signed.
++    fn marshal(&self) -> String {
++        let hash_b64 = BASE64_STANDARD.encode(self.hash);
++        let other_content: String = self
++            .other_content
++            .iter()
++            .map(|c| format!("{c}\n"))
++            .collect();
++        format!(
++            "{}\n{}\n{hash_b64}\n{other_content}",
++            self.origin, self.size
++        )
++    }
++    fn unmarshal(s: &str) -> Result<Self, ParseCheckpointError> {
++        // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
++        // note is separated by new lines
++        let split_note = s.split('\n').collect::<Vec<_>>();
++        let [origin, size, hash_b64, other_content @ ..] = split_note.as_slice() else {
++            return Err(DecodeError("note not in expected format".to_string()));
++        };
++
++        let size = size
++            .parse()
++            .map_err(|_| DecodeError("expected decimal string for size".into()))?;
++
++        let hash = BASE64_STANDARD
++            .decode(hash_b64)
++            .map_err(|_| DecodeError("failed to decode root hash".to_string()))
++            .and_then(|v| {
++                <[u8; 32]>::try_from(v)
++                    .map_err(|_| DecodeError("expected 32-byte hash".to_string()))
++            })?;
++
++        let other_content = other_content
++            .iter()
++            .filter(|s| !s.is_empty())
++            .map(|s| {
++                s.split_once(": ")
++                    .map(|(k, v)| OtherContent::KeyValue(k.to_string(), v.to_string()))
++                    .unwrap_or(OtherContent::Value(s.to_string()))
++            })
++            .collect();
++
++        Ok(CheckpointNote {
++            origin: origin.to_string(),
++            size,
++            hash,
++            other_content,
++        })
++    }
++}
++
++impl ToString for SignedCheckpoint {
++    fn to_string(&self) -> String {
++        let note = self.note.marshal();
++        let signature = self.signature.to_string();
++        format!("{note}\n{signature}")
++    }
++}
++
++impl SignedCheckpoint {
++    /// This method can be used to verify that the checkpoint was issued by the log with the
++    /// public key `rekor_key`.
++    pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
++        rekor_key.verify_signature(
++            Signature::Raw(&self.signature.raw),
++            self.note.marshal().as_bytes(),
++        )
++    }
++}
++
++impl Serialize for SignedCheckpoint {
++    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++    where
++        S: Serializer,
++    {
++        self.to_string().serialize(serializer)
++    }
++}
++
++impl<'de> Deserialize<'de> for SignedCheckpoint {
++    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
++    where
++        D: Deserializer<'de>,
++    {
++        <String>::deserialize(deserializer).and_then(|s| {
++            SignedCheckpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
++        })
++    }
++}
++
++impl ToString for CheckpointSignature {
++    fn to_string(&self) -> String {
++        let sig_b64 =
++            BASE64_STANDARD.encode([self.key_fingerprint.as_slice(), self.raw.as_slice()].concat());
++        format!("— {} {sig_b64}\n", self.name)
++    }
++}
++
++impl FromStr for CheckpointSignature {
++    type Err = ParseCheckpointError;
++    fn from_str(s: &str) -> Result<Self, Self::Err> {
++        let s = s.trim_start_matches('\n').trim_end_matches('\n');
++        let [_, name, sig_b64] = s.split(' ').collect::<Vec<_>>()[..] else {
++            return Err(DecodeError(format!("unexpected signature format {s:?}")));
++        };
++        let sig = BASE64_STANDARD
++            .decode(sig_b64.trim_end())
++            .map_err(|_| DecodeError("failed to decode signature".to_string()))?;
++
++        // first four bytes of signature are fingerprint of key
++        let (key_fingerprint, sig) = sig.split_at(4);
++        let key_fingerprint = key_fingerprint
++            .try_into()
++            .map_err(|_| DecodeError("unexpected signature length in checkpoint".to_string()))?;
++
++        Ok(CheckpointSignature {
++            key_fingerprint,
++            name: name.to_string(),
++            raw: sig.to_vec(),
++        })
++    }
++}
++
++#[cfg(test)]
++mod test {
++    #[cfg(test)]
++    mod test_checkpoint_note {
++        use crate::rekor::models::checkpoint::CheckpointNote;
++        use crate::rekor::models::checkpoint::OtherContent::{KeyValue, Value};
++
++        #[test]
++        fn test_marshal() {
++            let test_cases = [
++                (
++                    "Log Checkpoint v0",
++                    123,
++                    [0; 32],
++                    vec![],
++                    "Log Checkpoint v0\n123\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n",
++                ),
++                (
++                    "Banana Checkpoint v5",
++                    9944,
++                    [1; 32],
++                    vec![],
++                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n", ),
++                (
++                    "Banana Checkpoint v7",
++                    9943,
++                    [2; 32],
++                    vec![Value("foo".to_string()), Value("bar".to_string())],
++                    "Banana Checkpoint v7\n9943\nAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nfoo\nbar\n",
++                ),
++            ];
++
++            for (origin, size, hash, other_content, expected) in test_cases {
++                assert_eq!(
++                    CheckpointNote {
++                        size,
++                        origin: origin.to_string(),
++                        hash,
++                        other_content,
++                    }
++                    .marshal(),
++                    expected
++                );
++            }
++        }
++
++        #[test]
++        fn test_unmarshal_valid() {
++            let test_cases = [
++                (
++                    "valid",
++                    "Log Checkpoint v0",
++                    123,
++                    [0; 32],
++                    vec![],
++                    "Log Checkpoint v0\n123\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n",
++                ),
++                (
++                    "valid",
++                    "Banana Checkpoint v5",
++                    9944,
++                    [1; 32],
++                    vec![],
++                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n", ),
++                (
++                    "valid with multiple trailing data lines",
++                    "Banana Checkpoint v7",
++                    9943,
++                    [2; 32],
++                    vec![Value("foo".to_string()), Value("bar".to_string())],
++                    "Banana Checkpoint v7\n9943\nAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nfoo\nbar\n",
++                ),
++                (
++                    "valid with key-value data line",
++                    "Banana Checkpoint v7",
++                    9943,
++                    [2; 32],
++                    vec![KeyValue("Timestamp".to_string(), "1689748607742585419".to_string())],
++                    "Banana Checkpoint v7\n9943\nAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nTimestamp: 1689748607742585419\n",
++                ),
++                (
++                    "valid with trailing newlines",
++                    "Banana Checkpoint v7",
++                    9943,
++                    [2; 32],
++                    vec![],
++                    "Banana Checkpoint v7\n9943\nAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\n\n\n\n",
++                ),
++            ];
++
++            for (desc, origin, size, hash, other_content, input) in test_cases {
++                let got = CheckpointNote::unmarshal(input);
++
++                let expected = CheckpointNote {
++                    size,
++                    origin: origin.to_string(),
++                    hash,
++                    other_content,
++                };
++                assert_eq!(got, Ok(expected), "failed test case: {desc}");
++            }
++        }
++
++        #[test]
++        fn test_unmarshal_invalid() {
++            let test_cases = [(
++                "invalid - insufficient lines",
++                "Head\n9944\n",
++            ), (
++                "invalid - empty header",
++                "\n9944\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
++            ), (
++                "invalid - missing newline on roothash",
++                "Log Checkpoint v0\n123\nYmFuYW5hcw==",
++            ), (
++                "invalid size - not a number",
++                "Log Checkpoint v0\nbananas\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
++            ), (
++                "invalid size - negative",
++                "Log Checkpoint v0\n-34\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
++            ),
++                (
++                    "invalid size - too large",
++                    "Log Checkpoint v0\n3438945738945739845734895735\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
++                ),
++                (
++                    "invalid roothash - not base64",
++                    "Log Checkpoint v0\n123\nThisIsn'tBase64\n",
++                ),
++            ];
++            for (desc, data) in test_cases {
++                assert!(
++                    CheckpointNote::unmarshal(data).is_err(),
++                    "accepted invalid note: {desc}"
++                );
++            }
++        }
++    }
++
++    #[cfg(test)]
++    mod test_checkpoint_signature {
++        use crate::rekor::models::checkpoint::CheckpointSignature;
++        use std::str::FromStr;
++
++        #[test]
++        fn test_to_string_valid_with_url_name() {
++            let got = CheckpointSignature {
++                name: "log.example.org".to_string(),
++                key_fingerprint: [0; 4],
++                raw: vec![1; 32],
++            }
++            .to_string();
++            let expected = "— log.example.org AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
++            assert_eq!(got, expected)
++        }
++
++        #[test]
++        fn test_to_string_valid_with_id_name() {
++            let got = CheckpointSignature {
++                name: "815f6c60aab9".to_string(),
++                key_fingerprint: [0; 4],
++                raw: vec![1; 32],
++            }
++            .to_string();
++            let expected = "— 815f6c60aab9 AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
++            assert_eq!(got, expected)
++        }
++
++        #[test]
++        fn test_from_str_valid_with_url_name() {
++            let input = "— log.example.org AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
++            let expected = CheckpointSignature {
++                name: "log.example.org".to_string(),
++                key_fingerprint: [0; 4],
++                raw: vec![1; 32],
++            };
++            let got = CheckpointSignature::from_str(input);
++            assert_eq!(got, Ok(expected))
++        }
++
++        #[test]
++        fn test_from_str_valid_with_id_name() {
++            let input = "— 815f6c60aab9 AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
++            let expected = CheckpointSignature {
++                name: "815f6c60aab9".to_string(),
++                key_fingerprint: [0; 4],
++                raw: vec![1; 32],
++            };
++            let got = CheckpointSignature::from_str(input);
++            assert_eq!(got, Ok(expected))
++        }
++
++        #[test]
++        fn test_from_str_valid_with_whitespace() {
++            let input = "\n— log.example.org AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n\n";
++            let expected = CheckpointSignature {
++                name: "log.example.org".to_string(),
++                key_fingerprint: [0; 4],
++                raw: vec![1; 32],
++            };
++            let got = CheckpointSignature::from_str(input);
++            assert_eq!(got, Ok(expected))
++        }
++
++        #[test]
++        fn test_from_str_invalid_with_spaces_in_name() {
++            let input = "— Foo Bar AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
++            let got = CheckpointSignature::from_str(input);
++            assert!(got.is_err())
++        }
++    }
++}
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index f819675eed..5ab351449a 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -8,6 +8,8 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
++use crate::errors::SigstoreError;
++use crate::errors::SigstoreError::{ConsistencyProofError, UnexpectedError};
+ use serde::{Deserialize, Serialize};
+ 
+ #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+@@ -23,4 +25,45 @@ impl ConsistencyProof {
+     pub fn new(root_hash: String, hashes: Vec<String>) -> ConsistencyProof {
+         ConsistencyProof { root_hash, hashes }
+     }
++
++    pub fn verify(
++        &self,
++        old_size: usize,
++        old_root: &str,
++        new_size: usize,
++    ) -> Result<(), SigstoreError> {
++        use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
++
++        // decode hashes from hex and convert them to the required data structure
++        // immediately return an error when conversion fails
++        let proof_hashes = self
++            .hashes
++            .iter()
++            .map(|h| {
++                hex::decode(h)
++                    .map_err(Into::into) // failed to decode from hex
++                    .and_then(|h| {
++                        <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++                    })
++                    .map(Into::into)
++            })
++            .collect::<Result<Vec<_>, _>>()?;
++
++        let old_root = hex::decode(old_root)
++            .map_err(Into::into)
++            .and_then(|h| {
++                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++            })
++            .map(Into::into)?;
++
++        let new_root = hex::decode(&self.root_hash)
++            .map_err(Into::into)
++            .and_then(|h| {
++                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++            })
++            .map(Into::into)?;
++
++        Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
++            .map_err(ConsistencyProofError)
++    }
+ }
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index 3dc6653a14..fdf1cc425f 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -8,6 +8,11 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
++use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTrait};
++use crate::crypto::CosignVerificationKey;
++use crate::errors::SigstoreError;
++use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
++use crate::rekor::models::checkpoint::{CheckpointNote, SignedCheckpoint};
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+ 
+@@ -25,6 +30,7 @@ pub struct InclusionProof {
+     /// A list of hashes required to compute the inclusion proof, sorted in order from leaf to root
+     #[serde(rename = "hashes")]
+     pub hashes: Vec<String>,
++    pub checkpoint: Option<SignedCheckpoint>,
+ }
+ 
+ impl InclusionProof {
+@@ -33,12 +39,77 @@ impl InclusionProof {
+         root_hash: String,
+         tree_size: TreeSize,
+         hashes: Vec<String>,
++        checkpoint: Option<SignedCheckpoint>,
+     ) -> InclusionProof {
+         InclusionProof {
+             log_index,
+             root_hash,
+             tree_size,
+             hashes,
++            checkpoint,
+         }
+     }
++
++    /// Verify that the canonically encoded `entry` is included in the log,
++    /// and the included checkpoint was signed by the log.
++    pub fn verify(
++        &self,
++        entry: &[u8],
++        rekor_key: &CosignVerificationKey,
++    ) -> Result<(), SigstoreError> {
++        // enforce that there is a checkpoint
++        let checkpoint = self.checkpoint.as_ref().ok_or(UnexpectedError(
++            "inclusion proof misses checkpoint".to_string(),
++        ))?;
++
++        // make sure we don't just accept any random checkpoint
++        self.verify_checkpoint_sanity(&checkpoint.note)?;
++
++        // verify the checkpoint signature
++        checkpoint.verify_signature(rekor_key)?;
++
++        let entry_hash = Rfc6269Default::hash_leaf(entry);
++
++        // decode hashes from hex and convert them to the required data structure
++        // immediately return an error when conversion fails
++        let proof_hashes = self
++            .hashes
++            .iter()
++            .map(|h| {
++                hex::decode(h)
++                    .map_err(Into::into)
++                    .and_then(|h| {
++                        <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++                    })
++                    .map(Into::into)
++            })
++            .collect::<Result<Vec<_>, _>>()?;
++
++        let entry_hash = hex::decode(entry_hash)
++            .map_err(Into::into)
++            .and_then(|h| {
++                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++            })
++            .map(Into::into)?;
++        let root_hash = hex::decode(&self.root_hash)
++            .map_err(Into::into)
++            .and_then(|h| {
++                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
++            })
++            .map(Into::into)?;
++
++        Rfc6269Default::verify_inclusion(
++            self.log_index as usize,
++            &entry_hash,
++            self.tree_size as usize,
++            &proof_hashes,
++            &root_hash,
++        )
++        .map_err(InclusionProofError)
++    }
++
++    /// verify that the checkpoint actually can be used to verify this inclusion proof
++    fn verify_checkpoint_sanity(&self, _note: &CheckpointNote) -> Result<(), SigstoreError> {
++        todo!()
++    }
+ }
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 5caadd3db2..3d39b5bc9e 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -17,6 +17,10 @@ use crate::errors::SigstoreError;
+ use crate::rekor::TreeSize;
+ use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _};
+ 
++use crate::crypto::CosignVerificationKey;
++use crate::errors::SigstoreError::UnexpectedError;
++use crate::rekor::models::InclusionProof;
++use olpc_cjson::CanonicalFormatter;
+ use serde::{Deserialize, Serialize};
+ use serde_json::{json, Error, Value};
+ use std::collections::HashMap;
+@@ -50,7 +54,7 @@ impl FromStr for LogEntry {
+                 decode_body(body.as_str().expect("Failed to parse Body"))
+                     .expect("Failed to decode Body"),
+             )
+-            .expect("Serialization failed");
++                .expect("Serialization failed");
+             *body = json!(decoded_body);
+         });
+         let log_entry_str = serde_json::to_string(&log_entry_map)?;
+@@ -102,6 +106,25 @@ pub struct Verification {
+     pub signed_entry_timestamp: String,
+ }
+ 
++impl LogEntry {
++    pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
++        self.verification
++            .inclusion_proof
++            .as_ref()
++            .ok_or(UnexpectedError("missing inclusion proof".to_string()))
++            .and_then(|proof| {
++                // encode as canonical JSON
++                let mut encoded_entry = Vec::new();
++                let mut ser = serde_json::Serializer::with_formatter(
++                    &mut encoded_entry,
++                    CanonicalFormatter::new(),
++                );
++                self.serialize(&mut ser)?;
++                proof.verify(&encoded_entry, rekor_key)
++            })
++    }
++}
++
+ /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
+ #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase")]
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 12e2ce72b7..6697457df3 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -8,10 +8,11 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
++use crate::rekor::models::checkpoint::SignedCheckpoint;
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+ 
+-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct LogInfo {
+     /// The current hash value stored at the root of the merkle tree
+     #[serde(rename = "rootHash")]
+@@ -21,7 +22,7 @@ pub struct LogInfo {
+     pub tree_size: TreeSize,
+     /// The current signed tree head
+     #[serde(rename = "signedTreeHead")]
+-    pub signed_tree_head: String,
++    pub signed_tree_head: SignedCheckpoint,
+     /// The current treeID
+     #[serde(rename = "treeID")]
+     pub tree_id: Option<String>,
+@@ -30,7 +31,11 @@ pub struct LogInfo {
+ }
+ 
+ impl LogInfo {
+-    pub fn new(root_hash: String, tree_size: TreeSize, signed_tree_head: String) -> LogInfo {
++    pub fn new(
++        root_hash: String,
++        tree_size: TreeSize,
++        signed_tree_head: SignedCheckpoint,
++    ) -> LogInfo {
+         LogInfo {
+             root_hash,
+             tree_size,
+diff --git a/src/rekor/models/mod.rs b/src/rekor/models/mod.rs
+index 67ba961315..bd44837e77 100644
+--- a/src/rekor/models/mod.rs
++++ b/src/rekor/models/mod.rs
+@@ -52,5 +52,6 @@ pub mod tuf;
+ pub use self::tuf::Tuf;
+ pub mod tuf_all_of;
+ pub use self::tuf_all_of::TufAllOf;
++pub mod checkpoint;
+ pub mod log_entry;
+ pub use self::log_entry::LogEntry;
+
+From 7dd422459c61e790ddb51cda7f8d3e2d5bb49e36 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 21 Jul 2023 10:59:49 +0200
+Subject: [PATCH 02/13] Added merkle proof examples, fixed some bugs, reduced
+ repetition and added some functionality.
+
+Relates to: #283
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ Cargo.toml                                  |  8 ++++
+ examples/rekor/merkle_proofs/consistency.rs | 46 +++++++++++++++++++++
+ examples/rekor/merkle_proofs/inclusion.rs   | 35 ++++++++++++++++
+ src/crypto/merkle/mod.rs                    | 15 +++++++
+ src/rekor/models/checkpoint.rs              | 32 ++++++++++++++
+ src/rekor/models/consistency_proof.rs       | 30 +++-----------
+ src/rekor/models/inclusion_proof.rs         | 39 ++++-------------
+ src/rekor/models/log_entry.rs               |  2 +-
+ src/rekor/models/log_info.rs                | 22 ++++++++++
+ 9 files changed, 174 insertions(+), 55 deletions(-)
+ create mode 100644 examples/rekor/merkle_proofs/consistency.rs
+ create mode 100644 examples/rekor/merkle_proofs/inclusion.rs
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 4c9f5cbc74..a9de331c82 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -218,3 +218,11 @@ path = "examples/rekor/search_log_query/main.rs"
+ [[example]]
+ name = "fulcio_cert"
+ path = "examples/fulcio/cert/main.rs"
++
++[[example]]
++name = "inclusion_proof"
++path = "examples/rekor/merkle_proofs/inclusion.rs"
++
++[[example]]
++name = "consistency_proof"
++path = "examples/rekor/merkle_proofs/consistency.rs"
+\ No newline at end of file
+diff --git a/examples/rekor/merkle_proofs/consistency.rs b/examples/rekor/merkle_proofs/consistency.rs
+new file mode 100644
+index 0000000000..39cf4413e2
+--- /dev/null
++++ b/examples/rekor/merkle_proofs/consistency.rs
+@@ -0,0 +1,46 @@
++use clap::Parser;
++use sigstore::crypto::CosignVerificationKey;
++use sigstore::rekor::apis::configuration::Configuration;
++use sigstore::rekor::apis::tlog_api::{get_log_info, get_log_proof};
++use std::fs::read_to_string;
++use std::path::PathBuf;
++
++#[derive(Parser)]
++struct Args {
++    #[arg(long, value_name = "REKOR PUBLIC KEY")]
++    rekor_key: PathBuf,
++    #[arg(long, value_name = "HEX ENCODED HASH")]
++    old_root: String,
++    #[arg(long)]
++    old_size: usize,
++    #[arg(long, value_name = "TREE ID")]
++    tree_id: Option<String>,
++}
++
++#[tokio::main]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let args = Args::parse();
++    let tree_id = args.tree_id.as_ref().map(|s| s.as_str());
++    // read verification key
++    let rekor_key = read_to_string(&args.rekor_key)
++        .map_err(Into::into)
++        .and_then(|k| CosignVerificationKey::from_pem(k.as_bytes(), &Default::default()))?;
++
++    // fetch log info
++    let rekor_config = Configuration::default();
++    let log_info = get_log_info(&rekor_config).await?;
++
++    let proof = get_log_proof(
++        &rekor_config,
++        log_info.tree_size as _,
++        Some(&args.old_size.to_string()),
++        tree_id,
++    )
++    .await?;
++
++    log_info
++        .verify_consistency(args.old_size, &args.old_root, &proof, &rekor_key)
++        .expect("failed to verify log consistency");
++    println!("Successfully verified consistency");
++    Ok(())
++}
+diff --git a/examples/rekor/merkle_proofs/inclusion.rs b/examples/rekor/merkle_proofs/inclusion.rs
+new file mode 100644
+index 0000000000..332f296b30
+--- /dev/null
++++ b/examples/rekor/merkle_proofs/inclusion.rs
+@@ -0,0 +1,35 @@
++use clap::Parser;
++use sigstore::crypto::CosignVerificationKey;
++use sigstore::rekor::apis::configuration::Configuration;
++use sigstore::rekor::apis::entries_api::get_log_entry_by_index;
++use std::fs::read_to_string;
++use std::path::PathBuf;
++
++#[derive(Parser)]
++struct Args {
++    #[arg(long, value_name = "INDEX")]
++    log_index: usize,
++    #[arg(long, value_name = "REKOR PUBLIC KEY")]
++    rekor_key: PathBuf,
++}
++
++#[tokio::main]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let args = Args::parse();
++
++    // read verification key
++    let rekor_key = read_to_string(&args.rekor_key)
++        .map_err(Into::into)
++        .and_then(|k| CosignVerificationKey::from_pem(k.as_bytes(), &Default::default()))?;
++
++    // fetch entry from log
++    let rekor_config = Configuration::default();
++    let log_entry = get_log_entry_by_index(&rekor_config, args.log_index as i32).await?;
++
++    // verify inclusion with key
++    log_entry
++        .verify_inclusion(&rekor_key)
++        .expect("failed to verify log inclusion");
++    println!("Successfully verified inclusion.");
++    Ok(())
++}
+diff --git a/src/crypto/merkle/mod.rs b/src/crypto/merkle/mod.rs
+index c53cf0548d..a7366a4eaf 100644
+--- a/src/crypto/merkle/mod.rs
++++ b/src/crypto/merkle/mod.rs
+@@ -1,6 +1,21 @@
+ pub mod proof_verification;
+ pub mod rfc6962;
+ 
++use crate::errors::SigstoreError;
++use crate::errors::SigstoreError::UnexpectedError;
++use digest::Output;
+ pub use proof_verification::MerkleProofError;
+ pub(crate) use proof_verification::MerkleProofVerifier;
+ pub(crate) use rfc6962::{Rfc6269Default, Rfc6269HasherTrait};
++
++/// Many rekor models have hex-encoded hashes, this functions helps to avoid repetition.
++pub(crate) fn hex_to_hash_output(
++    h: impl AsRef<[u8]>,
++) -> Result<Output<Rfc6269Default>, SigstoreError> {
++    hex::decode(h)
++        .map_err(Into::into)
++        .and_then(|h| {
++            <[u8; 32]>::try_from(h.as_slice()).map_err(|err| UnexpectedError(format!("{err:?}")))
++        })
++        .map(Into::into)
++}
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index ec3593ef0f..69cbe7228d 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -1,8 +1,11 @@
++use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
+ use crate::crypto::{CosignVerificationKey, Signature};
+ use crate::errors::SigstoreError;
++use crate::errors::SigstoreError::{ConsistencyProofError, UnexpectedError};
+ use crate::rekor::models::checkpoint::ParseCheckpointError::*;
+ use base64::prelude::BASE64_STANDARD;
+ use base64::Engine;
++use digest::Output;
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+ use std::fmt::{Display, Formatter};
+ use std::str::FromStr;
+@@ -153,6 +156,35 @@ impl SignedCheckpoint {
+             self.note.marshal().as_bytes(),
+         )
+     }
++
++    /// Checks if the checkpoint and inclusion proof are valid together.
++    pub(crate) fn valid_consistency_proof(
++        &self,
++        proof_root_hash: &Output<Rfc6269Default>,
++        proof_tree_size: u64,
++    ) -> Result<(), SigstoreError> {
++        // Delegate implementation as trivial consistency proof.
++        Rfc6269Default::verify_consistency(
++            self.note.size as usize,
++            proof_tree_size as usize,
++            &[],
++            &self.note.hash.into(),
++            proof_root_hash,
++        )
++        .map_err(ConsistencyProofError)
++    }
++
++    /// Verifies that the checkpoint can be used for an inclusion proof with this root hash.
++    pub(crate) fn valid_inclusion_proof(
++        &self,
++        proof_root_hash: &Output<Rfc6269Default>,
++    ) -> Result<(), SigstoreError> {
++        Rfc6269Default::verify_match(proof_root_hash, &self.note.hash.into()).map_err(|_| {
++            UnexpectedError(
++                "consistency proof root hash does not match checkpoint root hash".to_string(),
++            )
++        })
++    }
+ }
+ 
+ impl Serialize for SignedCheckpoint {
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 5ab351449a..0e473e7f14 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -8,8 +8,10 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
++use crate::crypto::merkle::hex_to_hash_output;
++use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
+ use crate::errors::SigstoreError;
+-use crate::errors::SigstoreError::{ConsistencyProofError, UnexpectedError};
++use crate::errors::SigstoreError::ConsistencyProofError;
+ use serde::{Deserialize, Serialize};
+ 
+ #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+@@ -32,36 +34,16 @@ impl ConsistencyProof {
+         old_root: &str,
+         new_size: usize,
+     ) -> Result<(), SigstoreError> {
+-        use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
+-
+         // decode hashes from hex and convert them to the required data structure
+         // immediately return an error when conversion fails
+         let proof_hashes = self
+             .hashes
+             .iter()
+-            .map(|h| {
+-                hex::decode(h)
+-                    .map_err(Into::into) // failed to decode from hex
+-                    .and_then(|h| {
+-                        <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-                    })
+-                    .map(Into::into)
+-            })
++            .map(hex_to_hash_output)
+             .collect::<Result<Vec<_>, _>>()?;
+ 
+-        let old_root = hex::decode(old_root)
+-            .map_err(Into::into)
+-            .and_then(|h| {
+-                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-            })
+-            .map(Into::into)?;
+-
+-        let new_root = hex::decode(&self.root_hash)
+-            .map_err(Into::into)
+-            .and_then(|h| {
+-                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-            })
+-            .map(Into::into)?;
++        let old_root = hex_to_hash_output(old_root)?;
++        let new_root = hex_to_hash_output(&self.root_hash)?;
+ 
+         Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
+             .map_err(ConsistencyProofError)
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index fdf1cc425f..97e7a6fc9e 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -8,11 +8,13 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
+-use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTrait};
++use crate::crypto::merkle::{
++    hex_to_hash_output, MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTrait,
++};
+ use crate::crypto::CosignVerificationKey;
+ use crate::errors::SigstoreError;
+ use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
+-use crate::rekor::models::checkpoint::{CheckpointNote, SignedCheckpoint};
++use crate::rekor::models::checkpoint::SignedCheckpoint;
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+ 
+@@ -62,9 +64,6 @@ impl InclusionProof {
+             "inclusion proof misses checkpoint".to_string(),
+         ))?;
+ 
+-        // make sure we don't just accept any random checkpoint
+-        self.verify_checkpoint_sanity(&checkpoint.note)?;
+-
+         // verify the checkpoint signature
+         checkpoint.verify_signature(rekor_key)?;
+ 
+@@ -75,28 +74,13 @@ impl InclusionProof {
+         let proof_hashes = self
+             .hashes
+             .iter()
+-            .map(|h| {
+-                hex::decode(h)
+-                    .map_err(Into::into)
+-                    .and_then(|h| {
+-                        <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-                    })
+-                    .map(Into::into)
+-            })
++            .map(hex_to_hash_output)
+             .collect::<Result<Vec<_>, _>>()?;
+ 
+-        let entry_hash = hex::decode(entry_hash)
+-            .map_err(Into::into)
+-            .and_then(|h| {
+-                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-            })
+-            .map(Into::into)?;
+-        let root_hash = hex::decode(&self.root_hash)
+-            .map_err(Into::into)
+-            .and_then(|h| {
+-                <[u8; 32]>::try_from(h).map_err(|err| UnexpectedError(format!("{err:?}")))
+-            })
+-            .map(Into::into)?;
++        let root_hash = hex_to_hash_output(&self.root_hash)?;
++
++        // check if the inclusion and checkpoint match
++        checkpoint.valid_inclusion_proof(&root_hash)?;
+ 
+         Rfc6269Default::verify_inclusion(
+             self.log_index as usize,
+@@ -107,9 +91,4 @@ impl InclusionProof {
+         )
+         .map_err(InclusionProofError)
+     }
+-
+-    /// verify that the checkpoint actually can be used to verify this inclusion proof
+-    fn verify_checkpoint_sanity(&self, _note: &CheckpointNote) -> Result<(), SigstoreError> {
+-        todo!()
+-    }
+ }
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 3d39b5bc9e..943dc529ba 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -119,7 +119,7 @@ impl LogEntry {
+                     &mut encoded_entry,
+                     CanonicalFormatter::new(),
+                 );
+-                self.serialize(&mut ser)?;
++                self.body.serialize(&mut ser)?;
+                 proof.verify(&encoded_entry, rekor_key)
+             })
+     }
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 6697457df3..b3c46b147c 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -8,7 +8,11 @@
+  * Generated by: https://openapi-generator.tech
+  */
+ 
++use crate::crypto::merkle::hex_to_hash_output;
++use crate::crypto::CosignVerificationKey;
++use crate::errors::SigstoreError;
+ use crate::rekor::models::checkpoint::SignedCheckpoint;
++use crate::rekor::models::ConsistencyProof;
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+ 
+@@ -44,4 +48,22 @@ impl LogInfo {
+             inactive_shards: None,
+         }
+     }
++
++    pub fn verify_consistency(
++        &self,
++        old_size: usize,
++        old_root: &str,
++        consistency_proof: &ConsistencyProof,
++        rekor_key: &CosignVerificationKey,
++    ) -> Result<(), SigstoreError> {
++        // verify checkpoint is signed by log
++        self.signed_tree_head.verify_signature(rekor_key)?;
++
++        self.signed_tree_head.valid_consistency_proof(
++            &hex_to_hash_output(&self.root_hash)?,
++            self.tree_size as u64,
++        )?;
++        consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
++        Ok(())
++    }
+ }
+
+From 73dd6e874ca29c5add2761339d728c6214171067 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Wed, 26 Jul 2023 09:42:24 +0200
+Subject: [PATCH 03/13] consolidated methods
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/checkpoint.rs      | 16 ++--------------
+ src/rekor/models/inclusion_proof.rs |  2 +-
+ src/rekor/models/log_info.rs        |  6 ++----
+ 3 files changed, 5 insertions(+), 19 deletions(-)
+
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index 69cbe7228d..09c920fafd 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -1,7 +1,7 @@
+ use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default};
+ use crate::crypto::{CosignVerificationKey, Signature};
+ use crate::errors::SigstoreError;
+-use crate::errors::SigstoreError::{ConsistencyProofError, UnexpectedError};
++use crate::errors::SigstoreError::ConsistencyProofError;
+ use crate::rekor::models::checkpoint::ParseCheckpointError::*;
+ use base64::prelude::BASE64_STANDARD;
+ use base64::Engine;
+@@ -158,7 +158,7 @@ impl SignedCheckpoint {
+     }
+ 
+     /// Checks if the checkpoint and inclusion proof are valid together.
+-    pub(crate) fn valid_consistency_proof(
++    pub(crate) fn is_valid_for_proof(
+         &self,
+         proof_root_hash: &Output<Rfc6269Default>,
+         proof_tree_size: u64,
+@@ -173,18 +173,6 @@ impl SignedCheckpoint {
+         )
+         .map_err(ConsistencyProofError)
+     }
+-
+-    /// Verifies that the checkpoint can be used for an inclusion proof with this root hash.
+-    pub(crate) fn valid_inclusion_proof(
+-        &self,
+-        proof_root_hash: &Output<Rfc6269Default>,
+-    ) -> Result<(), SigstoreError> {
+-        Rfc6269Default::verify_match(proof_root_hash, &self.note.hash.into()).map_err(|_| {
+-            UnexpectedError(
+-                "consistency proof root hash does not match checkpoint root hash".to_string(),
+-            )
+-        })
+-    }
+ }
+ 
+ impl Serialize for SignedCheckpoint {
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index 97e7a6fc9e..09bf753fb4 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -80,7 +80,7 @@ impl InclusionProof {
+         let root_hash = hex_to_hash_output(&self.root_hash)?;
+ 
+         // check if the inclusion and checkpoint match
+-        checkpoint.valid_inclusion_proof(&root_hash)?;
++        checkpoint.is_valid_for_proof(&root_hash, self.tree_size as u64)?;
+ 
+         Rfc6269Default::verify_inclusion(
+             self.log_index as usize,
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index b3c46b147c..7b8f921e10 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -59,10 +59,8 @@ impl LogInfo {
+         // verify checkpoint is signed by log
+         self.signed_tree_head.verify_signature(rekor_key)?;
+ 
+-        self.signed_tree_head.valid_consistency_proof(
+-            &hex_to_hash_output(&self.root_hash)?,
+-            self.tree_size as u64,
+-        )?;
++        self.signed_tree_head
++            .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size as u64)?;
+         consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
+         Ok(())
+     }
+
+From d936abd006989b7b9d617082d21988c6d6239b98 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Wed, 26 Jul 2023 10:34:57 +0200
+Subject: [PATCH 04/13] Added doctests to LogInfo and LogEntry merkle proof
+ verification functions.
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/consistency_proof.rs |  1 +
+ src/rekor/models/log_entry.rs         | 31 +++++++++++++++++++
+ src/rekor/models/log_info.rs          | 44 ++++++++++++++++++++++++++-
+ 3 files changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 0e473e7f14..1161834cce 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -28,6 +28,7 @@ impl ConsistencyProof {
+         ConsistencyProof { root_hash, hashes }
+     }
+ 
++    /// Verify this consistency proof against the given parameters.
+     pub fn verify(
+         &self,
+         old_size: usize,
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 943dc529ba..d895ac7970 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -107,6 +107,37 @@ pub struct Verification {
+ }
+ 
+ impl LogEntry {
++    /// Verifies that the log entry was included by a log in possession of `rekor_key`.
++    ///
++    /// Example:
++    /// ```rust
++    /// use sigstore::rekor::apis::configuration::Configuration;
++    /// use sigstore::rekor::apis::pubkey_api::get_public_key;
++    /// use sigstore::rekor::apis::tlog_api::get_log_info;
++    /// use sigstore::crypto::{CosignVerificationKey, SigningScheme};
++    /// #[tokio::main]
++    /// async fn main() {
++    ///     use sigstore::rekor::apis::entries_api::get_log_entry_by_index;
++    ///     let rekor_config = Configuration::default();
++    ///     // Important: in practice obtain the rekor key via TUF repo or another secure channel!
++    ///     let rekor_key = get_public_key(&rekor_config, None)
++    ///         .await
++    ///         .expect("failed to fetch pubkey from remote log");
++    ///     let rekor_key =  CosignVerificationKey::from_pem(
++    ///         rekor_key.as_bytes(),
++    ///         &SigningScheme::ECDSA_P256_SHA256_ASN1,
++    ///     ).expect("failed to parse rekor key");
++    ///
++    ///     // fetch log info and then the most recent entry
++    ///     let log_info = get_log_info(&rekor_config)
++    ///         .await
++    ///         .expect("failed to fetch log info");
++    ///     let entry = get_log_entry_by_index(&rekor_config, (log_info.tree_size - 1) as i32)
++    ///         .await.expect("failed to fetch log entry");
++    ///     entry.verify_inclusion(&rekor_key)
++    ///         .expect("failed to verify inclusion");
++    /// }
++    /// ```
+     pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+         self.verification
+             .inclusion_proof
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 7b8f921e10..91587e7660 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -48,7 +48,49 @@ impl LogInfo {
+             inactive_shards: None,
+         }
+     }
+-
++    /// Verify the consistency of the proof provided by the log.
++    ///
++    /// Example:
++    /// ```rust
++    /// use sigstore::crypto::{CosignVerificationKey, SigningScheme};
++    /// use sigstore::rekor::apis::configuration::Configuration;
++    /// use sigstore::rekor::apis::pubkey_api::get_public_key;
++    /// use sigstore::rekor::apis::tlog_api::{get_log_info, get_log_proof};
++    ///
++    /// #[tokio::main]
++    /// async fn main() {
++    ///     let rekor_config = Configuration::default();
++    ///
++    ///     // Important: in practice obtain the rekor key via TUF repo or another secure channel!
++    ///     let rekor_key = get_public_key(&rekor_config, None)
++    ///         .await
++    ///         .expect("failed to fetch pubkey from remote log");
++    ///     let rekor_key =  CosignVerificationKey::from_pem(
++    ///         rekor_key.as_bytes(),
++    ///         &SigningScheme::ECDSA_P256_SHA256_ASN1,
++    ///     ).expect("failed to parse rekor key");
++    ///     // fetch log info twice and run consistency proof
++    ///     let log_info1 = get_log_info(&rekor_config)
++    ///         .await
++    ///         .expect("failed to fetch data from remote");
++    ///     let log_info2 = get_log_info(&rekor_config)
++    ///         .await
++    ///         .expect("failed to fetch data from remote");
++    ///
++    ///      // get a proof using log_info1 as the previous tree state
++    ///      let proof = get_log_proof(
++    ///         &rekor_config,
++    ///         log_info2.tree_size as _,
++    ///         Some(&log_info1.tree_size.to_string()),
++    ///         None,
++    ///     )
++    ///     .await.expect("failed to fetch data from remote");
++    ///      log_info2
++    ///         .verify_consistency(log_info1.tree_size as usize, &log_info1.root_hash, &proof, &rekor_key)
++    ///         .expect("failed to verify log consistency");
++    /// }
++    ///
++    /// ```
+     pub fn verify_consistency(
+         &self,
+         old_size: usize,
+
+From 6d513772022f2532b600145a5843e01e585ea34d Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Thu, 27 Jul 2023 09:35:29 +0200
+Subject: [PATCH 05/13] Rebased to main.
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/checkpoint.rs      | 16 ++++++++--------
+ src/rekor/models/inclusion_proof.rs |  6 +++---
+ src/rekor/models/log_entry.rs       | 18 ++++++++++++++++--
+ src/rekor/models/log_info.rs        | 10 +++-------
+ 4 files changed, 30 insertions(+), 20 deletions(-)
+
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index 09c920fafd..5d57238871 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -15,7 +15,7 @@ use std::str::FromStr;
+ /// The `note` field stores this data,
+ /// and its authenticity can be verified with the data in `signature`.
+ #[derive(Debug, PartialEq, Clone, Eq)]
+-pub struct SignedCheckpoint {
++pub struct Checkpoint {
+     pub note: CheckpointNote,
+     pub signature: CheckpointSignature,
+ }
+@@ -67,7 +67,7 @@ pub enum ParseCheckpointError {
+     DecodeError(String),
+ }
+ 
+-impl FromStr for SignedCheckpoint {
++impl FromStr for Checkpoint {
+     type Err = ParseCheckpointError;
+ 
+     fn from_str(s: &str) -> Result<Self, Self::Err> {
+@@ -82,7 +82,7 @@ impl FromStr for SignedCheckpoint {
+         let signature = signature.parse()?;
+         let note = CheckpointNote::unmarshal(note)?;
+ 
+-        Ok(SignedCheckpoint { note, signature })
++        Ok(Checkpoint { note, signature })
+     }
+ }
+ 
+@@ -139,7 +139,7 @@ impl CheckpointNote {
+     }
+ }
+ 
+-impl ToString for SignedCheckpoint {
++impl ToString for Checkpoint {
+     fn to_string(&self) -> String {
+         let note = self.note.marshal();
+         let signature = self.signature.to_string();
+@@ -147,7 +147,7 @@ impl ToString for SignedCheckpoint {
+     }
+ }
+ 
+-impl SignedCheckpoint {
++impl Checkpoint {
+     /// This method can be used to verify that the checkpoint was issued by the log with the
+     /// public key `rekor_key`.
+     pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+@@ -175,7 +175,7 @@ impl SignedCheckpoint {
+     }
+ }
+ 
+-impl Serialize for SignedCheckpoint {
++impl Serialize for Checkpoint {
+     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+     where
+         S: Serializer,
+@@ -184,13 +184,13 @@ impl Serialize for SignedCheckpoint {
+     }
+ }
+ 
+-impl<'de> Deserialize<'de> for SignedCheckpoint {
++impl<'de> Deserialize<'de> for Checkpoint {
+     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+     where
+         D: Deserializer<'de>,
+     {
+         <String>::deserialize(deserializer).and_then(|s| {
+-            SignedCheckpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
++            Checkpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
+         })
+     }
+ }
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index 09bf753fb4..f0bfd53f39 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -14,7 +14,7 @@ use crate::crypto::merkle::{
+ use crate::crypto::CosignVerificationKey;
+ use crate::errors::SigstoreError;
+ use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
+-use crate::rekor::models::checkpoint::SignedCheckpoint;
++use crate::rekor::models::checkpoint::Checkpoint;
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+ 
+@@ -32,7 +32,7 @@ pub struct InclusionProof {
+     /// A list of hashes required to compute the inclusion proof, sorted in order from leaf to root
+     #[serde(rename = "hashes")]
+     pub hashes: Vec<String>,
+-    pub checkpoint: Option<SignedCheckpoint>,
++    pub checkpoint: Option<Checkpoint>,
+ }
+ 
+ impl InclusionProof {
+@@ -41,7 +41,7 @@ impl InclusionProof {
+         root_hash: String,
+         tree_size: TreeSize,
+         hashes: Vec<String>,
+-        checkpoint: Option<SignedCheckpoint>,
++        checkpoint: Option<Checkpoint>,
+     ) -> InclusionProof {
+         InclusionProof {
+             log_index,
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index d895ac7970..fcc8528d9b 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -19,7 +19,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STD_ENGINE, Engine as _
+ 
+ use crate::crypto::CosignVerificationKey;
+ use crate::errors::SigstoreError::UnexpectedError;
+-use crate::rekor::models::InclusionProof;
++use crate::rekor::models::checkpoint::Checkpoint;
++use crate::rekor::models::InclusionProof as InclusionProof2;
+ use olpc_cjson::CanonicalFormatter;
+ use serde::{Deserialize, Serialize};
+ use serde_json::{json, Error, Value};
+@@ -54,7 +55,7 @@ impl FromStr for LogEntry {
+                 decode_body(body.as_str().expect("Failed to parse Body"))
+                     .expect("Failed to decode Body"),
+             )
+-                .expect("Serialization failed");
++            .expect("Serialization failed");
+             *body = json!(decoded_body);
+         });
+         let log_entry_str = serde_json::to_string(&log_entry_map)?;
+@@ -143,6 +144,19 @@ impl LogEntry {
+             .inclusion_proof
+             .as_ref()
+             .ok_or(UnexpectedError("missing inclusion proof".to_string()))
++            .and_then(|proof| {
++                Checkpoint::from_str(&proof.checkpoint)
++                    .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
++                    .map(|checkpoint| {
++                        InclusionProof2::new(
++                            proof.log_index,
++                            proof.root_hash.clone(),
++                            proof.tree_size,
++                            proof.hashes.clone(),
++                            Some(checkpoint),
++                        )
++                    })
++            })
+             .and_then(|proof| {
+                 // encode as canonical JSON
+                 let mut encoded_entry = Vec::new();
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 91587e7660..31f536db3b 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -11,7 +11,7 @@
+ use crate::crypto::merkle::hex_to_hash_output;
+ use crate::crypto::CosignVerificationKey;
+ use crate::errors::SigstoreError;
+-use crate::rekor::models::checkpoint::SignedCheckpoint;
++use crate::rekor::models::checkpoint::Checkpoint;
+ use crate::rekor::models::ConsistencyProof;
+ use crate::rekor::TreeSize;
+ use serde::{Deserialize, Serialize};
+@@ -26,7 +26,7 @@ pub struct LogInfo {
+     pub tree_size: TreeSize,
+     /// The current signed tree head
+     #[serde(rename = "signedTreeHead")]
+-    pub signed_tree_head: SignedCheckpoint,
++    pub signed_tree_head: Checkpoint,
+     /// The current treeID
+     #[serde(rename = "treeID")]
+     pub tree_id: Option<String>,
+@@ -35,11 +35,7 @@ pub struct LogInfo {
+ }
+ 
+ impl LogInfo {
+-    pub fn new(
+-        root_hash: String,
+-        tree_size: TreeSize,
+-        signed_tree_head: SignedCheckpoint,
+-    ) -> LogInfo {
++    pub fn new(root_hash: String, tree_size: TreeSize, signed_tree_head: Checkpoint) -> LogInfo {
+         LogInfo {
+             root_hash,
+             tree_size,
+
+From e45c952703f073028f9e6629d7e2e51706464759 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Wed, 20 Mar 2024 12:02:45 +0100
+Subject: [PATCH 06/13] Refactored to use a single library for JSON
+ canonicalization.
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ Cargo.toml                         |  1 -
+ src/cosign/bundle.rs               | 14 +++++------
+ src/registry/oci_caching_client.rs | 38 +++++++++++++++++-------------
+ src/rekor/models/checkpoint.rs     | 10 ++++----
+ src/rekor/models/log_entry.rs      | 17 ++++++-------
+ 5 files changed, 42 insertions(+), 38 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index a9de331c82..be1c652c49 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -83,7 +83,6 @@ ed25519-dalek = { version = "2.0.0-rc.2", features = ["pkcs8", "rand_core"] }
+ elliptic-curve = { version = "0.13.5", features = ["arithmetic", "pem"] }
+ lazy_static = "1.4.0"
+ oci-distribution = { version = "0.10", default-features = false, optional = true }
+-olpc-cjson = "0.1"
+ openidconnect = { version = "3.0", default-features = false, features = [
+   "reqwest",
+ ], optional = true }
+diff --git a/src/cosign/bundle.rs b/src/cosign/bundle.rs
+index e484a64796..795e9bc7cb 100644
+--- a/src/cosign/bundle.rs
++++ b/src/cosign/bundle.rs
+@@ -13,7 +13,7 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-use olpc_cjson::CanonicalFormatter;
++use json_syntax::Print;
+ use serde::{Deserialize, Serialize};
+ use std::cmp::PartialEq;
+ 
+@@ -78,17 +78,15 @@ impl Bundle {
+         bundle: &Bundle,
+         rekor_pub_key: &CosignVerificationKey,
+     ) -> Result<()> {
+-        let mut buf = Vec::new();
+-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
+-        bundle.payload.serialize(&mut ser).map_err(|e| {
+-            SigstoreError::UnexpectedError(format!(
+-                "Cannot create canonical JSON representation of bundle: {e:?}"
+-            ))
++        let mut body = json_syntax::to_value(&bundle.payload).map_err(|_| {
++            SigstoreError::UnexpectedError("failed to serialize with json_syntax".to_string())
+         })?;
++        body.canonicalize();
++        let encoded = body.compact_print().to_string();
+ 
+         rekor_pub_key.verify_signature(
+             Signature::Base64Encoded(bundle.signed_entry_timestamp.as_bytes()),
+-            &buf,
++            encoded.as_bytes(),
+         )?;
+         Ok(())
+     }
+diff --git a/src/registry/oci_caching_client.rs b/src/registry/oci_caching_client.rs
+index 035bd3ad93..93122fe722 100644
+--- a/src/registry/oci_caching_client.rs
++++ b/src/registry/oci_caching_client.rs
+@@ -18,7 +18,7 @@ use crate::errors::{Result, SigstoreError};
+ 
+ use async_trait::async_trait;
+ use cached::proc_macro::cached;
+-use olpc_cjson::CanonicalFormatter;
++use json_syntax::Print;
+ use serde::Serialize;
+ use sha2::{Digest, Sha256};
+ use tracing::{debug, error};
+@@ -103,15 +103,18 @@ impl<'a> PullSettings<'a> {
+     // Because of that the method will return the '0' value when something goes
+     // wrong during the serialization operation. This is very unlikely to happen
+     pub fn hash(&self) -> String {
+-        let mut buf = Vec::new();
+-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
+-        if let Err(e) = self.serialize(&mut ser) {
+-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
+-            return "0".to_string();
+-        }
++        let mut body = match json_syntax::to_value(self) {
++            Ok(body) => body,
++            Err(_e) => {
++                error!(err=?_e, settings=?self, "Cannot perform canonical serialization");
++                return "0".to_string();
++            }
++        };
++        body.canonicalize();
++        let encoded = body.compact_print().to_string();
+ 
+         let mut hasher = Sha256::new();
+-        hasher.update(&buf);
++        hasher.update(encoded.as_bytes());
+         let result = hasher.finalize();
+         result
+             .iter()
+@@ -194,15 +197,18 @@ impl PullManifestSettings {
+     // Because of that the method will return the '0' value when something goes
+     // wrong during the serialization operation. This is very unlikely to happen
+     pub fn hash(&self) -> String {
+-        let mut buf = Vec::new();
+-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
+-        if let Err(e) = self.serialize(&mut ser) {
+-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
+-            return "0".to_string();
+-        }
++        let mut body = match json_syntax::to_value(self) {
++            Ok(body) => body,
++            Err(_e) => {
++                error!(err=?_e, settings=?self, "Cannot perform canonical serialization");
++                return "0".to_string();
++            }
++        };
++        body.canonicalize();
++        let encoded = body.compact_print().to_string();
+ 
+         let mut hasher = Sha256::new();
+-        hasher.update(&buf);
++        hasher.update(encoded.as_bytes());
+         let result = hasher.finalize();
+         result
+             .iter()
+@@ -243,7 +249,7 @@ async fn pull_manifest_cached(
+ impl ClientCapabilitiesDeps for OciCachingClient {}
+ 
+ #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
++#[cfg_attr(target_arch = "wasm32", async_trait(? Send))]
+ impl ClientCapabilities for OciCachingClient {
+     async fn fetch_manifest_digest(
+         &mut self,
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index 5d57238871..9ae58280bd 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -7,6 +7,7 @@ use base64::prelude::BASE64_STANDARD;
+ use base64::Engine;
+ use digest::Output;
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
++use std::fmt::Write;
+ use std::fmt::{Display, Formatter};
+ use std::str::FromStr;
+ 
+@@ -90,11 +91,10 @@ impl CheckpointNote {
+     // Output is the part of the checkpoint that is signed.
+     fn marshal(&self) -> String {
+         let hash_b64 = BASE64_STANDARD.encode(self.hash);
+-        let other_content: String = self
+-            .other_content
+-            .iter()
+-            .map(|c| format!("{c}\n"))
+-            .collect();
++        let other_content: String = self.other_content.iter().fold(String::new(), |mut acc, c| {
++            writeln!(acc, "{c}").expect("failed to write to string");
++            acc
++        });
+         format!(
+             "{}\n{}\n{hash_b64}\n{other_content}",
+             self.origin, self.size
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index fcc8528d9b..13250b0623 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -21,7 +21,7 @@ use crate::crypto::CosignVerificationKey;
+ use crate::errors::SigstoreError::UnexpectedError;
+ use crate::rekor::models::checkpoint::Checkpoint;
+ use crate::rekor::models::InclusionProof as InclusionProof2;
+-use olpc_cjson::CanonicalFormatter;
++use json_syntax::Print;
+ use serde::{Deserialize, Serialize};
+ use serde_json::{json, Error, Value};
+ use std::collections::HashMap;
+@@ -159,13 +159,14 @@ impl LogEntry {
+             })
+             .and_then(|proof| {
+                 // encode as canonical JSON
+-                let mut encoded_entry = Vec::new();
+-                let mut ser = serde_json::Serializer::with_formatter(
+-                    &mut encoded_entry,
+-                    CanonicalFormatter::new(),
+-                );
+-                self.body.serialize(&mut ser)?;
+-                proof.verify(&encoded_entry, rekor_key)
++                let mut body = json_syntax::to_value(&self.body).map_err(|_| {
++                    SigstoreError::UnexpectedError(
++                        "failed to serialize with json_syntax".to_string(),
++                    )
++                })?;
++                body.canonicalize();
++                let encoded_entry = body.compact_print().to_string();
++                proof.verify(encoded_entry.as_bytes(), rekor_key)
+             })
+     }
+ }
+
+From 4398466e6af96a7e334e7cb18a27b7a495f0f6eb Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Mon, 19 Aug 2024 12:51:19 +0200
+Subject: [PATCH 07/13] changed usize to u64 for compatibility
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/crypto/merkle/proof_verification.rs | 97 +++++++++++++------------
+ src/rekor/models/checkpoint.rs          |  4 +-
+ src/rekor/models/consistency_proof.rs   | 10 ++-
+ src/rekor/models/inclusion_proof.rs     |  4 +-
+ 4 files changed, 63 insertions(+), 52 deletions(-)
+
+diff --git a/src/crypto/merkle/proof_verification.rs b/src/crypto/merkle/proof_verification.rs
+index 21a076c896..7505145d8e 100644
+--- a/src/crypto/merkle/proof_verification.rs
++++ b/src/crypto/merkle/proof_verification.rs
+@@ -11,8 +11,8 @@ pub enum MerkleProofError {
+     IndexGtTreeSize,
+     UnexpectedNonEmptyProof,
+     UnexpectedEmptyProof,
+-    NewTreeSmaller { new: usize, old: usize },
+-    WrongProofSize { got: usize, want: usize },
++    NewTreeSmaller { new: u64, old: u64 },
++    WrongProofSize { got: u64, want: u64 },
+     WrongEmptyTreeHash,
+ }
+ 
+@@ -29,9 +29,9 @@ where
+     /// with the specified `leaf_hash` and `index`, relatively to the tree of the given `tree_size`
+     /// and `root_hash`. Requires `0 <= index < tree_size`.
+     fn verify_inclusion(
+-        index: usize,
++        index: u64,
+         leaf_hash: &O,
+-        tree_size: usize,
++        tree_size: u64,
+         proof_hashes: &[O],
+         root_hash: &O,
+     ) -> Result<(), MerkleProofError> {
+@@ -52,26 +52,26 @@ where
+     /// given size, provided a leaf index and hash with the corresponding inclusion
+     /// proof. Requires `0 <= index < tree_size`.
+     fn root_from_inclusion_proof(
+-        index: usize,
++        index: u64,
+         leaf_hash: &O,
+-        tree_size: usize,
++        tree_size: u64,
+         proof_hashes: &[O],
+     ) -> Result<Box<O>, MerkleProofError> {
+         if index >= tree_size {
+             return Err(IndexGtTreeSize);
+         }
+         let (inner, border) = Self::decomp_inclusion_proof(index, tree_size);
+-        match (proof_hashes.len(), inner + border) {
++        match (proof_hashes.len() as u64, inner + border) {
+             (got, want) if got != want => {
+                 return Err(WrongProofSize {
+-                    got: proof_hashes.len(),
++                    got: proof_hashes.len() as u64,
+                     want: inner + border,
+                 });
+             }
+             _ => {}
+         }
+-        let res_left = Self::chain_inner(leaf_hash, &proof_hashes[..inner], index);
+-        let res = Self::chain_border_right(&res_left, &proof_hashes[inner..]);
++        let res_left = Self::chain_inner(leaf_hash, &proof_hashes[..inner as usize], index);
++        let res = Self::chain_border_right(&res_left, &proof_hashes[inner as usize..]);
+         Ok(Box::new(res))
+     }
+ 
+@@ -79,8 +79,8 @@ where
+     // between the passed in tree sizes, with respect to the corresponding root
+     // hashes. Requires `0 <= old_size <= new_size`..
+     fn verify_consistency(
+-        old_size: usize,
+-        new_size: usize,
++        old_size: u64,
++        new_size: u64,
+         proof_hashes: &[O],
+         old_root: &O,
+         new_root: &O,
+@@ -117,7 +117,7 @@ where
+             (Ordering::Less, false, false) => {}
+         }
+ 
+-        let shift = old_size.trailing_zeros() as usize;
++        let shift = old_size.trailing_zeros() as u64;
+         let (inner, border) = Self::decomp_inclusion_proof(old_size - 1, new_size);
+         let inner = inner - shift;
+ 
+@@ -129,24 +129,24 @@ where
+             (&proof_hashes[0], 1)
+         };
+ 
+-        match (proof_hashes.len(), start + inner + border) {
++        match (proof_hashes.len() as u64, start + inner + border) {
+             (got, want) if got != want => return Err(WrongProofSize { got, want }),
+             _ => {}
+         }
+ 
+-        let proof = &proof_hashes[start..];
++        let proof = &proof_hashes[start as usize..];
+         let mask = (old_size - 1) >> shift;
+ 
+         // verify the old hash is correct
+-        let hash1 = Self::chain_inner_right(seed, &proof[..inner], mask);
+-        let hash1 = Self::chain_border_right(&hash1, &proof[inner..]);
++        let hash1 = Self::chain_inner_right(seed, &proof[..inner as usize], mask);
++        let hash1 = Self::chain_border_right(&hash1, &proof[inner as usize..]);
+         Self::verify_match(&hash1, old_root).map_err(|_| MismatchedRoot {
+             got: old_root.encode_hex(),
+             expected: hash1.encode_hex(),
+         })?;
+         // verify the new hash is correct
+-        let hash2 = Self::chain_inner(seed, &proof[..inner], mask);
+-        let hash2 = Self::chain_border_right(&hash2, &proof[inner..]);
++        let hash2 = Self::chain_inner(seed, &proof[..inner as usize], mask);
++        let hash2 = Self::chain_border_right(&hash2, &proof[inner as usize..]);
+         Self::verify_match(&hash2, new_root).map_err(|_| MismatchedRoot {
+             got: new_root.encode_hex(),
+             expected: hash2.encode_hex(),
+@@ -158,7 +158,7 @@ where
+     /// border. Assumes `proof_hashes` are ordered from lower levels to upper, and
+     /// `seed` is the initial subtree/leaf hash on the path located at the specified
+     /// `index` on its level.
+-    fn chain_inner(seed: &O, proof_hashes: &[O], index: usize) -> O {
++    fn chain_inner(seed: &O, proof_hashes: &[O], index: u64) -> O {
+         proof_hashes
+             .iter()
+             .enumerate()
+@@ -175,7 +175,7 @@ where
+     /// `chain_inner_right` computes a subtree hash like `chain_inner`, but only takes
+     /// hashes to the left from the path into consideration, which effectively means
+     /// the result is a hash of the corresponding earlier version of this subtree.
+-    fn chain_inner_right(seed: &O, proof_hashes: &[O], index: usize) -> O {
++    fn chain_inner_right(seed: &O, proof_hashes: &[O], index: u64) -> O {
+         proof_hashes
+             .iter()
+             .enumerate()
+@@ -201,14 +201,14 @@ where
+     /// point between them is where paths to leaves `index` and `tree_size-1` diverge.
+     /// Returns lengths of the bottom and upper proof parts correspondingly. The sum
+     /// of the two determines the correct length of the inclusion proof.
+-    fn decomp_inclusion_proof(index: usize, tree_size: usize) -> (usize, usize) {
+-        let inner: usize = Self::inner_proof_size(index, tree_size);
+-        let border = (index >> inner).count_ones() as usize;
++    fn decomp_inclusion_proof(index: u64, tree_size: u64) -> (u64, u64) {
++        let inner: u64 = Self::inner_proof_size(index, tree_size);
++        let border = (index >> inner).count_ones() as u64;
+         (inner, border)
+     }
+ 
+-    fn inner_proof_size(index: usize, tree_size: usize) -> usize {
+-        u64::BITS as usize - ((index ^ (tree_size - 1)).leading_zeros() as usize)
++    fn inner_proof_size(index: u64, tree_size: u64) -> u64 {
++        u64::BITS as u64 - ((index ^ (tree_size - 1)).leading_zeros() as u64)
+     }
+ }
+ 
+@@ -222,23 +222,23 @@ mod test_verify {
+ 
+     #[derive(Debug)]
+     struct InclusionProofTestVector<'a> {
+-        leaf: usize,
+-        size: usize,
++        leaf: u64,
++        size: u64,
+         proof: &'a [[u8; 32]],
+     }
+ 
+     #[derive(Debug)]
+     struct ConsistencyTestVector<'a> {
+-        size1: usize,
+-        size2: usize,
++        size1: u64,
++        size2: u64,
+         proof: &'a [[u8; 32]],
+     }
+ 
+     // InclusionProbe is a parameter set for inclusion proof verification.
+     #[derive(Debug)]
+     struct InclusionProbe {
+-        leaf_index: usize,
+-        tree_size: usize,
++        leaf_index: u64,
++        tree_size: u64,
+         root: [u8; 32],
+         leaf_hash: [u8; 32],
+         proof: Vec<[u8; 32]>,
+@@ -248,8 +248,8 @@ mod test_verify {
+     // ConsistencyProbe is a parameter set for consistency proof verification.
+     #[derive(Debug)]
+     struct ConsistencyProbe<'a> {
+-        size1: usize,
+-        size2: usize,
++        size1: u64,
++        size2: u64,
+         root1: &'a [u8; 32],
+         root2: &'a [u8; 32],
+         proof: Vec<[u8; 32]>,
+@@ -377,8 +377,8 @@ mod test_verify {
+     ];
+ 
+     fn corrupt_inclusion_proof(
+-        leaf_index: usize,
+-        tree_size: usize,
++        leaf_index: u64,
++        tree_size: u64,
+         proof: &[[u8; 32]],
+         root: &[u8; 32],
+         leaf_hash: &[u8; 32],
+@@ -487,8 +487,8 @@ mod test_verify {
+     }
+ 
+     fn verifier_check(
+-        leaf_index: usize,
+-        tree_size: usize,
++        leaf_index: u64,
++        tree_size: u64,
+         proof_hashes: &[[u8; 32]],
+         root: &[u8; 32],
+         leaf_hash: &[u8; 32],
+@@ -535,8 +535,8 @@ mod test_verify {
+     }
+ 
+     fn verifier_consistency_check(
+-        size1: usize,
+-        size2: usize,
++        size1: u64,
++        size2: u64,
+         proof: &[[u8; 32]],
+         root1: &[u8; 32],
+         root2: &[u8; 32],
+@@ -568,8 +568,8 @@ mod test_verify {
+     }
+ 
+     fn corrupt_consistency_proof<'a>(
+-        size1: usize,
+-        size2: usize,
++        size1: u64,
++        size2: u64,
+         root1: &'a [u8; 32],
+         root2: &'a [u8; 32],
+         proof: &[[u8; 32]],
+@@ -800,8 +800,13 @@ mod test_verify {
+         for i in 1..6 {
+             let p = &INCLUSION_PROOFS[i];
+             let leaf_hash = &Rfc6269Default::hash_leaf(LEAVES[i]).into();
+-            let result =
+-                verifier_check(p.leaf - 1, p.size, &p.proof, &ROOTS[p.size - 1], leaf_hash);
++            let result = verifier_check(
++                p.leaf - 1,
++                p.size,
++                &p.proof,
++                &ROOTS[p.size as usize - 1],
++                leaf_hash,
++            );
+             assert!(result.is_err(), "{result:?}")
+         }
+     }
+@@ -848,8 +853,8 @@ mod test_verify {
+                 p.size1,
+                 p.size2,
+                 p.proof,
+-                &ROOTS[p.size1 - 1],
+-                &ROOTS[p.size2 - 1],
++                &ROOTS[p.size1 as usize - 1],
++                &ROOTS[p.size2 as usize - 1],
+             );
+             assert!(result.is_ok(), "failed with error: {result:?}");
+         }
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index 9ae58280bd..437a220c73 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -165,8 +165,8 @@ impl Checkpoint {
+     ) -> Result<(), SigstoreError> {
+         // Delegate implementation as trivial consistency proof.
+         Rfc6269Default::verify_consistency(
+-            self.note.size as usize,
+-            proof_tree_size as usize,
++            self.note.size,
++            proof_tree_size,
+             &[],
+             &self.note.hash.into(),
+             proof_root_hash,
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 1161834cce..8849328ce6 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -46,7 +46,13 @@ impl ConsistencyProof {
+         let old_root = hex_to_hash_output(old_root)?;
+         let new_root = hex_to_hash_output(&self.root_hash)?;
+ 
+-        Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
+-            .map_err(ConsistencyProofError)
++        Rfc6269Default::verify_consistency(
++            old_size as u64,
++            new_size as u64,
++            &proof_hashes,
++            &old_root,
++            &new_root,
++        )
++        .map_err(ConsistencyProofError)
+     }
+ }
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index f0bfd53f39..0d5a9d0955 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -83,9 +83,9 @@ impl InclusionProof {
+         checkpoint.is_valid_for_proof(&root_hash, self.tree_size as u64)?;
+ 
+         Rfc6269Default::verify_inclusion(
+-            self.log_index as usize,
++            self.log_index as u64,
+             &entry_hash,
+-            self.tree_size as usize,
++            self.tree_size as u64,
+             &proof_hashes,
+             &root_hash,
+         )
+
+From c935f0459b47d07d8267e9f7f54e14a92ab5c1e2 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 13 Sep 2024 08:56:32 +0200
+Subject: [PATCH 08/13] Added tests to `LogEntry` struct in order to
+ additionally test inclusion proofs at this level
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/log_entry.rs | 152 +++++++++++++++++++++++++++++++++-
+ 1 file changed, 151 insertions(+), 1 deletion(-)
+
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 13250b0623..30183cebac 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -36,7 +36,8 @@ use super::{
+ #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields, rename_all = "camelCase")]
+ pub struct LogEntry {
+-    pub uuid: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub uuid: Option<String>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub attestation: Option<Attestation>,
+     pub body: Body,
+@@ -186,3 +187,152 @@ pub struct InclusionProof {
+     /// [Signed Note format]: https://github.com/transparency-dev/formats/blob/main/log/README.md
+     pub checkpoint: String,
+ }
++
++#[cfg(test)]
++mod tests {
++    use std::str::FromStr;
++
++    use crate::crypto::{CosignVerificationKey, SigningScheme};
++
++    use super::LogEntry;
++
++    const LOG_ENTRY: &str = r#"
++    {
++        "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI0N2MxZGI5ZmI1ZmU3ZmY2NmUzZDdjMTViMmNhNWQzYTA0NmVlOGY0YWEwNDNkZWRkMzE3ZTQ2YjMyMWM0MzkwIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUURVell6d3o4SEdhVXRXNUwvb0VNNGc1MFVvSUtzNXhuV1B0amFyeHRKckxBSWhBTzkwRTl2NGd5MmZUcytJbHM4OFczOXhldEUzS3NqRHN0cXF6NXNQMGVITSIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2sxSlNVTkRWRU5EUVdFclowRjNTVUpCWjBsSFFWbEhjMEZMUVhkTlFXOUhRME54UjFOTk5EbENRVTFEVFVOdmVFUlVRVXhDWjA1V1FrRk5UVUpJVW13S1l6TlJlRWRVUVZoQ1owNVdRa0Z2VFVWSVVteGpNMUZuV1RKV2VXUkhiRzFoVjA1b1pFZFZkMGhvWTA1TmFrbDNUbXBKTkUxcVFYbFBSRlY0VjJoalRncE5ha2wzVG1wSk5FMXFRVEJQUkZWNFYycEJjVTFSTUhkRGQxbEVWbEZSUkVSQlVqQmFXRTR3VFZKcmQwWjNXVVJXVVZGTFJFSkNNRnBZVGpCSlIwNXNDbU51VW5CYWJXeHFXVmhTYkUxR2EzZEZkMWxJUzI5YVNYcHFNRU5CVVZsSlMyOWFTWHBxTUVSQlVXTkVVV2RCUlVSQ1VISnBNMEp3VlhZNVRYRndVMlFLWlVoWlJXVjRZM3BqV0RKWmRHRkJXRGxDVjB4VVkyVm9Za2MxUnpkUFVGcHNVekZ2Y0hWRldXMVViVEJhY2pKTmNXcHBiV05xTHpjNFpFSTJNbUpFWWdwSlMwcDZTbUZQUW5kRVEwSjJWRUZrUW1kT1ZraFJORVZHWjFGVlFXcHBSMUJFUWsxSFNXSTFZVEp3YUhkeU1VVTJURXBtVTJGdmQwaDNXVVJXVWpCcUNrSkNaM2RHYjBGVldWTldPV1V5TjFKVmN6TTViRTg1VWsxTVlXaGtZVzV0V1VaM2QwUm5XVVJXVWpCUVFWRklMMEpCVVVSQloyVkJUVUpOUjBFeFZXUUtTbEZSVFUxQmIwZERRM05IUVZGVlJrSjNUVVJOUVhkSFFURlZaRVYzUlVJdmQxRkRUVUZCZDBkM1dVUldVakJTUVZGSUwwSkNSWGRFTkVWT1pFZFdlZ3BrUlVJd1dsaE9NRXh0VG5aaVZFRnlRbWR2Y2tKblJVVkJXVTh2VFVGRlFrSkNNVzlrU0ZKM1kzcHZka3d5V21oaE1sWm9XVEpPZG1SWE5UQmplVFV3Q2xwWVRqQk1iVTUyWWxSQlMwSm5aM0ZvYTJwUFVGRlJSRUZuVGtsQlJFSkdRV2xCVXpWTVZHeHlXak54Vm5aUGIyVjBibGh4V21JdmEzcEVURWRhYXpNS1MySkJTMGhMYmpkemFqQkZabEZKYUVGT05uTldVRTlyWlU1SlVYYzJlVEJNUVhNMVlrbGFXVkExUVVoTWFFUm9SRTlhZG1Od1lWUlhaek5xQ2kwdExTMHRSVTVFSUVORlVsUkpSa2xEUVZSRkxTMHRMUzBLIn19fX0=",
++        "integratedTime": 1656448131,
++        "logID": "d32f30a3c32d639c2b762205a21c7bb07788e68283a4ae6f42118723a1bea496",
++        "logIndex": 1688,
++        "verification": {
++        "inclusionProof": {
++            "hashes": [
++            "810320ec3029914695826d60133c67021f66ee0cfb09a6f79eb267ed9f55de2c",
++            "67e9d9f66f0ad388f7e1a20991e9a2ae3efad5cbf281e8b3d2aaf1ef99a4618c",
++            "16a106400c53465f6e18c2475df6ba889ca30f5667bacf32b1a5661f14a5080c",
++            "b4439e8d71edbc96271723cb7a969dd725e23e73d139361864a62ed76ce8dc11",
++            "49b3e90806c7b63b5a86f5748e3ecb7d264ea0828eb74a45bc1a2cd7962408e8",
++            "5059ad9b48fa50bd9adcbff0dd81c5a0dcb60f37e0716e723a33805a464f72f8",
++            "6c2ce64219799e61d72996884eee9e19fb906e4d7fa04b71625fde4108f21762",
++            "784f79c817abb78db3ae99b6c1ede640470bf4bb678673a05bf3a6b50aaaddd6",
++            "c6d92ebf4e10cdba500ca410166cd0a8d8b312154d2f45bc4292d63dea6112f6",
++            "1768732027401f6718b0df7769e2803127cfc099eb130a8ed7d913218f6a65f6",
++            "0da021f68571b65e49e926e4c69024de3ac248a1319d254bc51a85a657b93c33",
++            "bc8cf0c8497d5c24841de0c9bef598ec99bbd59d9538d58568340646fe289e9a",
++            "be328fa737b8fa9461850b8034250f237ff5b0b590b9468e6223968df294872b",
++            "6f06f4025d0346f04830352b23f65c8cd9e3ce4b8cb899877c35282521ddaf85"
++            ],
++            "logIndex": 1227,
++            "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
++            "treeSize": 14358,
++            "checkpoint": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiB8OkuzdwlL6/rDEu2CsIfqmesaH/KLfmIMvlH3YTdIYgIhAPFZeXK6+b0vbWy4GSU/YZxiTpFrrzjsVOShN4LlPdZb\n"
++        },
++        "signedEntryTimestamp": "MEUCIQCO8dFvolJwFZDHkhkSdsW3Ny+07fG8CF7G32feG8NJMgIgd2qfJ5shezuXX8I1S6DsudvIZ8xN/+y95at/V5xHfEQ="
++        }
++    }
++    "#;
++    /// Pubkey for `rekor.sigstage.dev`.
++    const REKOR_STAGING_KEY_PEM: &str = r#"
++        -----BEGIN PUBLIC KEY-----
++        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDODRU688UYGuy54mNUlaEBiQdTE9
++        nYLr0lg6RXowI/QV/RE1azBn4Eg5/2uTOMbhB1/gfcHzijzFi9Tk+g1Prg==
++        -----END PUBLIC KEY-----
++    "#;
++
++    #[test]
++    fn test_inclusion_proof_valid() {
++        let entry = LogEntry::from_str(LOG_ENTRY).expect("failed to parse log entry");
++        let rekor_key = CosignVerificationKey::from_pem(
++            REKOR_STAGING_KEY_PEM.as_bytes(),
++            &SigningScheme::ECDSA_P256_SHA256_ASN1,
++        )
++        .expect("failed to parse Rekor key");
++        entry
++            .verify_inclusion(&rekor_key)
++            .expect("rejected valid inclusion proof");
++    }
++
++    #[test]
++    fn test_inclusion_proof_missing_proof() {
++        let mut entry = LogEntry::from_str(LOG_ENTRY).expect("failed to parse log entry");
++        entry.verification.inclusion_proof = None;
++        let rekor_key = CosignVerificationKey::from_pem(
++            REKOR_STAGING_KEY_PEM.as_bytes(),
++            &SigningScheme::ECDSA_P256_SHA256_ASN1,
++        )
++        .expect("failed to parse Rekor key");
++        entry
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof");
++    }
++
++    #[test]
++    fn test_inclusion_proof_modified_proof() {
++        let entry = LogEntry::from_str(LOG_ENTRY).expect("failed to parse log entry");
++        let rekor_key = CosignVerificationKey::from_pem(
++            REKOR_STAGING_KEY_PEM.as_bytes(),
++            &SigningScheme::ECDSA_P256_SHA256_ASN1,
++        )
++        .expect("failed to parse Rekor key");
++
++        // swap upper and lower halves of hash.
++        let mut entry_modified_hashes = entry.clone();
++        entry_modified_hashes
++            .verification
++            .inclusion_proof
++            .as_mut()
++            .unwrap()
++            .hashes[0] =
++            "1f66ee0cfb09a6f79eb267ed9f55de2c810320ec3029914695826d60133c6702".to_string();
++        entry_modified_hashes
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof: modified hashes");
++
++        // modify checkpoint.
++        let mut entry_modified_checkpoint = entry.clone();
++        entry_modified_checkpoint
++            .verification
++            .inclusion_proof
++            .as_mut()
++            .unwrap()
++            .checkpoint = "foo".to_string();
++        entry_modified_checkpoint
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof: modified checkpoint");
++
++        // modify log index.
++        let mut entry_modified_log_index = entry.clone();
++        entry_modified_log_index
++            .verification
++            .inclusion_proof
++            .as_mut()
++            .unwrap()
++            .log_index += 1;
++        entry_modified_log_index
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof: modified log index");
++
++        // modify root hash.
++        let mut entry_modified_root_hash = entry.clone();
++        entry_modified_root_hash
++            .verification
++            .inclusion_proof
++            .as_mut()
++            .unwrap()
++            .root_hash =
++            "3de533212f9470d63a56d1992e73465deffa4fa4575f72829016a64e58444120".to_string();
++        entry_modified_root_hash
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof: modified root hash");
++
++        // modify tree size.
++        let mut entry_modified_tree_size = entry.clone();
++        entry_modified_tree_size
++            .verification
++            .inclusion_proof
++            .as_mut()
++            .unwrap()
++            .tree_size += 1;
++        entry_modified_tree_size
++            .verify_inclusion(&rekor_key)
++            .expect_err("accepted invalid inclusion proof: modified tree size");
++    }
++}
+
+From 41a99769cfd03d3f605fb37e2f9d61fc526049b5 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 13 Sep 2024 09:51:48 +0200
+Subject: [PATCH 09/13] added an additional test for consistency proofs and
+ changes to data types
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ examples/rekor/merkle_proofs/consistency.rs |   2 +-
+ src/rekor/mod.rs                            |   2 +-
+ src/rekor/models/consistency_proof.rs       |   8 +-
+ src/rekor/models/log_info.rs                | 137 +++++++++++++++++++-
+ 4 files changed, 136 insertions(+), 13 deletions(-)
+
+diff --git a/examples/rekor/merkle_proofs/consistency.rs b/examples/rekor/merkle_proofs/consistency.rs
+index 39cf4413e2..ab2ef3f712 100644
+--- a/examples/rekor/merkle_proofs/consistency.rs
++++ b/examples/rekor/merkle_proofs/consistency.rs
+@@ -12,7 +12,7 @@ struct Args {
+     #[arg(long, value_name = "HEX ENCODED HASH")]
+     old_root: String,
+     #[arg(long)]
+-    old_size: usize,
++    old_size: u64,
+     #[arg(long, value_name = "TREE ID")]
+     tree_id: Option<String>,
+ }
+diff --git a/src/rekor/mod.rs b/src/rekor/mod.rs
+index 74397fe71c..c9fffea814 100644
+--- a/src/rekor/mod.rs
++++ b/src/rekor/mod.rs
+@@ -88,4 +88,4 @@
+ 
+ pub mod apis;
+ pub mod models;
+-type TreeSize = i64;
++type TreeSize = u64;
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 8849328ce6..702ff9112a 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -31,9 +31,9 @@ impl ConsistencyProof {
+     /// Verify this consistency proof against the given parameters.
+     pub fn verify(
+         &self,
+-        old_size: usize,
++        old_size: u64,
+         old_root: &str,
+-        new_size: usize,
++        new_size: u64,
+     ) -> Result<(), SigstoreError> {
+         // decode hashes from hex and convert them to the required data structure
+         // immediately return an error when conversion fails
+@@ -47,8 +47,8 @@ impl ConsistencyProof {
+         let new_root = hex_to_hash_output(&self.root_hash)?;
+ 
+         Rfc6269Default::verify_consistency(
+-            old_size as u64,
+-            new_size as u64,
++            old_size,
++            new_size,
+             &proof_hashes,
+             &old_root,
+             &new_root,
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 31f536db3b..5bda17ac37 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -73,23 +73,26 @@ impl LogInfo {
+     ///         .await
+     ///         .expect("failed to fetch data from remote");
+     ///
+-    ///      // get a proof using log_info1 as the previous tree state
+-    ///      let proof = get_log_proof(
++    ///     // get a proof using log_info1 as the previous tree state
++    ///     let proof = get_log_proof(
+     ///         &rekor_config,
+     ///         log_info2.tree_size as _,
+     ///         Some(&log_info1.tree_size.to_string()),
+     ///         None,
+     ///     )
+-    ///     .await.expect("failed to fetch data from remote");
+-    ///      log_info2
+-    ///         .verify_consistency(log_info1.tree_size as usize, &log_info1.root_hash, &proof, &rekor_key)
++    ///     .await
++    ///     .expect("failed to fetch data from remote");
++    ///     
++    ///     // verify proof for the new log info
++    ///     log_info2
++    ///         .verify_consistency(log_info1.tree_size, &log_info1.root_hash, &proof, &rekor_key)
+     ///         .expect("failed to verify log consistency");
+     /// }
+     ///
+     /// ```
+     pub fn verify_consistency(
+         &self,
+-        old_size: usize,
++        old_size: u64,
+         old_root: &str,
+         consistency_proof: &ConsistencyProof,
+         rekor_key: &CosignVerificationKey,
+@@ -98,8 +101,128 @@ impl LogInfo {
+         self.signed_tree_head.verify_signature(rekor_key)?;
+ 
+         self.signed_tree_head
+-            .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size as u64)?;
++            .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size)?;
+         consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
+         Ok(())
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use crate::{
++        crypto::{CosignVerificationKey, SigningScheme},
++        rekor::models::ConsistencyProof,
++    };
++
++    use super::LogInfo;
++    const LOG_INFO_OLD: &str = r#"{
++        "inactiveShards": [
++          {
++            "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
++            "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiBeSutKae/1zsGfMgCstDexSktqVfYgAKYaFNsBqYQ3cAIhAOewsY+B/oXGOILSBv3wduhlyn4wNmV3v1eRg3LOwHDi\n",
++            "treeID": "8959784741570461564",
++            "treeSize": 461
++          },
++          {
++            "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
++            "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiBJlYY/wJQw6hW3LzziTAp7SXjc7MfghJ31tiydO1MvrAIhAPCX7LQ5jUNOssRDFJPXX3DdQjdan+8UGrKzGgfayV0c\n",
++            "treeID": "108574341321668964",
++            "treeSize": 14358
++          },
++          {
++            "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
++            "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBFAiEA6yozMl9lFn21m5mQHCJUyEiI3HOOuM5sIeVt/MU2MQMCIBDhFtWjwPKIjFSr/liQ8LY7K6LHQRvtzkoIrsWZ/c9a\n",
++            "treeID": "8050909264565447525",
++            "treeSize": 31667593
++          }
++        ],
++        "rootHash": "e222aa53db49893334fb5a878ead1bf8b9f8f3c02ccfc0ae687f28256bd74907",
++        "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352760\n4iKqU9tJiTM0+1qHjq0b+Ln488Asz8CuaH8oJWvXSQc=\n\n— rekor.sigstage.dev 0y8wozBFAiEAnIjdHAH9uhqBrRNBA4bMaKR30H6qdzW4TAsdB0/KP0ICIDjK9VeE+9dWXSAm/B0aPkhO7pJMLmKPjo9btFD9ZvEs\n",
++        "treeID": "8202293616175992157",
++        "treeSize": 1352760
++      }"#;
++    const LOG_INFO_NEW: &str = r#"
++        {
++            "inactiveShards": [
++            {
++                "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
++                "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiEAvtvC/roj8MxqTqvyHaq5pVHQ4eWJwNb/BpMNGLrjPdYCIB5rWm8b1FCsnVUty27Gyvod3PB9MgG6ar24XDYrNSau\n",
++                "treeID": "8959784741570461564",
++                "treeSize": 461
++            },
++            {
++                "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
++                "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiEA5zsLKvJeAuSc61IxVqNKnyVA0FIOZFck/cQl1BoYj0kCICMOJUulfDbukn5ApybPKUJ20nsFQ0P/54ku3/bl0Thq\n",
++                "treeID": "108574341321668964",
++                "treeSize": 14358
++            },
++            {
++                "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
++                "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBEAiBok3nxMEarLtLkNJFCq+4A3r1givc2YZqO48quIGEOrgIgUGJwm2+yr59SH/Vmf7+XxPY/mMIuyXlP6OXDdnHglF0=\n",
++                "treeID": "8050909264565447525",
++                "treeSize": 31667593
++            }
++            ],
++            "rootHash": "c7d98fcf73e06fb3b7a6c02648dee52567a4b7b6db1dae31ec723283b379c782",
++            "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352764\nx9mPz3Pgb7O3psAmSN7lJWekt7bbHa4x7HIyg7N5x4I=\n\n— rekor.sigstage.dev 0y8wozBGAiEAiU8vSPj7yujJ2R6ES8t2AXJG+uezCj5Th7Dp6U5kBU0CIQCDObTWELwMeAa0u1VndfB+WvXEXKtYTNm5QXzK7d7xhA==\n",
++            "treeID": "8202293616175992157",
++            "treeSize": 1352764
++        }"#;
++    const LOG_PROOF: &str = r#"
++        {
++            "hashes": [
++                "5a0948dede3e930b8f4e54623e9dddc02d8d1f8e7207aa2ef654581696dbd02b",
++                "a231a8bf92e79b70d99762dc5e97b8aabd7d7e345af3ecd54806a67a856e28fd",
++                "1da069f21926d9a6c71f5f53e3802f9a319592aaec38a26cca7000756013a8b0",
++                "de67dba818dcb59afa1eaf82f404ea3d60b9284fefcd48091cc392eeb85139e0",
++                "722774afdc8d9f7600104ebf18c9eed3f293990b516b5cc582455580182e5228",
++                "3cffd1e781089b1863981adefbc568102b38020a978318d73d90e3baa25893f6",
++                "26104de6f96047f3832e4fa21aef89e86de2b26d53f7f88bf652cbcdfcaf8fb7",
++                "c0bb4187448a423c7bb2a4e16ccee560ca47911049be666e335f28c5cc28f604",
++                "f95530163ba56a3da36ccfb774bf971c8e5197ebfb55b0a2f76dfa20efdf6a60",
++                "b4ee4fbb14937fa10fb77eda8f17492af7167311952c54a3c948263a70fa4d16",
++                "14873f5f2d7ddbaa9c35cae8e38a75d86771103593ff587009503011d0fd4656",
++                "3e879a6680719f5f20080d96af7054eac1f7e6c73d08cf7242e1d2ed1d0baa75",
++                "3936c8b8d984010658bcd36b2e7bb812964fb04de546da6e4be5877d6d30b244",
++                "832595ab7e4069d2b4439048e1844ae610ad1b739271a80b8e2eaf90daf2db0e",
++                "404ec07c1283ca96add90addbdb4e61cc46e842878b48abab7d06cdf2cd41431",
++                "53766be84290a00a98d2f412fbdafdcf9b76c25b2558a6824c4ed0942d2608ee",
++                "af298842ed85c9133527e4806ecf131eba8cda15b557ae8aa7d0b23579226037",
++                "3be14d5554e638fc70239826191844aa65251487eb50704a91628aeb200b77ba",
++                "897eece5297ade68dbb8771d2fb8f0745f09510a5c10b751df2aea9c831f748d",
++                "e9d4090a317dc9e584a04d2268a1b808ac1cf092021fa29a7f879fdffa9bf271",
++                "42051abed257700e92e99263172d12ff2ff23c7fb6f6e5d0bb141723a15c346c"
++            ],
++            "rootHash": "df83e27afbe9fa6d04f417879882f9c29a6c4b2d677a01c53f5189dbd3290b31"
++        }"#;
++
++    /// Pubkey for `rekor.sigstage.dev`.
++    const REKOR_STAGING_KEY_PEM: &str = r#"
++    -----BEGIN PUBLIC KEY-----
++    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDODRU688UYGuy54mNUlaEBiQdTE9
++    nYLr0lg6RXowI/QV/RE1azBn4Eg5/2uTOMbhB1/gfcHzijzFi9Tk+g1Prg==
++    -----END PUBLIC KEY-----
++"#;
++    #[test]
++    fn test_consistency() {
++        let rekor_key = CosignVerificationKey::from_pem(
++            REKOR_STAGING_KEY_PEM.as_bytes(),
++            &SigningScheme::ECDSA_P256_SHA256_ASN1,
++        )
++        .expect("failed to parse Rekor key");
++        let log_info_old: LogInfo =
++            serde_json::from_str(LOG_INFO_OLD).expect("failed to deserialize log info test data");
++        let log_info_new: LogInfo =
++            serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
++        let consistency_proof: ConsistencyProof =
++            serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
++        log_info_new
++            .verify_consistency(
++                log_info_old.tree_size,
++                &log_info_old.root_hash,
++                &consistency_proof,
++                &rekor_key,
++            )
++            .expect("failed to accept valid inclusion proof");
++    }
++}
+
+From d068671d88a666237302ae7f8107a685d00a6e12 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 13 Sep 2024 09:53:52 +0200
+Subject: [PATCH 10/13] fixed formatting error
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/consistency_proof.rs | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 702ff9112a..22ecfe1ebd 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -46,13 +46,7 @@ impl ConsistencyProof {
+         let old_root = hex_to_hash_output(old_root)?;
+         let new_root = hex_to_hash_output(&self.root_hash)?;
+ 
+-        Rfc6269Default::verify_consistency(
+-            old_size,
+-            new_size,
+-            &proof_hashes,
+-            &old_root,
+-            &new_root,
+-        )
+-        .map_err(ConsistencyProofError)
++        Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
++            .map_err(ConsistencyProofError)
+     }
+ }
+
+From 38b0829f64fda61f06b07064240cdb71f87e146e Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 13 Sep 2024 11:29:09 +0200
+Subject: [PATCH 11/13] fixed inclusion proof bug, caused by using the
+ incorrect root hash
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/consistency_proof.rs |  4 +-
+ src/rekor/models/inclusion_proof.rs   |  4 +-
+ src/rekor/models/log_info.rs          | 95 +++++++++++++--------------
+ 3 files changed, 51 insertions(+), 52 deletions(-)
+
+diff --git a/src/rekor/models/consistency_proof.rs b/src/rekor/models/consistency_proof.rs
+index 22ecfe1ebd..80d7ac905b 100644
+--- a/src/rekor/models/consistency_proof.rs
++++ b/src/rekor/models/consistency_proof.rs
+@@ -29,11 +29,13 @@ impl ConsistencyProof {
+     }
+ 
+     /// Verify this consistency proof against the given parameters.
++    /// If `new_root` is `Some` then this root will be used in the verification. If it is `None` then the root in `self.root_hash` is used.
+     pub fn verify(
+         &self,
+         old_size: u64,
+         old_root: &str,
+         new_size: u64,
++        new_root: Option<&str>,
+     ) -> Result<(), SigstoreError> {
+         // decode hashes from hex and convert them to the required data structure
+         // immediately return an error when conversion fails
+@@ -44,7 +46,7 @@ impl ConsistencyProof {
+             .collect::<Result<Vec<_>, _>>()?;
+ 
+         let old_root = hex_to_hash_output(old_root)?;
+-        let new_root = hex_to_hash_output(&self.root_hash)?;
++        let new_root = hex_to_hash_output(new_root.unwrap_or(self.root_hash.as_str()))?;
+ 
+         Rfc6269Default::verify_consistency(old_size, new_size, &proof_hashes, &old_root, &new_root)
+             .map_err(ConsistencyProofError)
+diff --git a/src/rekor/models/inclusion_proof.rs b/src/rekor/models/inclusion_proof.rs
+index 0d5a9d0955..b7c0d034ab 100644
+--- a/src/rekor/models/inclusion_proof.rs
++++ b/src/rekor/models/inclusion_proof.rs
+@@ -80,12 +80,12 @@ impl InclusionProof {
+         let root_hash = hex_to_hash_output(&self.root_hash)?;
+ 
+         // check if the inclusion and checkpoint match
+-        checkpoint.is_valid_for_proof(&root_hash, self.tree_size as u64)?;
++        checkpoint.is_valid_for_proof(&root_hash, self.tree_size)?;
+ 
+         Rfc6269Default::verify_inclusion(
+             self.log_index as u64,
+             &entry_hash,
+-            self.tree_size as u64,
++            self.tree_size,
+             &proof_hashes,
+             &root_hash,
+         )
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 5bda17ac37..6ca5e84d26 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -102,7 +102,12 @@ impl LogInfo {
+ 
+         self.signed_tree_head
+             .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size)?;
+-        consistency_proof.verify(old_size, old_root, self.tree_size as _)?;
++        consistency_proof.verify(
++            old_size,
++            old_root,
++            self.tree_size as _,
++            Some(&self.root_hash),
++        )?;
+         Ok(())
+     }
+ }
+@@ -115,32 +120,34 @@ mod tests {
+     };
+ 
+     use super::LogInfo;
+-    const LOG_INFO_OLD: &str = r#"{
+-        "inactiveShards": [
+-          {
+-            "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
+-            "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiBeSutKae/1zsGfMgCstDexSktqVfYgAKYaFNsBqYQ3cAIhAOewsY+B/oXGOILSBv3wduhlyn4wNmV3v1eRg3LOwHDi\n",
+-            "treeID": "8959784741570461564",
+-            "treeSize": 461
+-          },
+-          {
+-            "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
+-            "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiBJlYY/wJQw6hW3LzziTAp7SXjc7MfghJ31tiydO1MvrAIhAPCX7LQ5jUNOssRDFJPXX3DdQjdan+8UGrKzGgfayV0c\n",
+-            "treeID": "108574341321668964",
+-            "treeSize": 14358
+-          },
+-          {
+-            "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
+-            "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBFAiEA6yozMl9lFn21m5mQHCJUyEiI3HOOuM5sIeVt/MU2MQMCIBDhFtWjwPKIjFSr/liQ8LY7K6LHQRvtzkoIrsWZ/c9a\n",
+-            "treeID": "8050909264565447525",
+-            "treeSize": 31667593
+-          }
+-        ],
+-        "rootHash": "e222aa53db49893334fb5a878ead1bf8b9f8f3c02ccfc0ae687f28256bd74907",
+-        "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352760\n4iKqU9tJiTM0+1qHjq0b+Ln488Asz8CuaH8oJWvXSQc=\n\n— rekor.sigstage.dev 0y8wozBFAiEAnIjdHAH9uhqBrRNBA4bMaKR30H6qdzW4TAsdB0/KP0ICIDjK9VeE+9dWXSAm/B0aPkhO7pJMLmKPjo9btFD9ZvEs\n",
+-        "treeID": "8202293616175992157",
+-        "treeSize": 1352760
+-      }"#;
++    const LOG_INFO_OLD: &str = r#"
++        {
++            "inactiveShards": [
++            {
++                "rootHash": "ed4cb79f98642c7cd7626f8307d8fee48e04991dc4e827611884f131e53221ba",
++                "signedTreeHead": "rekor.sigstage.dev - 8959784741570461564\n461\n7Uy3n5hkLHzXYm+DB9j+5I4EmR3E6CdhGITxMeUyIbo=\n\n— rekor.sigstage.dev 0y8wozBFAiBeSutKae/1zsGfMgCstDexSktqVfYgAKYaFNsBqYQ3cAIhAOewsY+B/oXGOILSBv3wduhlyn4wNmV3v1eRg3LOwHDi\n",
++                "treeID": "8959784741570461564",
++                "treeSize": 461
++            },
++            {
++                "rootHash": "effa4fa4575f72829016a64e584441203de533212f9470d63a56d1992e73465d",
++                "signedTreeHead": "rekor.sigstage.dev - 108574341321668964\n14358\n7/pPpFdfcoKQFqZOWERBID3lMyEvlHDWOlbRmS5zRl0=\n\n— rekor.sigstage.dev 0y8wozBFAiBJlYY/wJQw6hW3LzziTAp7SXjc7MfghJ31tiydO1MvrAIhAPCX7LQ5jUNOssRDFJPXX3DdQjdan+8UGrKzGgfayV0c\n",
++                "treeID": "108574341321668964",
++                "treeSize": 14358
++            },
++            {
++                "rootHash": "ae6af751ddcfffc1b77386692d7eaa9b105c191cb613fad3e718183513b956f1",
++                "signedTreeHead": "rekor.sigstage.dev - 8050909264565447525\n31667593\nrmr3Ud3P/8G3c4ZpLX6qmxBcGRy2E/rT5xgYNRO5VvE=\n\n— rekor.sigstage.dev 0y8wozBFAiEA6yozMl9lFn21m5mQHCJUyEiI3HOOuM5sIeVt/MU2MQMCIBDhFtWjwPKIjFSr/liQ8LY7K6LHQRvtzkoIrsWZ/c9a\n",
++                "treeID": "8050909264565447525",
++                "treeSize": 31667593
++            }
++            ],
++            "rootHash": "e222aa53db49893334fb5a878ead1bf8b9f8f3c02ccfc0ae687f28256bd74907",
++            "signedTreeHead": "rekor.sigstage.dev - 8202293616175992157\n1352760\n4iKqU9tJiTM0+1qHjq0b+Ln488Asz8CuaH8oJWvXSQc=\n\n— rekor.sigstage.dev 0y8wozBFAiEAnIjdHAH9uhqBrRNBA4bMaKR30H6qdzW4TAsdB0/KP0ICIDjK9VeE+9dWXSAm/B0aPkhO7pJMLmKPjo9btFD9ZvEs\n",
++            "treeID": "8202293616175992157",
++            "treeSize": 1352760
++        }"#;
++
+     const LOG_INFO_NEW: &str = r#"
+         {
+             "inactiveShards": [
+@@ -168,32 +175,21 @@ mod tests {
+             "treeID": "8202293616175992157",
+             "treeSize": 1352764
+         }"#;
++    /// Consistency proof requested via: https://rekor.sigstage.dev/api/v1/log/proof?lastSize=1352764&firstSize=1352760&treeId=8202293616175992157
+     const LOG_PROOF: &str = r#"
+         {
+             "hashes": [
+-                "5a0948dede3e930b8f4e54623e9dddc02d8d1f8e7207aa2ef654581696dbd02b",
+-                "a231a8bf92e79b70d99762dc5e97b8aabd7d7e345af3ecd54806a67a856e28fd",
+-                "1da069f21926d9a6c71f5f53e3802f9a319592aaec38a26cca7000756013a8b0",
+-                "de67dba818dcb59afa1eaf82f404ea3d60b9284fefcd48091cc392eeb85139e0",
+-                "722774afdc8d9f7600104ebf18c9eed3f293990b516b5cc582455580182e5228",
+-                "3cffd1e781089b1863981adefbc568102b38020a978318d73d90e3baa25893f6",
+-                "26104de6f96047f3832e4fa21aef89e86de2b26d53f7f88bf652cbcdfcaf8fb7",
+-                "c0bb4187448a423c7bb2a4e16ccee560ca47911049be666e335f28c5cc28f604",
+-                "f95530163ba56a3da36ccfb774bf971c8e5197ebfb55b0a2f76dfa20efdf6a60",
+-                "b4ee4fbb14937fa10fb77eda8f17492af7167311952c54a3c948263a70fa4d16",
+-                "14873f5f2d7ddbaa9c35cae8e38a75d86771103593ff587009503011d0fd4656",
+-                "3e879a6680719f5f20080d96af7054eac1f7e6c73d08cf7242e1d2ed1d0baa75",
+-                "3936c8b8d984010658bcd36b2e7bb812964fb04de546da6e4be5877d6d30b244",
+-                "832595ab7e4069d2b4439048e1844ae610ad1b739271a80b8e2eaf90daf2db0e",
+-                "404ec07c1283ca96add90addbdb4e61cc46e842878b48abab7d06cdf2cd41431",
+-                "53766be84290a00a98d2f412fbdafdcf9b76c25b2558a6824c4ed0942d2608ee",
+-                "af298842ed85c9133527e4806ecf131eba8cda15b557ae8aa7d0b23579226037",
+-                "3be14d5554e638fc70239826191844aa65251487eb50704a91628aeb200b77ba",
+-                "897eece5297ade68dbb8771d2fb8f0745f09510a5c10b751df2aea9c831f748d",
+-                "e9d4090a317dc9e584a04d2268a1b808ac1cf092021fa29a7f879fdffa9bf271",
+-                "42051abed257700e92e99263172d12ff2ff23c7fb6f6e5d0bb141723a15c346c"
++                "2713ba8ade1872a38adf7d108e5cedf5056fbde30c6d19fcc10f965e9fc1373e",
++                "2197a8f07628339739e65c2cc1d16fd36ccca1ef980d5966de82259a56821145",
++                "bc6015344bdfce14a2d24d4230ae734002220557f7a930c8fbc17e1e3e86b692",
++                "156bdcfc96e73a81f2255c4e05936ef0b50a0862213f4b863af228f4fa4f20ca",
++                "a6c2a8510ab7f123bc4cc7927e1f3156bf324bfceafee6ecae8597739cb4b436",
++                "299a7084ca00c8be9dfbf176291a266599308a014edc9c5ddacc07821d003837",
++                "153a44af92202f031e457d09930fd53c85e519bf3a4b79a11b1d946e65a28da8",
++                "3abe35db1c15b4710d9cf755a11f32d95f4e58907ac54fef389bfcf18c231f38",
++                "e0300bb7400e692bccbf20b17fe7ec177aba23e7bfd36dcb7484935ccd214336"
+             ],
+-            "rootHash": "df83e27afbe9fa6d04f417879882f9c29a6c4b2d677a01c53f5189dbd3290b31"
++            "rootHash": "437afb5d68e7f875cd91311f6549f4f12324418b39bdbf96cffe3884cb9e8f26"
+         }"#;
+ 
+     /// Pubkey for `rekor.sigstage.dev`.
+@@ -216,6 +212,7 @@ mod tests {
+             serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
+         let consistency_proof: ConsistencyProof =
+             serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
++
+         log_info_new
+             .verify_consistency(
+                 log_info_old.tree_size,
+
+From 333d686304b4f6d9cd32e0105742b9c6f6810d12 Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Fri, 13 Sep 2024 11:43:00 +0200
+Subject: [PATCH 12/13] replaced ToString/FromStr trait implemenations with
+ encode/decode functions
+
+Signed-off-by: Victor Embacher <victor@embacher.xyz>
+---
+ src/rekor/models/checkpoint.rs | 104 +++++++++++++++------------------
+ src/rekor/models/log_entry.rs  |   2 +-
+ 2 files changed, 47 insertions(+), 59 deletions(-)
+
+diff --git a/src/rekor/models/checkpoint.rs b/src/rekor/models/checkpoint.rs
+index 437a220c73..3d443ece95 100644
+--- a/src/rekor/models/checkpoint.rs
++++ b/src/rekor/models/checkpoint.rs
+@@ -9,7 +9,6 @@ use digest::Output;
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+ use std::fmt::Write;
+ use std::fmt::{Display, Formatter};
+-use std::str::FromStr;
+ 
+ /// A checkpoint (also known as a signed tree head) that served by the log.
+ /// It represents the log state at a point in time.
+@@ -68,10 +67,8 @@ pub enum ParseCheckpointError {
+     DecodeError(String),
+ }
+ 
+-impl FromStr for Checkpoint {
+-    type Err = ParseCheckpointError;
+-
+-    fn from_str(s: &str) -> Result<Self, Self::Err> {
++impl Checkpoint {
++    pub(crate) fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
+         // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
+ 
+         let checkpoint = s.trim_start_matches('"').trim_end_matches('"');
+@@ -80,11 +77,43 @@ impl FromStr for Checkpoint {
+             return Err(DecodeError("unexpected checkpoint format".to_string()));
+         };
+ 
+-        let signature = signature.parse()?;
++        let signature = CheckpointSignature::decode(signature)?;
+         let note = CheckpointNote::unmarshal(note)?;
+ 
+         Ok(Checkpoint { note, signature })
+     }
++
++    pub(crate) fn encode(&self) -> String {
++        let note = self.note.marshal();
++        let signature = self.signature.encode();
++        format!("{note}\n{signature}")
++    }
++
++    /// This method can be used to verify that the checkpoint was issued by the log with the
++    /// public key `rekor_key`.
++    pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
++        rekor_key.verify_signature(
++            Signature::Raw(&self.signature.raw),
++            self.note.marshal().as_bytes(),
++        )
++    }
++
++    /// Checks if the checkpoint and inclusion proof are valid together.
++    pub(crate) fn is_valid_for_proof(
++        &self,
++        proof_root_hash: &Output<Rfc6269Default>,
++        proof_tree_size: u64,
++    ) -> Result<(), SigstoreError> {
++        // Delegate implementation as trivial consistency proof.
++        Rfc6269Default::verify_consistency(
++            self.note.size,
++            proof_tree_size,
++            &[],
++            &self.note.hash.into(),
++            proof_root_hash,
++        )
++        .map_err(ConsistencyProofError)
++    }
+ }
+ 
+ impl CheckpointNote {
+@@ -139,48 +168,12 @@ impl CheckpointNote {
+     }
+ }
+ 
+-impl ToString for Checkpoint {
+-    fn to_string(&self) -> String {
+-        let note = self.note.marshal();
+-        let signature = self.signature.to_string();
+-        format!("{note}\n{signature}")
+-    }
+-}
+-
+-impl Checkpoint {
+-    /// This method can be used to verify that the checkpoint was issued by the log with the
+-    /// public key `rekor_key`.
+-    pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
+-        rekor_key.verify_signature(
+-            Signature::Raw(&self.signature.raw),
+-            self.note.marshal().as_bytes(),
+-        )
+-    }
+-
+-    /// Checks if the checkpoint and inclusion proof are valid together.
+-    pub(crate) fn is_valid_for_proof(
+-        &self,
+-        proof_root_hash: &Output<Rfc6269Default>,
+-        proof_tree_size: u64,
+-    ) -> Result<(), SigstoreError> {
+-        // Delegate implementation as trivial consistency proof.
+-        Rfc6269Default::verify_consistency(
+-            self.note.size,
+-            proof_tree_size,
+-            &[],
+-            &self.note.hash.into(),
+-            proof_root_hash,
+-        )
+-        .map_err(ConsistencyProofError)
+-    }
+-}
+-
+ impl Serialize for Checkpoint {
+     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+     where
+         S: Serializer,
+     {
+-        self.to_string().serialize(serializer)
++        self.encode().serialize(serializer)
+     }
+ }
+ 
+@@ -190,22 +183,18 @@ impl<'de> Deserialize<'de> for Checkpoint {
+         D: Deserializer<'de>,
+     {
+         <String>::deserialize(deserializer).and_then(|s| {
+-            Checkpoint::from_str(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
++            Checkpoint::decode(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
+         })
+     }
+ }
+ 
+-impl ToString for CheckpointSignature {
+-    fn to_string(&self) -> String {
++impl CheckpointSignature {
++    fn encode(&self) -> String {
+         let sig_b64 =
+             BASE64_STANDARD.encode([self.key_fingerprint.as_slice(), self.raw.as_slice()].concat());
+         format!("— {} {sig_b64}\n", self.name)
+     }
+-}
+-
+-impl FromStr for CheckpointSignature {
+-    type Err = ParseCheckpointError;
+-    fn from_str(s: &str) -> Result<Self, Self::Err> {
++    fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
+         let s = s.trim_start_matches('\n').trim_end_matches('\n');
+         let [_, name, sig_b64] = s.split(' ').collect::<Vec<_>>()[..] else {
+             return Err(DecodeError(format!("unexpected signature format {s:?}")));
+@@ -370,7 +359,6 @@ mod test {
+     #[cfg(test)]
+     mod test_checkpoint_signature {
+         use crate::rekor::models::checkpoint::CheckpointSignature;
+-        use std::str::FromStr;
+ 
+         #[test]
+         fn test_to_string_valid_with_url_name() {
+@@ -379,7 +367,7 @@ mod test {
+                 key_fingerprint: [0; 4],
+                 raw: vec![1; 32],
+             }
+-            .to_string();
++            .encode();
+             let expected = "— log.example.org AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
+             assert_eq!(got, expected)
+         }
+@@ -391,7 +379,7 @@ mod test {
+                 key_fingerprint: [0; 4],
+                 raw: vec![1; 32],
+             }
+-            .to_string();
++            .encode();
+             let expected = "— 815f6c60aab9 AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
+             assert_eq!(got, expected)
+         }
+@@ -404,7 +392,7 @@ mod test {
+                 key_fingerprint: [0; 4],
+                 raw: vec![1; 32],
+             };
+-            let got = CheckpointSignature::from_str(input);
++            let got = CheckpointSignature::decode(input);
+             assert_eq!(got, Ok(expected))
+         }
+ 
+@@ -416,7 +404,7 @@ mod test {
+                 key_fingerprint: [0; 4],
+                 raw: vec![1; 32],
+             };
+-            let got = CheckpointSignature::from_str(input);
++            let got = CheckpointSignature::decode(input);
+             assert_eq!(got, Ok(expected))
+         }
+ 
+@@ -428,14 +416,14 @@ mod test {
+                 key_fingerprint: [0; 4],
+                 raw: vec![1; 32],
+             };
+-            let got = CheckpointSignature::from_str(input);
++            let got = CheckpointSignature::decode(input);
+             assert_eq!(got, Ok(expected))
+         }
+ 
+         #[test]
+         fn test_from_str_invalid_with_spaces_in_name() {
+             let input = "— Foo Bar AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
+-            let got = CheckpointSignature::from_str(input);
++            let got = CheckpointSignature::decode(input);
+             assert!(got.is_err())
+         }
+     }
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 30183cebac..3ff548bf93 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -146,7 +146,7 @@ impl LogEntry {
+             .as_ref()
+             .ok_or(UnexpectedError("missing inclusion proof".to_string()))
+             .and_then(|proof| {
+-                Checkpoint::from_str(&proof.checkpoint)
++                Checkpoint::decode(&proof.checkpoint)
+                     .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
+                     .map(|checkpoint| {
+                         InclusionProof2::new(
+
+From 31f0dac61c62a0556e10a15523653b81deeb6cbe Mon Sep 17 00:00:00 2001
+From: Victor Embacher <victor@embacher.xyz>
+Date: Mon, 16 Sep 2024 08:56:23 +0200
+Subject: [PATCH 13/13] added more cases to the consistency proof test suite
+
+---
+ src/rekor/models/log_entry.rs | 29 +++++++++---------
+ src/rekor/models/log_info.rs  | 55 ++++++++++++++++++++++++++++++++++-
+ 2 files changed, 67 insertions(+), 17 deletions(-)
+
+diff --git a/src/rekor/models/log_entry.rs b/src/rekor/models/log_entry.rs
+index 3ff548bf93..320eb021df 100644
+--- a/src/rekor/models/log_entry.rs
++++ b/src/rekor/models/log_entry.rs
+@@ -273,7 +273,9 @@ mod tests {
+         )
+         .expect("failed to parse Rekor key");
+ 
+-        // swap upper and lower halves of hash.
++        let mut test_cases = vec![];
++
++        // swap upper and lower halves of a hash.
+         let mut entry_modified_hashes = entry.clone();
+         entry_modified_hashes
+             .verification
+@@ -282,9 +284,7 @@ mod tests {
+             .unwrap()
+             .hashes[0] =
+             "1f66ee0cfb09a6f79eb267ed9f55de2c810320ec3029914695826d60133c6702".to_string();
+-        entry_modified_hashes
+-            .verify_inclusion(&rekor_key)
+-            .expect_err("accepted invalid inclusion proof: modified hashes");
++        test_cases.push((entry_modified_hashes, "modified hash"));
+ 
+         // modify checkpoint.
+         let mut entry_modified_checkpoint = entry.clone();
+@@ -294,9 +294,7 @@ mod tests {
+             .as_mut()
+             .unwrap()
+             .checkpoint = "foo".to_string();
+-        entry_modified_checkpoint
+-            .verify_inclusion(&rekor_key)
+-            .expect_err("accepted invalid inclusion proof: modified checkpoint");
++        test_cases.push((entry_modified_checkpoint, "modified checkpoint"));
+ 
+         // modify log index.
+         let mut entry_modified_log_index = entry.clone();
+@@ -306,9 +304,7 @@ mod tests {
+             .as_mut()
+             .unwrap()
+             .log_index += 1;
+-        entry_modified_log_index
+-            .verify_inclusion(&rekor_key)
+-            .expect_err("accepted invalid inclusion proof: modified log index");
++        test_cases.push((entry_modified_log_index, "modified log index"));
+ 
+         // modify root hash.
+         let mut entry_modified_root_hash = entry.clone();
+@@ -319,9 +315,7 @@ mod tests {
+             .unwrap()
+             .root_hash =
+             "3de533212f9470d63a56d1992e73465deffa4fa4575f72829016a64e58444120".to_string();
+-        entry_modified_root_hash
+-            .verify_inclusion(&rekor_key)
+-            .expect_err("accepted invalid inclusion proof: modified root hash");
++        test_cases.push((entry_modified_root_hash, "modified root hash"));
+ 
+         // modify tree size.
+         let mut entry_modified_tree_size = entry.clone();
+@@ -331,8 +325,11 @@ mod tests {
+             .as_mut()
+             .unwrap()
+             .tree_size += 1;
+-        entry_modified_tree_size
+-            .verify_inclusion(&rekor_key)
+-            .expect_err("accepted invalid inclusion proof: modified tree size");
++        test_cases.push((entry_modified_tree_size, "modified tree size"));
++
++        for (case, desc) in test_cases {
++            let res = case.verify_inclusion(&rekor_key);
++            assert!(res.is_err(), "accepted invalid proof: {desc}");
++        }
+     }
+ }
+diff --git a/src/rekor/models/log_info.rs b/src/rekor/models/log_info.rs
+index 6ca5e84d26..30cf9f32ae 100644
+--- a/src/rekor/models/log_info.rs
++++ b/src/rekor/models/log_info.rs
+@@ -199,8 +199,9 @@ mod tests {
+     nYLr0lg6RXowI/QV/RE1azBn4Eg5/2uTOMbhB1/gfcHzijzFi9Tk+g1Prg==
+     -----END PUBLIC KEY-----
+ "#;
++
+     #[test]
+-    fn test_consistency() {
++    fn test_consistency_valid() {
+         let rekor_key = CosignVerificationKey::from_pem(
+             REKOR_STAGING_KEY_PEM.as_bytes(),
+             &SigningScheme::ECDSA_P256_SHA256_ASN1,
+@@ -222,4 +223,56 @@ mod tests {
+             )
+             .expect("failed to accept valid inclusion proof");
+     }
++
++    #[test]
++    fn test_consistency_invalid() {
++        let rekor_key = CosignVerificationKey::from_pem(
++            REKOR_STAGING_KEY_PEM.as_bytes(),
++            &SigningScheme::ECDSA_P256_SHA256_ASN1,
++        )
++        .expect("failed to parse Rekor key");
++        let log_info_old: LogInfo =
++            serde_json::from_str(LOG_INFO_OLD).expect("failed to deserialize log info test data");
++        let log_info_new: LogInfo =
++            serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
++
++        let consistency_proof: ConsistencyProof =
++            serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
++
++        let mut test_cases = vec![];
++
++        let mut consistency_proof_empty = consistency_proof.clone();
++        consistency_proof_empty.hashes = vec![];
++        test_cases.push((consistency_proof_empty, "empty proof"));
++
++        let mut consistency_proof_additional_hash = consistency_proof.clone();
++        consistency_proof_additional_hash
++            .hashes
++            .push("e0300bb7400e692bccbf20b17fe7ec177aba23e7bfd36dcb7484935ccd214336".to_string());
++        test_cases.push((consistency_proof_additional_hash, "too many hashes"));
++
++        let mut consistency_proof_removed_hash = consistency_proof.clone();
++        let _ = consistency_proof_removed_hash.hashes.pop().unwrap();
++        test_cases.push((consistency_proof_removed_hash, "too few hashes"));
++
++        // invert all the hashes in the proof
++        let mut consistency_proof_invalid_hash = consistency_proof.clone();
++        consistency_proof_invalid_hash.hashes = consistency_proof_invalid_hash
++            .hashes
++            .into_iter()
++            .map(|h| h.chars().rev().collect())
++            .collect();
++
++        test_cases.push((consistency_proof_invalid_hash, "invalid hashes"));
++
++        for (proof, desc) in test_cases {
++            let res = log_info_new.verify_consistency(
++                log_info_old.tree_size,
++                &log_info_old.root_hash,
++                &proof,
++                &rekor_key,
++            );
++            assert!(res.is_err(), "accepted invalid proof:  {desc}");
++        }
++    }
+ }

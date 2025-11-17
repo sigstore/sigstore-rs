@@ -1,0 +1,12 @@
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.11`.
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.2, pluggy-1.5.0 -- /Users/wolfv/Programs/sigstore-rs/sigstore-conformance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/wolfv/Programs/sigstore-rs/sigstore-conformance
+configfile: pyproject.toml
+plugins: subtests-0.14.2
+collecting ... ERROR: file or directory not found: uv
+
+collected 0 items
+
+============================ no tests ran in 0.00s =============================
