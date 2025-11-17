@@ -19,7 +19,7 @@
 
 use super::proof_verification::MerkleProofVerifier;
 use super::rfc6962::Rfc6269Default;
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use digest::Output;
 use rstest::rstest;
 use serde::Deserialize;
@@ -69,13 +69,11 @@ fn decode_base64_hash(s: &str) -> Result<Output<Rfc6269Default>, String> {
 }
 
 #[rstest]
-fn test_inclusion_proof(
-    #[files("tests/data/merkle/testdata/inclusion/**/*.json")] path: PathBuf,
-) {
-    let content = fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
-    let vector: InclusionProofTestVector =
-        serde_json::from_str(&content).unwrap_or_else(|e| panic!("Failed to parse {:?}: {}", path, e));
+fn test_inclusion_proof(#[files("tests/data/merkle/testdata/inclusion/**/*.json")] path: PathBuf) {
+    let content =
+        fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
+    let vector: InclusionProofTestVector = serde_json::from_str(&content)
+        .unwrap_or_else(|e| panic!("Failed to parse {:?}: {}", path, e));
 
     // Try to decode - if any decoding fails and we expect an error, accept it
     let root_result = decode_base64_hash(&vector.root);
@@ -120,10 +118,10 @@ fn test_inclusion_proof(
 fn test_consistency_proof(
     #[files("tests/data/merkle/testdata/consistency/**/*.json")] path: PathBuf,
 ) {
-    let content = fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
-    let vector: ConsistencyProofTestVector =
-        serde_json::from_str(&content).unwrap_or_else(|e| panic!("Failed to parse {:?}: {}", path, e));
+    let content =
+        fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
+    let vector: ConsistencyProofTestVector = serde_json::from_str(&content)
+        .unwrap_or_else(|e| panic!("Failed to parse {:?}: {}", path, e));
 
     // Try to decode - if any decoding fails and we expect an error, accept it
     let root1_result = decode_base64_hash(&vector.root1);
@@ -134,8 +132,7 @@ fn test_consistency_proof(
         .map(|p| p.iter().map(|h| decode_base64_hash(h)).collect())
         .unwrap_or(Ok(Vec::new()));
 
-    if (root1_result.is_err() || root2_result.is_err() || proof_result.is_err())
-        && vector.want_err
+    if (root1_result.is_err() || root2_result.is_err() || proof_result.is_err()) && vector.want_err
     {
         // Expected error due to invalid input
         return;

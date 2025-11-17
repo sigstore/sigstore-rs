@@ -47,8 +47,8 @@ pub(crate) type Rfc6269Default = Sha256;
 /// These tests were taken from the [transparency-dev Merkle implementation](https://github.com/transparency-dev/merkle/blob/036047b5d2f7faf3b1ee643d391e60fe5b1defcf/rfc6962/rfc6962_test.go).
 #[cfg(test)]
 mod test_rfc6962 {
-    use crate::crypto::merkle::rfc6962::Rfc6269HasherTrait;
     use crate::crypto::merkle::Rfc6269Default;
+    use crate::crypto::merkle::rfc6962::Rfc6269HasherTrait;
     use hex_literal::hex;
 
     #[derive(Debug, PartialEq)]

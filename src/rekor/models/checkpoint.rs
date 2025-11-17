@@ -3,8 +3,8 @@ use crate::crypto::{CosignVerificationKey, Signature};
 use crate::errors::SigstoreError;
 use crate::errors::SigstoreError::ConsistencyProofError;
 use crate::rekor::models::checkpoint::ParseCheckpointError::*;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use digest::Output;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Write;
@@ -239,7 +239,8 @@ mod test {
                     9944,
                     [1; 32],
                     vec![],
-                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n", ),
+                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n",
+                ),
                 (
                     "Banana Checkpoint v7",
                     9943,
@@ -280,7 +281,8 @@ mod test {
                     9944,
                     [1; 32],
                     vec![],
-                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n", ),
+                    "Banana Checkpoint v5\n9944\nAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n",
+                ),
                 (
                     "valid with multiple trailing data lines",
                     "Banana Checkpoint v7",
@@ -294,7 +296,10 @@ mod test {
                     "Banana Checkpoint v7",
                     9943,
                     [2; 32],
-                    vec![KeyValue("Timestamp".to_string(), "1689748607742585419".to_string())],
+                    vec![KeyValue(
+                        "Timestamp".to_string(),
+                        "1689748607742585419".to_string(),
+                    )],
                     "Banana Checkpoint v7\n9943\nAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nTimestamp: 1689748607742585419\n",
                 ),
                 (
@@ -322,22 +327,24 @@ mod test {
 
         #[test]
         fn test_unmarshal_invalid() {
-            let test_cases = [(
-                "invalid - insufficient lines",
-                "Head\n9944\n",
-            ), (
-                "invalid - empty header",
-                "\n9944\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
-            ), (
-                "invalid - missing newline on roothash",
-                "Log Checkpoint v0\n123\nYmFuYW5hcw==",
-            ), (
-                "invalid size - not a number",
-                "Log Checkpoint v0\nbananas\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
-            ), (
-                "invalid size - negative",
-                "Log Checkpoint v0\n-34\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
-            ),
+            let test_cases = [
+                ("invalid - insufficient lines", "Head\n9944\n"),
+                (
+                    "invalid - empty header",
+                    "\n9944\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
+                ),
+                (
+                    "invalid - missing newline on roothash",
+                    "Log Checkpoint v0\n123\nYmFuYW5hcw==",
+                ),
+                (
+                    "invalid size - not a number",
+                    "Log Checkpoint v0\nbananas\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
+                ),
+                (
+                    "invalid size - negative",
+                    "Log Checkpoint v0\n-34\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
+                ),
                 (
                     "invalid size - too large",
                     "Log Checkpoint v0\n3438945738945739845734895735\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
