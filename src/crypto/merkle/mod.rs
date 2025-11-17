@@ -1,6 +1,9 @@
 pub mod proof_verification;
 pub mod rfc6962;
 
+#[cfg(test)]
+mod testdata_tests;
+
 use crate::errors::SigstoreError;
 use crate::errors::SigstoreError::UnexpectedError;
 use digest::Output;

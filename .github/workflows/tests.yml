@@ -43,6 +43,15 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+
+      # Checkout transparency-dev/merkle test vectors for Merkle tree validation
+      - name: Checkout transparency-dev/merkle test vectors
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: transparency-dev/merkle
+          path: tests/data/merkle
+          persist-credentials: false
+
       - uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1.0.3
         with:
           command: test
