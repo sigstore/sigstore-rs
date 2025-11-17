@@ -21,7 +21,6 @@ use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError::UnexpectedError;
 use crate::rekor::models::InclusionProof as InclusionProof2;
 use crate::rekor::models::checkpoint::Checkpoint;
-use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
 use std::collections::HashMap;
@@ -112,7 +111,7 @@ impl LogEntry {
     /// Verifies that the log entry was included by a log in possession of `rekor_key`.
     ///
     /// Example:
-    /// ```rust
+    /// ```rust,no_run
     /// use sigstore::rekor::apis::configuration::Configuration;
     /// use sigstore::rekor::apis::pubkey_api::get_public_key;
     /// use sigstore::rekor::apis::tlog_api::get_log_info;
@@ -160,16 +159,13 @@ impl LogEntry {
             })
             .and_then(|proof| {
                 // encode as canonical JSON
-                let mut encoded_entry = Vec::new();
-                let mut ser = serde_json::Serializer::with_formatter(
-                    &mut encoded_entry,
-                    CanonicalFormatter::new(),
-                );
-                self.body.serialize(&mut ser).map_err(|e| {
-                    SigstoreError::UnexpectedError(format!(
-                        "Cannot serialize log entry body: {e:?}"
-                    ))
-                })?;
+                let encoded_entry = serde_json_canonicalizer::to_string(&self.body)
+                    .map_err(|e| {
+                        SigstoreError::UnexpectedError(format!(
+                            "Cannot serialize log entry body: {e:?}"
+                        ))
+                    })?
+                    .into_bytes();
                 proof.verify(&encoded_entry, rekor_key)
             })
     }

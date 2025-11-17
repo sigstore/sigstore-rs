@@ -1,6 +1,7 @@
 use super::rfc6962::Rfc6269HasherTrait;
 use MerkleProofError::*;
 use digest::{Digest, Output};
+#[cfg(any(feature = "verify", feature = "sign", feature = "sigstore-trust-root"))]
 use hex::ToHex;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -14,6 +15,23 @@ pub enum MerkleProofError {
     NewTreeSmaller { new: u64, old: u64 },
     WrongProofSize { got: u64, want: u64 },
     WrongEmptyTreeHash,
+}
+
+// Helper function to create MismatchedRoot error with hex encoding when feature is enabled
+#[cfg(any(feature = "verify", feature = "sign", feature = "sigstore-trust-root"))]
+fn mismatched_root_error<O: ToHex>(got: &O, expected: &O) -> MerkleProofError {
+    MismatchedRoot {
+        got: got.encode_hex(),
+        expected: expected.encode_hex(),
+    }
+}
+
+#[cfg(not(any(feature = "verify", feature = "sign", feature = "sigstore-trust-root")))]
+fn mismatched_root_error<O>(_got: &O, _expected: &O) -> MerkleProofError {
+    MismatchedRoot {
+        got: "unavailable".to_string(),
+        expected: "unavailable".to_string(),
+    }
 }
 
 pub(crate) trait MerkleProofVerifier<O>: Rfc6269HasherTrait<O>
@@ -40,10 +58,8 @@ where
         }
         Self::root_from_inclusion_proof(index, leaf_hash, tree_size, proof_hashes).and_then(
             |calc_root| {
-                Self::verify_match(calc_root.as_ref(), root_hash).map_err(|_| MismatchedRoot {
-                    got: root_hash.encode_hex(),
-                    expected: calc_root.encode_hex(),
-                })
+                Self::verify_match(calc_root.as_ref(), root_hash)
+                    .map_err(|_| mismatched_root_error(root_hash, calc_root.as_ref()))
             },
         )
     }
@@ -98,10 +114,8 @@ where
             }
             // when sizes are equal and the proof is empty we can just verify the roots
             (Ordering::Equal, _, true) => {
-                return Self::verify_match(old_root, new_root).map_err(|_| MismatchedRoot {
-                    got: new_root.encode_hex(),
-                    expected: old_root.encode_hex(),
-                });
+                return Self::verify_match(old_root, new_root)
+                    .map_err(|_| mismatched_root_error(new_root, old_root));
             }
 
             // the proof cannot be empty if the sizes are equal or the previous size was zero
@@ -140,17 +154,13 @@ where
         // verify the old hash is correct
         let hash1 = Self::chain_inner_right(seed, &proof[..inner as usize], mask);
         let hash1 = Self::chain_border_right(&hash1, &proof[inner as usize..]);
-        Self::verify_match(&hash1, old_root).map_err(|_| MismatchedRoot {
-            got: old_root.encode_hex(),
-            expected: hash1.encode_hex(),
-        })?;
+        Self::verify_match(&hash1, old_root)
+            .map_err(|_| mismatched_root_error(old_root, &hash1))?;
         // verify the new hash is correct
         let hash2 = Self::chain_inner(seed, &proof[..inner as usize], mask);
         let hash2 = Self::chain_border_right(&hash2, &proof[inner as usize..]);
-        Self::verify_match(&hash2, new_root).map_err(|_| MismatchedRoot {
-            got: new_root.encode_hex(),
-            expected: hash2.encode_hex(),
-        })?;
+        Self::verify_match(&hash2, new_root)
+            .map_err(|_| mismatched_root_error(new_root, &hash2))?;
         Ok(())
     }
 
