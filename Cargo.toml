@@ -22,8 +22,8 @@ cosign = [
     "dep:async-trait",
     "dep:cfg-if",
     "dep:oci-client",
-    "dep:olpc-cjson",
     "dep:regex",
+    "dep:serde_json_canonicalizer",
     "registry",
 ]
 fulcio = [
@@ -49,7 +49,7 @@ native-tls = [
     "reqwest?/native-tls",
 ]
 oauth = ["dep:openidconnect", "dep:reqwest"]
-registry = ["dep:async-trait", "dep:oci-client", "dep:olpc-cjson"]
+registry = ["dep:async-trait", "dep:oci-client", "dep:serde_json_canonicalizer"]
 rekor = ["dep:reqwest"]
 rustls-tls = [
     "oci-client?/rustls-tls",
@@ -85,7 +85,8 @@ verify = [
     "fulcio",
     "rekor",
 ]
-wasm = ["chrono/wasmbind", "ring?/wasm32_unknown_unknown_js"]
+
+wasm = ["chrono/wasmbind"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
@@ -126,7 +127,6 @@ hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
 oci-client = { version = "0.15", default-features = false, optional = true }
-olpc-cjson = { version = "0.1", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "reqwest-blocking",
@@ -158,7 +158,6 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "multipart",
 ], optional = true }
-ring = { version = "0.17", default-features = false, optional = true }
 rsa = { version = "0.9", default-features = false, features = ["std"] }
 rustls-webpki = { version = "0.103", default-features = false, features = [
     "std",
