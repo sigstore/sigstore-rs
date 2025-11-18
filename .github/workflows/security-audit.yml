@@ -9,8 +9,13 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
+    name: Audit for vulnerable crates
     permissions:
       checks: write # for rustsec/audit-check to create check
       contents: read # for actions/checkout to fetch code
