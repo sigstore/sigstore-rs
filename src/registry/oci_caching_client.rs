@@ -20,7 +20,6 @@ use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
 use cached::proc_macro::cached;
-use olpc_cjson::CanonicalFormatter;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error};
@@ -105,12 +104,13 @@ impl<'a> PullSettings<'a> {
     // Because of that the method will return the '0' value when something goes
     // wrong during the serialization operation. This is very unlikely to happen
     pub fn hash(&self) -> String {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        if let Err(e) = self.serialize(&mut ser) {
-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
-            return "0".to_string();
-        }
+        let buf = match serde_json_canonicalizer::to_vec(self) {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!(err=?e, settings=?self, "Cannot perform canonical serialization");
+                return "0".to_string();
+            }
+        };
 
         let mut hasher = Sha256::new();
         hasher.update(&buf);
@@ -196,12 +196,13 @@ impl PullManifestSettings {
     // Because of that the method will return the '0' value when something goes
     // wrong during the serialization operation. This is very unlikely to happen
     pub fn hash(&self) -> String {
-        let mut buf = Vec::new();
-        let mut ser = serde_json::Serializer::with_formatter(&mut buf, CanonicalFormatter::new());
-        if let Err(e) = self.serialize(&mut ser) {
-            error!(err=?e, settings=?self, "Cannot perform canonical serialization");
-            return "0".to_string();
-        }
+        let buf = match serde_json_canonicalizer::to_vec(self) {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!(err=?e, settings=?self, "Cannot perform canonical serialization");
+                return "0".to_string();
+            }
+        };
 
         let mut hasher = Sha256::new();
         hasher.update(&buf);
