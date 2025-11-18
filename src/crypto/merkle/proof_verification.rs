@@ -753,7 +753,7 @@ mod test_verify {
                 desc: "truncated proof",
             });
         }
-        // add probes with proves that have a flipped 4th bit of i-th byte of the i-th hash
+        // add probes with proves that have a flipped 3th bit of i-th byte of the i-th hash
         ret.extend((0..ln).map(|i| {
             let mut wrong_proof = proof.to_vec();
             wrong_proof[i][i] ^= 4;
