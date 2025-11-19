@@ -117,11 +117,11 @@ impl OauthTokenProvider {
             let nonce = &oidc_url.2;
 
             let claims = id_token.claims(&verifier, nonce);
-            if let Ok(claims) = claims {
-                if let Some(email) = claims.email() {
-                    let email = &**email;
-                    return Ok((id_token.clone(), email.clone()));
-                }
+            if let Ok(claims) = claims
+                && let Some(email) = claims.email()
+            {
+                let email = &**email;
+                return Ok((id_token.clone(), email.clone()));
             }
         }
 

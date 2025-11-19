@@ -2,20 +2,28 @@ on: [workflow_dispatch]
 
 name: Conformance Suite
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   conformance:
+    name: Check sigstore conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1.0.3
-        with:
-          command: build
-          args: --manifest-path=tests/conformance/Cargo.toml
+          persist-credentials: false
+      - name: Rustup
+        run: |
+          rustup install --profile minimal stable
+          rustup override set stable
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - run: |
+          cargo build --manifest-path=tests/conformance/Cargo.toml
       - uses: sigstore/sigstore-conformance@main
         with:
           entrypoint: ${{ github.workspace }}/tests/conformance/target/debug/sigstore

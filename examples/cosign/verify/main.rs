@@ -14,6 +14,7 @@
 // limitations under the License.
 
 extern crate sigstore;
+use sigstore::cosign::verification_constraint::cert_subject_email_verifier::StringVerifier;
 use sigstore::cosign::verification_constraint::{
     AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, CertificateVerifier,
     PublicKeyVerifier, VerificationConstraintVec,
@@ -24,19 +25,18 @@ use sigstore::errors::SigstoreVerifyConstraintsError;
 use sigstore::registry::{ClientConfig, ClientProtocol, OciReference};
 use sigstore::trust::sigstore::SigstoreTrustRoot;
 use std::time::Instant;
+use std::{collections::BTreeMap, fs};
 
 extern crate anyhow;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 extern crate clap;
 use clap::Parser;
 
-use std::{collections::HashMap, fs};
-
 extern crate tracing_subscriber;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -61,7 +61,7 @@ struct Cli {
     #[clap(long)]
     use_sigstore_tuf_data: bool,
 
-    /// File containing Rekor's public key (e.g.: ~/.sigstore/root/targets/rekor.pub)
+    /// Rekor's public key ID (in hex format) and path to the public key, separated by the ':' symbol (e.g.: c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d:~/.sigstore/root/targets/rekor.pub)
     #[clap(long, required(false))]
     rekor_pub_keys: Vec<String>,
 
@@ -146,10 +146,13 @@ async fn run_app(
     // Build verification constraints
     let mut verification_constraints: VerificationConstraintVec = Vec::new();
     if let Some(cert_email) = cli.cert_email.as_ref() {
-        let issuer = cli.cert_issuer.as_ref().map(|i| i.to_string());
+        let issuer = cli
+            .cert_issuer
+            .as_ref()
+            .map(|i| StringVerifier::ExactMatch(i.to_string()));
 
         verification_constraints.push(Box::new(CertSubjectEmailVerifier {
-            email: cert_email.to_string(),
+            email: StringVerifier::ExactMatch(cert_email.to_string()),
             issuer,
         }));
     }
@@ -199,7 +202,7 @@ async fn run_app(
     }
 
     if !cli.annotations.is_empty() {
-        let mut values: HashMap<String, String> = HashMap::new();
+        let mut values: BTreeMap<String, String> = BTreeMap::new();
         for annotation in &cli.annotations {
             let tmp: Vec<_> = annotation.splitn(2, '=').collect();
             if tmp.len() == 2 {
@@ -229,14 +232,19 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
     if cli.use_sigstore_tuf_data {
         info!("Downloading data from Sigstore TUF repository");
 
-        let repo: sigstore::errors::Result<SigstoreTrustRoot> = SigstoreTrustRoot::new(None).await;
+        let trust_root: sigstore::errors::Result<SigstoreTrustRoot> =
+            SigstoreTrustRoot::new(None).await;
 
-        return Ok(Box::new(repo?));
+        return Ok(Box::new(trust_root?));
     };
 
-    let mut data = sigstore::trust::ManualTrustRoot::default();
-    for path in cli.rekor_pub_keys.iter() {
-        data.rekor_keys.push(
+    let mut trust_root = sigstore::trust::ManualTrustRoot::default();
+    for id_and_path in cli.rekor_pub_keys.iter() {
+        let (id, path) = id_and_path
+            .split_once(':')
+            .ok_or_else(|| anyhow!("Invalid format for rekor public key"))?;
+        trust_root.rekor_keys.insert(
+            id.to_string(),
             fs::read(path)
                 .map_err(|e| anyhow!("Error reading rekor public key from disk: {}", e))?,
         );
@@ -250,10 +258,10 @@ async fn fulcio_and_rekor_data(cli: &Cli) -> anyhow::Result<Box<dyn sigstore::tr
             encoding: sigstore::registry::CertificateEncoding::Pem,
             data: cert_data,
         };
-        data.fulcio_certs.push(certificate.try_into()?);
+        trust_root.fulcio_certs.push(certificate.try_into()?);
     }
 
-    Ok(Box::new(data))
+    Ok(Box::new(trust_root))
 }
 
 #[tokio::main]

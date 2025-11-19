@@ -1,0 +1,32 @@
+name: Security audit
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit for vulnerable crates
+    permissions:
+      checks: write # for rustsec/audit-check to create check
+      contents: read # for actions/checkout to fetch code
+      issues: write # for rustsec/audit-check to create issues
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

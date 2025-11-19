@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use webpki::types::CertificateDer;
+use std::collections::BTreeMap;
+
+use pki_types::CertificateDer;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "sigstore-trust-root")))]
 #[cfg(feature = "sigstore-trust-root")]
@@ -22,8 +24,8 @@ pub mod sigstore;
 /// A `TrustRoot` owns all key material necessary for establishing a root of trust.
 pub trait TrustRoot {
     fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>>;
-    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
-    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>>;
+    fn rekor_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
+    fn ctfe_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>>;
 }
 
 /// A `ManualTrustRoot` is a [TrustRoot] with out-of-band trust materials.
@@ -31,20 +33,28 @@ pub trait TrustRoot {
 #[derive(Debug, Default)]
 pub struct ManualTrustRoot<'a> {
     pub fulcio_certs: Vec<CertificateDer<'a>>,
-    pub rekor_keys: Vec<Vec<u8>>,
-    pub ctfe_keys: Vec<Vec<u8>>,
+    pub rekor_keys: BTreeMap<String, Vec<u8>>,
+    pub ctfe_keys: BTreeMap<String, Vec<u8>>,
 }
 
-impl TrustRoot for ManualTrustRoot<'_> {
-    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'_>>> {
+impl<'a> TrustRoot for ManualTrustRoot<'a> {
+    fn fulcio_certs(&self) -> crate::errors::Result<Vec<CertificateDer<'a>>> {
         Ok(self.fulcio_certs.clone())
     }
 
-    fn rekor_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
-        Ok(self.rekor_keys.iter().map(|key| &key[..]).collect())
+    fn rekor_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>> {
+        Ok(self
+            .rekor_keys
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_slice()))
+            .collect())
     }
 
-    fn ctfe_keys(&self) -> crate::errors::Result<Vec<&[u8]>> {
-        Ok(self.ctfe_keys.iter().map(|v| &v[..]).collect())
+    fn ctfe_keys(&self) -> crate::errors::Result<BTreeMap<String, &[u8]>> {
+        Ok(self
+            .ctfe_keys
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_slice()))
+            .collect())
     }
 }

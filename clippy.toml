@@ -1,0 +1,2 @@
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true

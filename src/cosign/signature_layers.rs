@@ -15,9 +15,10 @@
 
 use const_oid::ObjectIdentifier;
 use digest::Digest;
-use oci_distribution::client::ImageLayer;
+use oci_client::client::ImageLayer;
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::collections::BTreeMap;
+use std::fmt;
 use tracing::{debug, info, warn};
 use x509_cert::der::DecodePem;
 use x509_cert::ext::pkix::name::GeneralName;
@@ -238,10 +239,10 @@ impl SignatureLayer {
     /// object are to be considered **trusted** and **verified**, according to
     /// the parameters provided to this method.
     pub(crate) fn new(
-        descriptor: &oci_distribution::manifest::OciDescriptor,
-        layer: &oci_distribution::client::ImageLayer,
+        descriptor: &oci_client::manifest::OciDescriptor,
+        layer: &oci_client::client::ImageLayer,
         source_image_digest: &str,
-        rekor_pub_key: Option<&CosignVerificationKey>,
+        rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
         fulcio_cert_pool: Option<&CertificatePool>,
     ) -> Result<SignatureLayer> {
         if descriptor.media_type != SIGSTORE_OCI_MEDIA_TYPE {
@@ -272,7 +273,7 @@ impl SignatureLayer {
         let annotations = descriptor.annotations.clone().unwrap_or_default();
 
         let signature = Self::get_signature_from_annotations(&annotations)?;
-        let bundle = Self::get_bundle_from_annotations(&annotations, rekor_pub_key)?;
+        let bundle = Self::get_bundle_from_annotations(&annotations, rekor_pub_keys)?;
         let certificate_signature = Self::get_certificate_signature_from_annotations(
             &annotations,
             fulcio_cert_pool,
@@ -289,7 +290,7 @@ impl SignatureLayer {
         })
     }
 
-    fn get_signature_from_annotations(annotations: &HashMap<String, String>) -> Result<String> {
+    fn get_signature_from_annotations(annotations: &BTreeMap<String, String>) -> Result<String> {
         let signature: String = annotations
             .get(SIGSTORE_SIGNATURE_ANNOTATION)
             .cloned()
@@ -298,12 +299,12 @@ impl SignatureLayer {
     }
 
     fn get_bundle_from_annotations(
-        annotations: &HashMap<String, String>,
-        rekor_pub_key: Option<&CosignVerificationKey>,
+        annotations: &BTreeMap<String, String>,
+        rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
     ) -> Result<Option<Bundle>> {
         let bundle = match annotations.get(SIGSTORE_BUNDLE_ANNOTATION) {
-            Some(value) => match rekor_pub_key {
-                Some(key) => Some(Bundle::new_verified(value, key)?),
+            Some(value) => match rekor_pub_keys {
+                Some(keys) => Some(Bundle::new_verified(value, keys)?),
                 None => {
                     info!(bundle = ?value, "Ignoring bundle, rekor public key not provided to verification client");
                     None
@@ -315,11 +316,12 @@ impl SignatureLayer {
     }
 
     fn get_certificate_signature_from_annotations(
-        annotations: &HashMap<String, String>,
+        annotations: &BTreeMap<String, String>,
         fulcio_cert_pool: Option<&CertificatePool>,
         bundle: Option<&Bundle>,
     ) -> Option<CertificateSignature> {
         let cert_raw = annotations.get(SIGSTORE_CERT_ANNOTATION)?;
+
         let fulcio_cert_pool = match fulcio_cert_pool {
             Some(cp) => cp,
             None => {
@@ -382,26 +384,25 @@ impl SignatureLayer {
 /// returned `SignatureLayer` is guaranteed to be
 /// verified using the given Rekor and Fulcio keys.
 pub(crate) fn build_signature_layers(
-    manifest: &oci_distribution::manifest::OciImageManifest,
+    manifest: &oci_client::manifest::OciImageManifest,
     source_image_digest: &str,
-    layers: &[oci_distribution::client::ImageLayer],
-    rekor_pub_key: Option<&CosignVerificationKey>,
+    layers: &[oci_client::client::ImageLayer],
+    rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
     fulcio_cert_pool: Option<&CertificatePool>,
 ) -> Result<Vec<SignatureLayer>> {
     let mut signature_layers: Vec<SignatureLayer> = Vec::new();
 
     for manifest_layer in &manifest.layers {
-        let matching_layer: Option<&oci_distribution::client::ImageLayer> =
-            layers.iter().find(|l| {
-                let tmp: ImageLayer = (*l).clone();
-                tmp.sha256_digest() == manifest_layer.digest
-            });
+        let matching_layer: Option<&oci_client::client::ImageLayer> = layers.iter().find(|l| {
+            let tmp: ImageLayer = (*l).clone();
+            tmp.sha256_digest() == manifest_layer.digest
+        });
         if let Some(layer) = matching_layer {
             match SignatureLayer::new(
                 manifest_layer,
                 layer,
                 source_image_digest,
-                rekor_pub_key,
+                rekor_pub_keys,
                 fulcio_cert_pool,
             ) {
                 Ok(sl) => signature_layers.push(sl),
@@ -434,7 +435,7 @@ impl CertificateSignature {
         // ensure the certificate has been issued by Fulcio
         fulcio_cert_pool.verify_pem_cert(
             cert_pem,
-            Some(webpki::types::UnixTime::since_unix_epoch(
+            Some(pki_types::UnixTime::since_unix_epoch(
                 cert.tbs_certificate.validity.not_before.to_unix_duration(),
             )),
         )?;
@@ -555,7 +556,9 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
 OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
-        let signature = String::from("MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
+        let signature = String::from(
+            "MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=",
+        );
         let verification_key =
             CosignVerificationKey::from_pem(public_key.as_bytes(), &SigningScheme::default())
                 .expect("Cannot create CosignVerificationKey");
@@ -639,8 +642,12 @@ oXqqo/C9QnOHTto=
 
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
-            oci_digest: String::from("sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e"),
-            signature: Some(String::from("MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=")),
+            oci_digest: String::from(
+                "sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e",
+            ),
+            signature: Some(String::from(
+                "MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=",
+            )),
             bundle: Some(bundle),
             certificate_signature: Some(certificate_signature),
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
@@ -666,17 +673,18 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn new_signature_layer_fails_because_bad_descriptor() {
-        let descriptor = oci_distribution::manifest::OciDescriptor {
+        let descriptor = oci_client::manifest::OciDescriptor {
             media_type: "not what you would expected".into(),
             ..Default::default()
         };
-        let layer = oci_distribution::client::ImageLayer {
+        let layer = oci_client::client::ImageLayer {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             data: Vec::new(),
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -684,31 +692,29 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreMediaTypeNotFoundError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreMediaTypeNotFoundError);
         assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
     fn new_signature_layer_fails_because_bad_layer() {
-        let descriptor = oci_distribution::manifest::OciDescriptor {
+        let descriptor = oci_client::manifest::OciDescriptor {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             ..Default::default()
         };
-        let layer = oci_distribution::client::ImageLayer {
+        let layer = oci_client::client::ImageLayer {
             media_type: "not what you would expect".into(),
             data: Vec::new(),
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -716,32 +722,30 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreMediaTypeNotFoundError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreMediaTypeNotFoundError);
         assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
     fn new_signature_layer_fails_because_checksum_mismatch() {
-        let descriptor = oci_distribution::manifest::OciDescriptor {
+        let descriptor = oci_client::manifest::OciDescriptor {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             digest: "some digest".into(),
             ..Default::default()
         };
-        let layer = oci_distribution::client::ImageLayer {
+        let layer = oci_client::client::ImageLayer {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
             data: "some other contents".into(),
             annotations: None,
         };
 
-        let rekor_pub_key = get_rekor_public_key();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
@@ -749,21 +753,18 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             &descriptor,
             &layer,
             "source_image_digest is not relevant now",
-            Some(&rekor_pub_key),
+            Some(&rekor_pub_keys),
             Some(&fulcio_cert_pool),
         )
         .expect_err("Didn't get an error");
 
-        let found = match error {
-            SigstoreError::SigstoreLayerDigestMismatchError => true,
-            _ => false,
-        };
+        let found = matches!(error, SigstoreError::SigstoreLayerDigestMismatchError);
         assert!(found, "Got a different error type: {}", error);
     }
 
     #[test]
     fn get_signature_from_annotations_success() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
         annotations.insert(SIGSTORE_SIGNATURE_ANNOTATION.into(), "foo".into());
 
         let actual = SignatureLayer::get_signature_from_annotations(&annotations);
@@ -772,7 +773,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_signature_from_annotations_failure() {
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
 
         let actual = SignatureLayer::get_signature_from_annotations(&annotations);
         assert!(actual.is_err());
@@ -786,18 +787,19 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         //
         // We care only about the only case not tested: to not
         // fail when no bundle is specified.
-        let annotations: HashMap<String, String> = HashMap::new();
-        let rekor_pub_key = get_rekor_public_key();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
+        let (key_id, key) = get_rekor_public_key();
+        let rekor_pub_keys = BTreeMap::from([(key_id, key)]);
 
         let actual =
-            SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_key));
+            SignatureLayer::get_bundle_from_annotations(&annotations, Some(&rekor_pub_keys));
         assert!(actual.is_ok());
         assert!(actual.unwrap().is_none());
     }
 
     #[test]
     fn get_certificate_signature_from_annotations_returns_none() {
-        let annotations: HashMap<String, String> = HashMap::new();
+        let annotations: BTreeMap<String, String> = BTreeMap::new();
         let fulcio_cert_pool = get_fulcio_cert_pool();
 
         let actual = SignatureLayer::get_certificate_signature_from_annotations(
@@ -811,7 +813,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_certificate_signature_from_annotations_fails_when_no_bundle_is_given() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
 
         // add a fake cert, contents are not relevant
         annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());
@@ -828,7 +830,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
 
     #[test]
     fn get_certificate_signature_from_annotations_fails_when_no_fulcio_pub_key_is_given() {
-        let mut annotations: HashMap<String, String> = HashMap::new();
+        let mut annotations: BTreeMap<String, String> = BTreeMap::new();
 
         // add a fake cert, contents are not relevant
         annotations.insert(SIGSTORE_CERT_ANNOTATION.to_string(), "a cert".to_string());

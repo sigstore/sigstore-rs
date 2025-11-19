@@ -1,8 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use json_syntax::Print;
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::LogId,
@@ -10,7 +9,7 @@ use sigstore_protobuf_specs::dev::sigstore::{
 };
 
 use crate::rekor::models::{
-    log_entry::InclusionProof as RekorInclusionProof, LogEntry as RekorLogEntry,
+    LogEntry as RekorLogEntry, log_entry::InclusionProof as RekorInclusionProof,
 };
 
 // Known Sigstore bundle media types.
@@ -73,11 +72,9 @@ impl TryFrom<RekorLogEntry> for TransparencyLogEntry {
     type Error = ();
 
     fn try_from(value: RekorLogEntry) -> Result<Self, Self::Error> {
-        let canonicalized_body = {
-            let mut body = json_syntax::to_value(value.body).or(Err(()))?;
-            body.canonicalize();
-            body.compact_print().to_string().into_bytes()
-        };
+        let canonicalized_body = serde_json_canonicalizer::to_string(&value.body)
+            .map_err(|_| ())?
+            .into_bytes();
         let inclusion_promise = Some(InclusionPromise {
             signed_entry_timestamp: base64
                 .decode(value.verification.signed_entry_timestamp)

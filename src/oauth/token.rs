@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use openidconnect::core::CoreIdToken;
 use serde::Deserialize;
 
-use base64::{engine::general_purpose::STANDARD_NO_PAD as base64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD as base64};
 
 use crate::errors::SigstoreError;
 
