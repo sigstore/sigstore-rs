@@ -486,7 +486,7 @@ mod test_verify {
                 tree_size,
                 root: *root,
                 leaf_hash: *leaf_hash,
-                proof: [proof.to_vec(), [[0 as u8; 32]].to_vec()].concat(),
+                proof: [proof.to_vec(), [[0_u8; 32]].to_vec()].concat(),
                 desc: "trailing garbage",
             },
             InclusionProbe {
@@ -494,7 +494,7 @@ mod test_verify {
                 tree_size,
                 root: *root,
                 leaf_hash: *leaf_hash,
-                proof: [proof.to_vec(), [root.clone()].to_vec()].concat(),
+                proof: [proof.to_vec(), [*root].to_vec()].concat(),
                 desc: "trailing root",
             }, // Add garbage at the front.
             InclusionProbe {
@@ -502,7 +502,7 @@ mod test_verify {
                 tree_size,
                 root: *root,
                 leaf_hash: *leaf_hash,
-                proof: [[[0 as u8; 32]].to_vec(), proof.to_vec()].concat(),
+                proof: [[[0_u8; 32]].to_vec(), proof.to_vec()].concat(),
                 desc: "preceding garbage",
             },
             InclusionProbe {
@@ -510,12 +510,12 @@ mod test_verify {
                 tree_size,
                 root: *root,
                 leaf_hash: *leaf_hash,
-                proof: [[root.clone()].to_vec(), proof.to_vec()].concat(),
+                proof: [[*root].to_vec(), proof.to_vec()].concat(),
                 desc: "preceding root",
             },
         ];
 
-        return ret;
+        ret
     }
 
     fn verifier_check(
@@ -525,8 +525,7 @@ mod test_verify {
         root: &[u8; 32],
         leaf_hash: &[u8; 32],
     ) -> Result<(), String> {
-        let probes =
-            corrupt_inclusion_proof(leaf_index, tree_size, &proof_hashes, &root, &leaf_hash);
+        let probes = corrupt_inclusion_proof(leaf_index, tree_size, proof_hashes, root, leaf_hash);
         let leaf_hash = leaf_hash.into();
         let root_hash = root.into();
         let proof_hashes = proof_hashes.iter().map(|&h| h.into()).collect::<Vec<_>>();
@@ -537,7 +536,7 @@ mod test_verify {
             &proof_hashes,
         )
         .map_err(|err| format!("{err:?}"))?;
-        Rfc6269Default::verify_match(got.as_ref().into(), root_hash)
+        Rfc6269Default::verify_match(got.as_ref(), root_hash)
             .map_err(|_| format!("roots did not match got: {got:x?} expected: {root:x?}"))?;
         Rfc6269Default::verify_inclusion(
             leaf_index,
@@ -578,7 +577,7 @@ mod test_verify {
         Rfc6269Default::verify_consistency(size1, size2, &proof_hashes, root1.into(), root2.into())
             .map_err(|err| format!("incorrectly rejected with {err:?}"))?;
         // For simplicity test only non-trivial proofs that have root1 != root2, size1 != 0 and size1 != size2.
-        if proof.len() == 0 {
+        if proof.is_empty() {
             return Ok(());
         }
         for (i, p) in corrupt_consistency_proof(size1, size2, root1, root2, proof)
@@ -767,7 +766,7 @@ mod test_verify {
             }
         }));
 
-        return ret;
+        ret
     }
 
     #[test]
@@ -803,11 +802,7 @@ mod test_verify {
                 &proof,
                 ZERO_HASH.as_slice().into(),
             );
-            assert_eq!(
-                result.is_err(),
-                true,
-                "Incorrectly verified invalid root/leaf",
-            );
+            assert!(result.is_err(), "Incorrectly verified invalid root/leaf",);
             let result = Rfc6269Default::verify_inclusion(
                 index,
                 ZERO_HASH.as_slice().into(),
@@ -815,11 +810,7 @@ mod test_verify {
                 &proof,
                 SHA256_EMPTY_TREE_HASH.as_slice().into(),
             );
-            assert_eq!(
-                result.is_err(),
-                true,
-                "Incorrectly verified invalid root/leaf",
-            );
+            assert!(result.is_err(), "Incorrectly verified invalid root/leaf",);
             let result = Rfc6269Default::verify_inclusion(
                 index,
                 SHA256_SOME_HASH.as_slice().into(),
@@ -835,7 +826,7 @@ mod test_verify {
             let result = verifier_check(
                 p.leaf - 1,
                 p.size,
-                &p.proof,
+                p.proof,
                 &ROOTS[p.size as usize - 1],
                 leaf_hash,
             );
@@ -881,7 +872,7 @@ mod test_verify {
             );
         }
 
-        for (_, p) in CONSISTENCY_PROOFS.into_iter().enumerate() {
+        for p in CONSISTENCY_PROOFS.into_iter() {
             let result = verifier_consistency_check(
                 p.size1,
                 p.size2,

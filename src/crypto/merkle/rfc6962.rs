@@ -102,7 +102,7 @@ mod test_rfc6962 {
         let sub_hash2 = Rfc6269Default::hash_children(&l2, &l1);
         assert_ne!(sub_hash1, sub_hash2, "got same hash for different order");
 
-        let forged_hash = Rfc6269Default::hash_leaf(&[l1, l2].concat());
+        let forged_hash = Rfc6269Default::hash_leaf([l1, l2].concat());
         assert_ne!(
             sub_hash1, forged_hash,
             "hasher is not second-preimage resistant"
