@@ -1,9 +1,9 @@
 use super::rfc6962::Rfc6269HasherTrait;
+use MerkleProofError::*;
 use digest::{Digest, Output};
 use hex::ToHex;
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use MerkleProofError::*;
 
 #[derive(Debug)]
 pub enum MerkleProofError {
@@ -101,17 +101,17 @@ where
                 return Self::verify_match(old_root, new_root).map_err(|_| MismatchedRoot {
                     got: new_root.encode_hex(),
                     expected: old_root.encode_hex(),
-                })
+                });
             }
 
             // the proof cannot be empty if the sizes are equal or the previous size was zero
             (Ordering::Equal, _, false) | (Ordering::Less, true, false) => {
-                return Err(UnexpectedNonEmptyProof)
+                return Err(UnexpectedNonEmptyProof);
             }
             // any proof is accepted if old_size == 0 and the hash is the expected empty hash
             (Ordering::Less, true, true) => {
                 return Self::verify_match(old_root, &Self::empty_root())
-                    .map_err(|_| WrongEmptyTreeHash)
+                    .map_err(|_| WrongEmptyTreeHash);
             }
             (Ordering::Less, false, true) => return Err(UnexpectedEmptyProof),
             (Ordering::Less, false, false) => {}

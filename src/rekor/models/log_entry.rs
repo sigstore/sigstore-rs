@@ -19,9 +19,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE
 
 use crate::crypto::CosignVerificationKey;
 use crate::errors::SigstoreError::UnexpectedError;
-use crate::rekor::models::checkpoint::Checkpoint;
 use crate::rekor::models::InclusionProof as InclusionProof2;
-use json_syntax::Print;
+use crate::rekor::models::checkpoint::Checkpoint;
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
 use std::collections::HashMap;
@@ -160,14 +159,12 @@ impl LogEntry {
             })
             .and_then(|proof| {
                 // encode as canonical JSON
-                let mut body = json_syntax::to_value(&self.body).map_err(|_| {
-                    SigstoreError::UnexpectedError(
-                        "failed to serialize with json_syntax".to_string(),
-                    )
+                let buf = serde_json_canonicalizer::to_vec(&self.body).map_err(|e| {
+                    SigstoreError::UnexpectedError(format!(
+                        "Cannot create canonical JSON representation of body: {e:?}"
+                    ))
                 })?;
-                body.canonicalize();
-                let encoded_entry = body.compact_print().to_string();
-                proof.verify(encoded_entry.as_bytes(), rekor_key)
+                proof.verify(&buf, rekor_key)
             })
     }
 }
