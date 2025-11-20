@@ -1,6 +1,13 @@
 use super::rfc6962::Rfc6269HasherTrait;
 use MerkleProofError::*;
 use digest::{Digest, Output};
+
+#[cfg(any(
+    feature = "sign",
+    feature = "sigstore-trust-root",
+    feature = "rekor",
+    feature = "verify"
+))]
 use hex::ToHex;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -28,6 +35,12 @@ where
     /// `verify_inclusion` verifies the correctness of the inclusion proof for the leaf
     /// with the specified `leaf_hash` and `index`, relatively to the tree of the given `tree_size`
     /// and `root_hash`. Requires `0 <= index < tree_size`.
+    #[cfg(any(
+        feature = "sign",
+        feature = "sigstore-trust-root",
+        feature = "rekor",
+        feature = "verify"
+    ))]
     fn verify_inclusion(
         index: u64,    // leaf index, m in RFC
         leaf_hash: &O, // d(m) leaf hash
@@ -78,6 +91,12 @@ where
     // `verify_consistency` checks that the passed-in consistency proof is valid
     // between the passed in tree sizes, with respect to the corresponding root
     // hashes. Requires `0 <= old_size <= new_size`..
+    #[cfg(any(
+        feature = "sign",
+        feature = "sigstore-trust-root",
+        feature = "rekor",
+        feature = "verify"
+    ))]
     fn verify_consistency(
         old_size: u64,
         new_size: u64,
