@@ -111,7 +111,7 @@ impl LogEntry {
     /// Verifies that the log entry was included by a log in possession of `rekor_key`.
     ///
     /// Example:
-    /// ```rust
+    /// ```rust,no_run
     /// use sigstore::rekor::apis::configuration::Configuration;
     /// use sigstore::rekor::apis::pubkey_api::get_public_key;
     /// use sigstore::rekor::apis::tlog_api::get_log_info;
