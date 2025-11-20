@@ -81,6 +81,20 @@ jobs:
       - run: |
           cargo test --workspace --no-default-features --features full,rustls-tls,test-registry
 
+  check-wasm:
+    name: Check wasm32-unknown-unknown target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@351f82a4dc29e4159746a068ed925da17341219f # 1.89.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - run: |
+          cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+
   doc:
     name: Build Documentation
     runs-on: ubuntu-latest
