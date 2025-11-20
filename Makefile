@@ -27,6 +27,10 @@ check-features-native-tls:
 check-features-rustls-tls:
 	cargo hack check --feature-powerset --features rustls-tls --skip wasm --skip test-registry --skip native-tls --skip rustls-tls-native-roots
 
+.PHONY: check-wasm
+check-wasm:
+	cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+
 .PHONY: test
 test: fmt lint doc
 	cargo test --workspace --no-default-features --features full,native-tls,test-registry
