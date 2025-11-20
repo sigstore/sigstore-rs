@@ -85,7 +85,7 @@ verify = [
     "fulcio",
     "rekor",
 ]
-wasm = ["chrono/wasmbind"]
+wasm = ["chrono/wasmbind", "ring/wasm32_unknown_unknown_js"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
@@ -157,6 +157,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "multipart",
 ], optional = true }
+# used only by the wasm feature
+ring = { version = "0", default-features = false, optional = true }
 rsa = { version = "0.9", default-features = false, features = ["std"] }
 rustls-webpki = { version = "0.103", default-features = false, features = [
     "std",
