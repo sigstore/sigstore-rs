@@ -50,7 +50,12 @@ native-tls = [
 ]
 oauth = ["dep:openidconnect", "dep:reqwest"]
 registry = ["dep:async-trait", "dep:oci-client", "dep:serde_json_canonicalizer"]
-rekor = ["dep:reqwest"]
+rekor = [
+    "dep:hex",
+    "dep:hex-literal",
+    "dep:reqwest",
+    "dep:serde_json_canonicalizer",
+]
 rustls-tls = [
     "oci-client?/rustls-tls",
     "openidconnect?/rustls-tls",
@@ -126,6 +131,8 @@ getrandom = { version = "0.2", default-features = false, optional = true }
 hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
+hex-literal = { version = "0.4", optional = true }
+
 oci-client = { version = "0.15", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
@@ -313,3 +320,11 @@ path = "examples/rekor/search_log_query/main.rs"
 [[example]]
 name = "fulcio_cert"
 path = "examples/fulcio/cert/main.rs"
+
+[[example]]
+name = "inclusion_proof"
+path = "examples/rekor/merkle_proofs/inclusion.rs"
+
+[[example]]
+name = "consistency_proof"
+path = "examples/rekor/merkle_proofs/consistency.rs"
