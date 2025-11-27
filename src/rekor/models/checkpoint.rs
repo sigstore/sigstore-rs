@@ -84,9 +84,10 @@ impl Checkpoint {
     }
 
     pub(crate) fn encode(&self) -> String {
-        let note = self.note.marshal();
+        let note = self.note.marshal() + "\n";
+        let empty_line = "\n";
         let signature = self.signature.encode();
-        format!("{note}\n{signature}")
+        format!("{note}{empty_line}{signature}")
     }
 
     /// This method can be used to verify that the checkpoint was issued by the log with the
