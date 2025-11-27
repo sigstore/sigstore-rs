@@ -200,7 +200,8 @@ impl CheckpointSignature {
     fn encode(&self) -> String {
         let sig_b64 =
             BASE64_STANDARD.encode([self.key_fingerprint.as_slice(), self.raw.as_slice()].concat());
-        format!("— {} {sig_b64}\n", self.name)
+        // line starts with an em dash ( \u{2014})
+        format!("\u{2014} {} {sig_b64}\n", self.name)
     }
     fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
         let s = s.trim_start_matches('\n').trim_end_matches('\n');
