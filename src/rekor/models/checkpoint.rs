@@ -68,8 +68,10 @@ pub enum ParseCheckpointError {
 }
 
 impl Checkpoint {
+    // decode from format used by Rekor for envelopes (signed notes)
+    // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#signed-envelope
     pub(crate) fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
-        // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
+        // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/signed_note.go
 
         let checkpoint = s.trim_start_matches('"').trim_end_matches('"');
 
@@ -83,6 +85,8 @@ impl Checkpoint {
         Ok(Checkpoint { note, signature })
     }
 
+    // encode into format used by Rekor for envelopes (signed notes)
+    // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#signed-envelope
     pub(crate) fn encode(&self) -> String {
         let note = self.note.marshal() + "\n";
         let empty_line = "\n";
@@ -198,12 +202,19 @@ impl<'de> Deserialize<'de> for Checkpoint {
 }
 
 impl CheckpointSignature {
+    // encode into format used by Rekor for signed checkpoints (Signed Tree Heads)
+    // in the sumdb note format `– <identity> <key_hint+signature_bytes>`
+    // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#signed-envelope
     fn encode(&self) -> String {
         let sig_b64 =
             BASE64_STANDARD.encode([self.key_fingerprint.as_slice(), self.raw.as_slice()].concat());
         // line starts with an em dash ( \u{2014})
         format!("\u{2014} {} {sig_b64}\n", self.name)
     }
+
+    // decode from format used by Rekor for signed checkpoints (Signed Tree Heads)
+    // in the sumdb note format `– <identity> <key_hint+signature_bytes>`
+    // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#signed-envelope
     fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
         let s = s.trim_start_matches('\n').trim_end_matches('\n');
         if !s.starts_with('\u{2014}') {
