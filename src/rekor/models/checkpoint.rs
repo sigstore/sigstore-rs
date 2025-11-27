@@ -212,7 +212,9 @@ impl CheckpointSignature {
             .map_err(|_| DecodeError("failed to decode signature".to_string()))?;
 
         // first four bytes of signature are fingerprint of key
-        let (key_fingerprint, sig) = sig.split_at(4);
+        let (key_fingerprint, sig) = sig
+            .split_at_checked(4)
+            .ok_or_else(|| DecodeError("unexpected signature length in checkpoint".to_string()))?;
         let key_fingerprint = key_fingerprint
             .try_into()
             .map_err(|_| DecodeError("unexpected signature length in checkpoint".to_string()))?;
