@@ -205,7 +205,10 @@ impl CheckpointSignature {
     }
     fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
         let s = s.trim_start_matches('\n').trim_end_matches('\n');
-        let [_, name, sig_b64] = s.split(' ').collect::<Vec<_>>()[..] else {
+        if !s.starts_with('\u{2014}') {
+            return Err(DecodeError("signature line missing em dash".to_string()));
+        }
+        let [_emdash, name, sig_b64] = s.split(' ').collect::<Vec<_>>()[..] else {
             return Err(DecodeError(format!("unexpected signature format {s:?}")));
         };
         let sig = BASE64_STANDARD
