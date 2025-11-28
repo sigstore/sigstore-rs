@@ -85,6 +85,9 @@ pub enum SigstoreError {
     #[error("Public key verification error")]
     PublicKeyVerificationError,
 
+    #[error("No valid signature found for checkpoint")]
+    CheckpointSignatureVerificationError,
+
     #[error("X.509 certificate version is not V3")]
     CertificateUnsupportedVersionError,
 

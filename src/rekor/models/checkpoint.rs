@@ -17,7 +17,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub struct Checkpoint {
     pub note: CheckpointNote,
-    pub signature: CheckpointSignature,
+    pub signatures: Vec<CheckpointSignature>,
 }
 
 /// The metadata that is contained in a checkpoint.
@@ -75,14 +75,19 @@ impl Checkpoint {
 
         let checkpoint = s.trim_start_matches('"').trim_end_matches('"');
 
-        let Some((note, signature)) = checkpoint.split_once("\n\n") else {
+        let Some((note, sigs)) = checkpoint.split_once("\n\n") else {
             return Err(DecodeError("unexpected checkpoint format".to_string()));
         };
 
-        let signature = CheckpointSignature::decode(signature)?;
+        let signatures: Vec<CheckpointSignature> = sigs
+            .split("\n\n")
+            .filter(|s| !s.trim().is_empty())
+            .map(CheckpointSignature::decode)
+            .collect::<Result<_, _>>()?;
+
         let note = CheckpointNote::unmarshal(note)?;
 
-        Ok(Checkpoint { note, signature })
+        Ok(Checkpoint { note, signatures })
     }
 
     // encode into format used by Rekor for envelopes (signed notes)
@@ -90,17 +95,27 @@ impl Checkpoint {
     pub(crate) fn encode(&self) -> String {
         let note = self.note.marshal() + "\n";
         let empty_line = "\n";
-        let signature = self.signature.encode();
-        format!("{note}{empty_line}{signature}")
+        let signatures = self
+            .signatures
+            .iter()
+            .map(|s| s.encode())
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{note}{empty_line}{signatures}")
     }
 
-    /// This method can be used to verify that the checkpoint was issued by the log with the
-    /// public key `rekor_key`.
+    /// verify_signature checks that at least one of the signatures can be verified by the log
+    /// with the public key `rekor_key`
     pub fn verify_signature(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
-        rekor_key.verify_signature(
-            Signature::Raw(&self.signature.raw),
-            self.note.marshal().as_bytes(),
-        )
+        for sig in &self.signatures {
+            if rekor_key
+                .verify_signature(Signature::Raw(&sig.raw), self.note.marshal().as_bytes())
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        Err(SigstoreError::CheckpointSignatureVerificationError)
     }
 
     /// Checks if the checkpoint (root hash) matches the Merkle root and tree size claimed by an
@@ -391,7 +406,7 @@ mod test {
 
     #[cfg(test)]
     mod test_checkpoint_signature {
-        use crate::rekor::models::checkpoint::CheckpointSignature;
+        use crate::rekor::models::checkpoint::{Checkpoint, CheckpointNote, CheckpointSignature};
 
         #[test]
         fn test_to_string_valid_with_url_name() {
@@ -458,6 +473,36 @@ mod test {
             let input = "— Foo Bar AAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n";
             let got = CheckpointSignature::decode(input);
             assert!(got.is_err())
+        }
+
+        #[test]
+        fn test_checkpoint_encode_decode_multiple_signatures() {
+            let note = CheckpointNote {
+                origin: "Test Log".to_string(),
+                size: 42,
+                hash: [7; 32],
+                other_content: vec![],
+            };
+            let sig1 = CheckpointSignature {
+                name: "log1.example.org".to_string(),
+                key_fingerprint: [1, 2, 3, 4],
+                raw: vec![5; 32],
+            };
+            let sig2 = CheckpointSignature {
+                name: "log2.example.org".to_string(),
+                key_fingerprint: [9, 8, 7, 6],
+                raw: vec![6; 32],
+            };
+            let checkpoint = Checkpoint {
+                note: note.clone(),
+                signatures: vec![sig1.clone(), sig2.clone()],
+            };
+            let encoded = checkpoint.encode();
+            let decoded = Checkpoint::decode(&encoded).expect("decode should succeed");
+            assert_eq!(decoded.note, note);
+            assert_eq!(decoded.signatures.len(), 2);
+            assert_eq!(decoded.signatures[0], sig1);
+            assert_eq!(decoded.signatures[1], sig2);
         }
     }
 }
