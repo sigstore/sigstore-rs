@@ -145,7 +145,8 @@ impl Checkpoint {
 }
 
 impl CheckpointNote {
-    // Output is the part of the checkpoint that is signed.
+    /// marshals the note
+    /// See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#checkpoint-body
     fn marshal(&self) -> String {
         let hash_b64 = BASE64_STANDARD.encode(self.hash);
         let other_content: String = self.other_content.iter().fold(String::new(), |mut acc, c| {
@@ -157,9 +158,16 @@ impl CheckpointNote {
             self.origin, self.size
         )
     }
+
+    /// unmarshal parses the common formatted note data and stores the result in a
+    /// CheckpointNote
     fn unmarshal(s: &str) -> Result<Self, ParseCheckpointError> {
-        // refer to: https://github.com/sigstore/rekor/blob/d702f84e6b8b127662c5e717ee550de1242a6aec/pkg/util/checkpoint.go
-        // note is separated by new lines
+        // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#checkpoint-body
+        // The note is in the form:
+        // <Origin string>
+        // <Decimal log size>
+        // <Base64 log root hash>
+        // [other data]
         let split_note = s.split('\n').collect::<Vec<_>>();
         let [origin, size, hash_b64, other_content @ ..] = split_note.as_slice() else {
             return Err(DecodeError("note not in expected format".to_string()));
