@@ -165,8 +165,12 @@ impl CheckpointNote {
             return Err(DecodeError("note not in expected format".to_string()));
         };
 
+        if origin.trim().is_empty() {
+            return Err(DecodeError("origin string must not be empty".to_string()));
+        }
+
         let size = size
-            .parse()
+            .parse::<u64>()
             .map_err(|_| DecodeError("expected decimal string for size".into()))?;
 
         let hash = BASE64_STANDARD
@@ -373,6 +377,10 @@ mod test {
                 (
                     "invalid - empty header",
                     "\n9944\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\n",
+                ),
+                (
+                    "invalid - empty origin",
+                    "123\ndGhlIHZpZXcgZnJvbSB0aGUgdHJlZSB0b3BzIGlzIGdyZWF0IQ==\nother data\n",
                 ),
                 (
                     "invalid - missing newline on roothash",
