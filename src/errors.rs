@@ -162,6 +162,9 @@ pub enum SigstoreError {
     #[error("Sigstore bundle malformed: {0}")]
     SigstoreBundleMalformedError(String),
 
+    #[error("Sigstore PKI file is malformed: {0}")]
+    SigstorePKIFileMalformedError(String),
+
     #[error("Layer doesn't have Sigstore media type")]
     SigstoreMediaTypeNotFoundError,
 
@@ -193,6 +196,13 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),
+
+    #[error("IOError: {context}: {source}")]
+    IOErrorWithContext {
+        context: String,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("{0}")]
     UnexpectedError(String),
