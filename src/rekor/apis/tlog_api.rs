@@ -31,7 +31,13 @@ pub enum GetLogProofError {
     ConversionError(String),
 }
 
-/// Returns the current root hash and size of the merkle tree used to store the log entries.
+/// Fetches the current state of the Rekor transparency log.
+///
+/// It queries the Rekor API for the latest log information, and returns a
+/// [`LogInfo`](crate::rekor::models::LogInfo).
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed, or the log info
+/// cannot be converted from the raw API format.
 pub async fn get_log_info(
     configuration: &configuration::Configuration,
 ) -> Result<crate::rekor::models::LogInfo, Error<GetLogInfoError>> {
@@ -77,9 +83,19 @@ pub async fn get_log_info(
     }
 }
 
-/// Returns a list of hashes for specified tree sizes that can be used to confirm the consistency
-/// of the transparency log It deserializes the API response, converts the HEX string values into
-/// `[u8;32]` to return a ConsistencyProof.
+/// Fetches a Merkle consistency proof between two tree sizes from the Rekor transparency log.
+///
+/// It queries the Rekor API for a consistency proof, returned in a
+/// [`ConsistencyProof`](crate::rekor::models::ConsistencyProof).
+///
+/// # Arguments
+/// * `configuration` - Rekor API client configuration.
+/// * `last_size` - The size of the newer tree (as an integer).
+/// * `first_size` - The size of the older tree (as a string, optional).
+/// * `tree_id` - The tree ID to query (optional).
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed, or the proof
+/// cannot be converted from the raw API format.
 pub async fn get_log_proof(
     configuration: &configuration::Configuration,
     last_size: i32,
