@@ -9,15 +9,17 @@
  */
 
 use crate::crypto::CosignVerificationKey;
-use crate::crypto::merkle::{
-    MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTrait, hex_to_hash_output,
-};
+use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTrait};
 use crate::errors::SigstoreError;
 use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
 use crate::rekor::TreeSize;
 use crate::rekor::models::checkpoint::Checkpoint;
+use sha2::Sha256;
+use sha2::digest::Output;
+
 use serde::{Deserialize, Serialize};
 
+/// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct InclusionProof {
     /// The index of the entry in the transparency log
@@ -25,22 +27,26 @@ pub struct InclusionProof {
     pub log_index: i64,
     /// The hash value stored at the root of the merkle tree at the time the proof was generated
     #[serde(rename = "rootHash")]
-    pub root_hash: String,
+    pub root_hash: [u8; 32],
     /// The size of the merkle tree at the time the inclusion proof was generated
     #[serde(rename = "treeSize")]
     pub tree_size: TreeSize,
     /// A list of hashes required to compute the inclusion proof, sorted in order from leaf to root
     #[serde(rename = "hashes")]
-    pub hashes: Vec<String>,
+    pub hashes: Vec<[u8; 32]>,
+    /// A snapshot of the transparency log's state at a specific point in time,
+    /// in [Signed Note format].
+    ///
+    /// [Signed Note format]: https://github.com/transparency-dev/formats/blob/main/log/README.md
     pub checkpoint: Option<Checkpoint>,
 }
 
 impl InclusionProof {
     pub fn new(
         log_index: i64,
-        root_hash: String,
+        root_hash: [u8; 32],
         tree_size: TreeSize,
-        hashes: Vec<String>,
+        hashes: Vec<[u8; 32]>,
         checkpoint: Option<Checkpoint>,
     ) -> InclusionProof {
         InclusionProof {
@@ -67,27 +73,23 @@ impl InclusionProof {
         // verify the checkpoint signature
         checkpoint.verify_signature(rekor_key)?;
 
-        let entry_hash = Rfc6269Default::hash_leaf(entry);
+        // check if the inclusion and checkpoint match
+        checkpoint.is_valid_for_proof(&self.root_hash.into(), self.tree_size)?;
 
-        // decode hashes from hex and convert them to the required data structure
-        // immediately return an error when conversion fails
-        let proof_hashes = self
+        let entry_hash = Rfc6269Default::hash_leaf(entry);
+        // convert hashes from bytestring and into Sha256
+        let proof_hashes: Vec<Output<Sha256>> = self
             .hashes
             .iter()
-            .map(hex_to_hash_output)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let root_hash = hex_to_hash_output(&self.root_hash)?;
-
-        // check if the inclusion and checkpoint match
-        checkpoint.is_valid_for_proof(&root_hash, self.tree_size)?;
+            .map(|h| Output::<Sha256>::from(*h))
+            .collect();
 
         Rfc6269Default::verify_inclusion(
             self.log_index as u64,
             &entry_hash,
             self.tree_size,
             &proof_hashes,
-            &root_hash,
+            &self.root_hash.into(),
         )
         .map_err(InclusionProofError)
     }

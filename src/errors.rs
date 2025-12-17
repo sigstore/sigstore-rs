@@ -79,6 +79,9 @@ pub enum SigstoreError {
     #[error(transparent)]
     HexDecodeError(#[from] hex::FromHexError),
 
+    #[error("Unable to parse checkpoint: {0}")]
+    ParseCheckpointError(String),
+
     #[error("Public key with unsupported algorithm: {0}")]
     PublicKeyUnsupportedAlgorithmError(String),
 

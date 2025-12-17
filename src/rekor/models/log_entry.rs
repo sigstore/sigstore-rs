@@ -18,9 +18,11 @@ use crate::rekor::TreeSize;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 
 use crate::crypto::CosignVerificationKey;
+use crate::crypto::merkle::hex_to_hash_output;
 use crate::errors::SigstoreError::UnexpectedError;
-use crate::rekor::models::InclusionProof as InclusionProof2;
+use crate::rekor::models::InclusionProof;
 use crate::rekor::models::checkpoint::Checkpoint;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
 use std::collections::HashMap;
@@ -103,7 +105,7 @@ pub struct Attestation {
 #[serde(rename_all = "camelCase")]
 pub struct Verification {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub inclusion_proof: Option<InclusionProof>,
+    pub inclusion_proof: Option<RekorInclusionProof>,
     pub signed_entry_timestamp: String,
 }
 
@@ -140,39 +142,29 @@ impl LogEntry {
     /// }
     /// ```
     pub fn verify_inclusion(&self, rekor_key: &CosignVerificationKey) -> Result<(), SigstoreError> {
-        self.verification
+        let api_proof = self
+            .verification
             .inclusion_proof
             .as_ref()
-            .ok_or(UnexpectedError("missing inclusion proof".to_string()))
-            .and_then(|proof| {
-                Checkpoint::decode(&proof.checkpoint)
-                    .map_err(|_| UnexpectedError("failed to parse checkpoint".to_string()))
-                    .map(|checkpoint| {
-                        InclusionProof2::new(
-                            proof.log_index,
-                            proof.root_hash.clone(),
-                            proof.tree_size,
-                            proof.hashes.clone(),
-                            Some(checkpoint),
-                        )
-                    })
-            })
-            .and_then(|proof| {
-                // encode as canonical JSON
-                let buf = serde_json_canonicalizer::to_vec(&self.body).map_err(|e| {
-                    SigstoreError::UnexpectedError(format!(
-                        "Cannot create canonical JSON representation of body: {e:?}"
-                    ))
-                })?;
-                proof.verify(&buf, rekor_key)
-            })
+            .ok_or_else(|| UnexpectedError("missing inclusion proof".to_string()))?;
+        let proof = InclusionProof::try_from(api_proof)
+            .map_err(|e| UnexpectedError(format!("Failed to convert inclusion proof: {e}")))?;
+        let buf = serde_json_canonicalizer::to_vec(&self.body).map_err(|e| {
+            SigstoreError::UnexpectedError(format!(
+                "Cannot create canonical JSON representation of body: {e:?}"
+            ))
+        })?;
+
+        proof.verify(&buf, rekor_key)
     }
 }
 
 /// Stores the signature over the artifact's logID, logIndex, body and integratedTime.
+///
+/// This struct is used for API (de)serialization in queries to Rekor
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct InclusionProof {
+pub struct RekorInclusionProof {
     pub hashes: Vec<String>,
     pub log_index: i64,
     pub root_hash: String,
@@ -183,6 +175,38 @@ pub struct InclusionProof {
     ///
     /// [Signed Note format]: https://github.com/transparency-dev/formats/blob/main/log/README.md
     pub checkpoint: String,
+}
+
+impl TryFrom<&RekorInclusionProof> for InclusionProof {
+    type Error = crate::errors::SigstoreError;
+
+    fn try_from(api: &RekorInclusionProof) -> Result<Self, Self::Error> {
+        let hashes = api
+            .hashes
+            .iter()
+            .map(hex_to_hash_output)
+            .map(|r| r.map(Into::into))
+            .collect::<Result<_, _>>()?;
+
+        let root_hash = hex_to_hash_output(&api.root_hash)?;
+
+        let checkpoint = if api.checkpoint.is_empty() {
+            None
+        } else {
+            Some(
+                Checkpoint::decode(&api.checkpoint)
+                    .map_err(|e| SigstoreError::ParseCheckpointError(format!("{:?}", e)))?,
+            )
+        };
+
+        Ok(InclusionProof {
+            hashes,
+            log_index: api.log_index,
+            root_hash: root_hash.into(),
+            tree_size: api.tree_size,
+            checkpoint,
+        })
+    }
 }
 
 #[cfg(test)]

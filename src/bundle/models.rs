@@ -8,9 +8,7 @@ use sigstore_protobuf_specs::dev::sigstore::{
     rekor::v1::{Checkpoint, InclusionPromise, InclusionProof, KindVersion, TransparencyLogEntry},
 };
 
-use crate::rekor::models::{
-    LogEntry as RekorLogEntry, log_entry::InclusionProof as RekorInclusionProof,
-};
+use crate::rekor::models::{LogEntry as RekorLogEntry, log_entry::RekorInclusionProof};
 
 // Known Sigstore bundle media types.
 #[derive(Clone, Copy, Debug)]
