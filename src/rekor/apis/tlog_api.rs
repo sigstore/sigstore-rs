@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 pub enum GetLogInfoError {
     DefaultResponse(crate::rekor::models::Error),
     UnknownValue(serde_json::Value),
+    ConversionError(String),
 }
 
 /// struct for typed errors of method [`get_log_proof`]
@@ -27,6 +28,7 @@ pub enum GetLogProofError {
     Status400(crate::rekor::models::Error),
     DefaultResponse(crate::rekor::models::Error),
     UnknownValue(serde_json::Value),
+    ConversionError(String),
 }
 
 /// Returns the current root hash and size of the merkle tree used to store the log entries.
@@ -53,7 +55,16 @@ pub async fn get_log_info(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        let raw: crate::rekor::models::RekorLogInfo =
+            serde_json::from_str(&local_var_content).map_err(Error::from)?;
+        let proof = crate::rekor::models::LogInfo::try_from(raw).map_err(|e| {
+            Error::ResponseError(ResponseContent {
+                status: local_var_status,
+                content: local_var_content.clone(),
+                entity: Some(GetLogInfoError::ConversionError(e.to_string())),
+            })
+        })?;
+        Ok(proof)
     } else {
         let local_var_entity: Option<GetLogInfoError> =
             serde_json::from_str(&local_var_content).ok();
@@ -66,7 +77,9 @@ pub async fn get_log_info(
     }
 }
 
-/// Returns a list of hashes for specified tree sizes that can be used to confirm the consistency of the transparency log
+/// Returns a list of hashes for specified tree sizes that can be used to confirm the consistency
+/// of the transparency log It deserializes the API response, converts the HEX string values into
+/// `[u8;32]` to return a ConsistencyProof.
 pub async fn get_log_proof(
     configuration: &configuration::Configuration,
     last_size: i32,
@@ -102,7 +115,16 @@ pub async fn get_log_proof(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        let raw: crate::rekor::models::RekorConsistencyProof =
+            serde_json::from_str(&local_var_content).map_err(Error::from)?;
+        let proof = crate::rekor::models::ConsistencyProof::try_from(raw).map_err(|e| {
+            Error::ResponseError(ResponseContent {
+                status: local_var_status,
+                content: local_var_content.clone(),
+                entity: Some(GetLogProofError::ConversionError(e.to_string())),
+            })
+        })?;
+        Ok(proof)
     } else {
         let local_var_entity: Option<GetLogProofError> =
             serde_json::from_str(&local_var_content).ok();

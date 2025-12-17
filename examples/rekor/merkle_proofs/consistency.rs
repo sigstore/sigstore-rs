@@ -38,8 +38,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    let old_root_bytes: [u8; 32] = hex::FromHex::from_hex(&args.old_root)?;
+
     log_info
-        .verify_consistency(args.old_size, &args.old_root, &proof, &rekor_key)
+        .verify_consistency(args.old_size, &old_root_bytes, &proof, &rekor_key)
         .expect("failed to verify log consistency");
     println!("Successfully verified consistency");
     Ok(())

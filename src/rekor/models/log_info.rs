@@ -14,10 +14,12 @@ use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
 use crate::rekor::models::ConsistencyProof;
 use crate::rekor::models::checkpoint::Checkpoint;
+
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LogInfo {
+/// Used to deserialize responses of the Rekor API.
+#[derive(Serialize, Deserialize)]
+pub struct RekorLogInfo {
     /// The current hash value stored at the root of the merkle tree
     #[serde(rename = "rootHash")]
     pub root_hash: String,
@@ -30,12 +32,46 @@ pub struct LogInfo {
     /// The current treeID
     #[serde(rename = "treeID")]
     pub tree_id: Option<String>,
+    /// Optional list of inactive shards that may still be valid for auditing purposes
     #[serde(rename = "inactiveShards", skip_serializing_if = "Option::is_none")]
     pub inactive_shards: Option<Vec<crate::rekor::models::InactiveShardLogInfo>>,
 }
 
+/// LogInfo represents the current state of a Rekor transparency log.
+///
+/// This struct is typically constructed from the log's API response in [`RekorLogInfo`].
+///
+/// Used to verify log consistency, inclusion proofs, and auditing the log's
+/// append-only property.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogInfo {
+    /// The current hash value, in bytestring, stored at the root of the merkle tree
+    pub root_hash: [u8; 32],
+    /// The current number of nodes in the merkle tree
+    pub tree_size: TreeSize,
+    /// The current signed tree head
+    pub signed_tree_head: Checkpoint,
+    /// The current treeID
+    pub tree_id: Option<String>,
+    /// Optional list of inactive shards that may still be valid for auditing purposes
+    pub inactive_shards: Option<Vec<crate::rekor::models::InactiveShardLogInfo>>,
+}
+
+impl TryFrom<RekorLogInfo> for LogInfo {
+    type Error = crate::errors::SigstoreError;
+    fn try_from(raw: RekorLogInfo) -> Result<Self, Self::Error> {
+        Ok(LogInfo {
+            root_hash: hex_to_hash_output(&raw.root_hash)?.into(),
+            tree_size: raw.tree_size,
+            signed_tree_head: raw.signed_tree_head,
+            tree_id: raw.tree_id,
+            inactive_shards: raw.inactive_shards,
+        })
+    }
+}
+
 impl LogInfo {
-    pub fn new(root_hash: String, tree_size: TreeSize, signed_tree_head: Checkpoint) -> LogInfo {
+    pub fn new(root_hash: [u8; 32], tree_size: TreeSize, signed_tree_head: Checkpoint) -> LogInfo {
         LogInfo {
             root_hash,
             tree_size,
@@ -93,7 +129,7 @@ impl LogInfo {
     pub fn verify_consistency(
         &self,
         old_size: u64,
-        old_root: &str,
+        old_root: &[u8; 32],
         consistency_proof: &ConsistencyProof,
         rekor_key: &CosignVerificationKey,
     ) -> Result<(), SigstoreError> {
@@ -101,7 +137,7 @@ impl LogInfo {
         self.signed_tree_head.verify_signature(rekor_key)?;
 
         self.signed_tree_head
-            .is_valid_for_proof(&hex_to_hash_output(&self.root_hash)?, self.tree_size)?;
+            .is_valid_for_proof(&self.root_hash.into(), self.tree_size)?;
         consistency_proof.verify(
             old_size,
             old_root,
@@ -116,10 +152,10 @@ impl LogInfo {
 mod tests {
     use crate::{
         crypto::{CosignVerificationKey, SigningScheme},
-        rekor::models::ConsistencyProof,
+        rekor::models::{ConsistencyProof, RekorConsistencyProof},
     };
 
-    use super::LogInfo;
+    use super::{LogInfo, RekorLogInfo};
     const LOG_INFO_OLD: &str = r#"
         {
             "inactiveShards": [
@@ -207,12 +243,18 @@ mod tests {
             &SigningScheme::ECDSA_P256_SHA256_ASN1,
         )
         .expect("failed to parse Rekor key");
-        let log_info_old: LogInfo =
+        let log_info_old_raw: RekorLogInfo =
             serde_json::from_str(LOG_INFO_OLD).expect("failed to deserialize log info test data");
-        let log_info_new: LogInfo =
+        let log_info_old: LogInfo =
+            LogInfo::try_from(log_info_old_raw).expect("failed to convert log info data");
+        let log_info_new_raw: RekorLogInfo =
             serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
-        let consistency_proof: ConsistencyProof =
+        let log_info_new: LogInfo =
+            LogInfo::try_from(log_info_new_raw).expect("failed to convert log info data");
+        let consistency_proof_raw: RekorConsistencyProof =
             serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
+        let consistency_proof = ConsistencyProof::try_from(consistency_proof_raw)
+            .expect("failed to convert log proof data");
 
         log_info_new
             .verify_consistency(
@@ -231,13 +273,19 @@ mod tests {
             &SigningScheme::ECDSA_P256_SHA256_ASN1,
         )
         .expect("failed to parse Rekor key");
-        let log_info_old: LogInfo =
+        let log_info_old_raw: RekorLogInfo =
             serde_json::from_str(LOG_INFO_OLD).expect("failed to deserialize log info test data");
-        let log_info_new: LogInfo =
+        let log_info_old: LogInfo =
+            LogInfo::try_from(log_info_old_raw).expect("failed to convert log info data");
+        let log_info_new_raw: RekorLogInfo =
             serde_json::from_str(LOG_INFO_NEW).expect("failed to deserialize log info test data");
+        let log_info_new: LogInfo =
+            LogInfo::try_from(log_info_new_raw).expect("failed to convert log info data");
 
-        let consistency_proof: ConsistencyProof =
+        let consistency_proof_raw: RekorConsistencyProof =
             serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
+        let consistency_proof = ConsistencyProof::try_from(consistency_proof_raw)
+            .expect("failed to convert log proof data");
 
         let mut test_cases = vec![];
 
@@ -245,10 +293,14 @@ mod tests {
         consistency_proof_empty.hashes = vec![];
         test_cases.push((consistency_proof_empty, "empty proof"));
 
-        let mut consistency_proof_additional_hash = consistency_proof.clone();
-        consistency_proof_additional_hash
+        let mut consistency_proof_additional_hash_raw: RekorConsistencyProof =
+            serde_json::from_str(LOG_PROOF).expect("failed to deserialize log proof data");
+        consistency_proof_additional_hash_raw
             .hashes
             .push("e0300bb7400e692bccbf20b17fe7ec177aba23e7bfd36dcb7484935ccd214336".to_string());
+        let consistency_proof_additional_hash =
+            ConsistencyProof::try_from(consistency_proof_additional_hash_raw)
+                .expect("failed to convert log proof data");
         test_cases.push((consistency_proof_additional_hash, "too many hashes"));
 
         let mut consistency_proof_removed_hash = consistency_proof.clone();
@@ -260,7 +312,10 @@ mod tests {
         consistency_proof_invalid_hash.hashes = consistency_proof_invalid_hash
             .hashes
             .into_iter()
-            .map(|h| h.chars().rev().collect())
+            .map(|mut h| {
+                h.reverse();
+                h
+            })
             .collect();
 
         test_cases.push((consistency_proof_invalid_hash, "invalid hashes"));
