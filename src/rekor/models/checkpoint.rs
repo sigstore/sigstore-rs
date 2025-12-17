@@ -16,13 +16,13 @@ use std::fmt::{Display, Formatter};
 /// and its authenticity can be verified with the data in `signature`.
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub struct SignedCheckpoint {
-    pub note: CheckpointNote,
+    pub note: Checkpoint,
     pub signatures: Vec<CheckpointSignature>,
 }
 
 /// The metadata that is contained in a checkpoint.
 #[derive(Debug, PartialEq, Clone, Eq)]
-pub struct CheckpointNote {
+pub struct Checkpoint {
     /// origin is the unique identifier/version string
     pub origin: String,
     /// merkle tree size
@@ -85,7 +85,7 @@ impl SignedCheckpoint {
             .map(CheckpointSignature::decode)
             .collect::<Result<_, _>>()?;
 
-        let note = CheckpointNote::unmarshal(note)?;
+        let note = Checkpoint::unmarshal(note)?;
 
         Ok(SignedCheckpoint { note, signatures })
     }
@@ -144,7 +144,7 @@ impl SignedCheckpoint {
     }
 }
 
-impl CheckpointNote {
+impl Checkpoint {
     /// marshals the note
     /// See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#checkpoint-body
     fn marshal(&self) -> String {
@@ -199,7 +199,7 @@ impl CheckpointNote {
             })
             .collect();
 
-        Ok(CheckpointNote {
+        Ok(Checkpoint {
             origin: origin.to_string(),
             size,
             hash,
@@ -274,7 +274,7 @@ impl CheckpointSignature {
 mod test {
     #[cfg(test)]
     mod test_checkpoint_note {
-        use crate::rekor::models::checkpoint::CheckpointNote;
+        use crate::rekor::models::checkpoint::Checkpoint;
         use crate::rekor::models::checkpoint::OtherContent::{KeyValue, Value};
 
         #[test]
@@ -305,7 +305,7 @@ mod test {
 
             for (origin, size, hash, other_content, expected) in test_cases {
                 assert_eq!(
-                    CheckpointNote {
+                    Checkpoint {
                         size,
                         origin: origin.to_string(),
                         hash,
@@ -366,9 +366,9 @@ mod test {
             ];
 
             for (desc, origin, size, hash, other_content, input) in test_cases {
-                let got = CheckpointNote::unmarshal(input);
+                let got = Checkpoint::unmarshal(input);
 
-                let expected = CheckpointNote {
+                let expected = Checkpoint {
                     size,
                     origin: origin.to_string(),
                     hash,
@@ -413,7 +413,7 @@ mod test {
             ];
             for (desc, data) in test_cases {
                 assert!(
-                    CheckpointNote::unmarshal(data).is_err(),
+                    Checkpoint::unmarshal(data).is_err(),
                     "accepted invalid note: {desc}"
                 );
             }
@@ -422,9 +422,7 @@ mod test {
 
     #[cfg(test)]
     mod test_checkpoint_signature {
-        use crate::rekor::models::checkpoint::{
-            CheckpointNote, CheckpointSignature, SignedCheckpoint,
-        };
+        use crate::rekor::models::checkpoint::{Checkpoint, CheckpointSignature, SignedCheckpoint};
 
         #[test]
         fn test_to_string_valid_with_url_name() {
@@ -495,7 +493,7 @@ mod test {
 
         #[test]
         fn test_checkpoint_encode_decode_multiple_signatures() {
-            let note = CheckpointNote {
+            let note = Checkpoint {
                 origin: "Test Log".to_string(),
                 size: 42,
                 hash: [7; 32],
