@@ -13,7 +13,7 @@ use crate::crypto::merkle::hex_to_hash_output;
 use crate::errors::SigstoreError;
 use crate::rekor::TreeSize;
 use crate::rekor::models::ConsistencyProof;
-use crate::rekor::models::checkpoint::Checkpoint;
+use crate::rekor::models::checkpoint::SignedCheckpoint;
 
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ pub struct RekorLogInfo {
     pub tree_size: TreeSize,
     /// The current signed tree head
     #[serde(rename = "signedTreeHead")]
-    pub signed_tree_head: Checkpoint,
+    pub signed_tree_head: SignedCheckpoint,
     /// The current treeID
     #[serde(rename = "treeID")]
     pub tree_id: Option<String>,
@@ -50,7 +50,7 @@ pub struct LogInfo {
     /// The current number of nodes in the merkle tree
     pub tree_size: TreeSize,
     /// The current signed tree head
-    pub signed_tree_head: Checkpoint,
+    pub signed_tree_head: SignedCheckpoint,
     /// The current treeID
     pub tree_id: Option<String>,
     /// Optional list of inactive shards that may still be valid for auditing purposes
@@ -71,7 +71,11 @@ impl TryFrom<RekorLogInfo> for LogInfo {
 }
 
 impl LogInfo {
-    pub fn new(root_hash: [u8; 32], tree_size: TreeSize, signed_tree_head: Checkpoint) -> LogInfo {
+    pub fn new(
+        root_hash: [u8; 32],
+        tree_size: TreeSize,
+        signed_tree_head: SignedCheckpoint,
+    ) -> LogInfo {
         LogInfo {
             root_hash,
             tree_size,

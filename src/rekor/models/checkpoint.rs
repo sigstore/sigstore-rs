@@ -10,12 +10,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 
-/// A checkpoint (also known as a signed tree head) that served by the log.
+/// A checkpoint (also known as a signed tree head) that is served by the log.
 /// It represents the log state at a point in time.
 /// The `note` field stores this data,
 /// and its authenticity can be verified with the data in `signature`.
 #[derive(Debug, PartialEq, Clone, Eq)]
-pub struct Checkpoint {
+pub struct SignedCheckpoint {
     pub note: CheckpointNote,
     pub signatures: Vec<CheckpointSignature>,
 }
@@ -67,7 +67,7 @@ pub enum ParseCheckpointError {
     DecodeError(String),
 }
 
-impl Checkpoint {
+impl SignedCheckpoint {
     // decode from format used by Rekor for envelopes (signed notes)
     // See https://github.com/transparency-dev/formats/blob/2de64aa755f08489bda36125786ced79688af872/log/README.md#signed-envelope
     pub(crate) fn decode(s: &str) -> Result<Self, ParseCheckpointError> {
@@ -87,7 +87,7 @@ impl Checkpoint {
 
         let note = CheckpointNote::unmarshal(note)?;
 
-        Ok(Checkpoint { note, signatures })
+        Ok(SignedCheckpoint { note, signatures })
     }
 
     // encode into format used by Rekor for envelopes (signed notes)
@@ -208,7 +208,7 @@ impl CheckpointNote {
     }
 }
 
-impl Serialize for Checkpoint {
+impl Serialize for SignedCheckpoint {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -217,13 +217,13 @@ impl Serialize for Checkpoint {
     }
 }
 
-impl<'de> Deserialize<'de> for Checkpoint {
+impl<'de> Deserialize<'de> for SignedCheckpoint {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         <String>::deserialize(deserializer).and_then(|s| {
-            Checkpoint::decode(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
+            SignedCheckpoint::decode(&s).map_err(|DecodeError(err)| serde::de::Error::custom(err))
         })
     }
 }
@@ -422,7 +422,9 @@ mod test {
 
     #[cfg(test)]
     mod test_checkpoint_signature {
-        use crate::rekor::models::checkpoint::{Checkpoint, CheckpointNote, CheckpointSignature};
+        use crate::rekor::models::checkpoint::{
+            CheckpointNote, CheckpointSignature, SignedCheckpoint,
+        };
 
         #[test]
         fn test_to_string_valid_with_url_name() {
@@ -509,12 +511,12 @@ mod test {
                 key_fingerprint: [9, 8, 7, 6],
                 raw: vec![6; 32],
             };
-            let checkpoint = Checkpoint {
+            let checkpoint = SignedCheckpoint {
                 note: note.clone(),
                 signatures: vec![sig1.clone(), sig2.clone()],
             };
             let encoded = checkpoint.encode();
-            let decoded = Checkpoint::decode(&encoded).expect("decode should succeed");
+            let decoded = SignedCheckpoint::decode(&encoded).expect("decode should succeed");
             assert_eq!(decoded.note, note);
             assert_eq!(decoded.signatures.len(), 2);
             assert_eq!(decoded.signatures[0], sig1);

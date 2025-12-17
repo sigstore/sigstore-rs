@@ -21,7 +21,7 @@ use crate::crypto::CosignVerificationKey;
 use crate::crypto::merkle::hex_to_hash_output;
 use crate::errors::SigstoreError::UnexpectedError;
 use crate::rekor::models::InclusionProof;
-use crate::rekor::models::checkpoint::Checkpoint;
+use crate::rekor::models::checkpoint::SignedCheckpoint;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
@@ -194,7 +194,7 @@ impl TryFrom<&RekorInclusionProof> for InclusionProof {
             None
         } else {
             Some(
-                Checkpoint::decode(&api.checkpoint)
+                SignedCheckpoint::decode(&api.checkpoint)
                     .map_err(|e| SigstoreError::ParseCheckpointError(format!("{:?}", e)))?,
             )
         };

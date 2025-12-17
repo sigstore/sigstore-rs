@@ -13,7 +13,7 @@ use crate::crypto::merkle::{MerkleProofVerifier, Rfc6269Default, Rfc6269HasherTr
 use crate::errors::SigstoreError;
 use crate::errors::SigstoreError::{InclusionProofError, UnexpectedError};
 use crate::rekor::TreeSize;
-use crate::rekor::models::checkpoint::Checkpoint;
+use crate::rekor::models::checkpoint::SignedCheckpoint;
 use sha2::Sha256;
 use sha2::digest::Output;
 
@@ -38,7 +38,7 @@ pub struct InclusionProof {
     /// in [Signed Note format].
     ///
     /// [Signed Note format]: https://github.com/transparency-dev/formats/blob/main/log/README.md
-    pub checkpoint: Option<Checkpoint>,
+    pub checkpoint: Option<SignedCheckpoint>,
 }
 
 impl InclusionProof {
@@ -47,7 +47,7 @@ impl InclusionProof {
         root_hash: [u8; 32],
         tree_size: TreeSize,
         hashes: Vec<[u8; 32]>,
-        checkpoint: Option<Checkpoint>,
+        checkpoint: Option<SignedCheckpoint>,
     ) -> InclusionProof {
         InclusionProof {
             log_index,
