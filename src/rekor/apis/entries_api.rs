@@ -106,6 +106,11 @@ pub async fn create_log_entry(
 }
 
 /// Fetches the specified entry from the transparency log using the log index
+///
+/// It queries the Rekor API for the specified log_index, and returns a [`LogEntry`].
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed,
+/// or the entry does not exist.
 pub async fn get_log_entry_by_index(
     configuration: &configuration::Configuration,
     log_index: i32,
@@ -142,7 +147,13 @@ pub async fn get_log_entry_by_index(
     }
 }
 
-/// Returns the entry, root hash, tree size, and a list of hashes that can be used to calculate proof of an entry being included in the transparency log
+/// Fetches the specified entry from the transparency log using the log entry UUID.
+///
+/// It queries the Rekor API for the specified log entry UUID (a hex-encoded hash), and returns a
+/// [`LogEntry`].
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed,
+/// or the entry does not exist.
 pub async fn get_log_entry_by_uuid(
     configuration: &configuration::Configuration,
     entry_uuid: &str,

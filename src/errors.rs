@@ -21,6 +21,7 @@ use thiserror::Error;
 use crate::cosign::{
     constraint::SignConstraintRefVec, verification_constraint::VerificationConstraintRefVec,
 };
+use crate::crypto::merkle::MerkleProofError;
 
 #[cfg(feature = "cosign")]
 #[cfg_attr(docsrs, doc(cfg(feature = "cosign")))]
@@ -69,11 +70,26 @@ pub enum SigstoreError {
     #[error(transparent)]
     Base64DecodeError(#[from] base64::DecodeError),
 
+    #[cfg(any(
+        feature = "sign",
+        feature = "sigstore-trust-root",
+        feature = "rekor",
+        feature = "verify"
+    ))]
+    #[error(transparent)]
+    HexDecodeError(#[from] hex::FromHexError),
+
+    #[error("Unable to parse checkpoint: {0}")]
+    ParseCheckpointError(String),
+
     #[error("Public key with unsupported algorithm: {0}")]
     PublicKeyUnsupportedAlgorithmError(String),
 
     #[error("Public key verification error")]
     PublicKeyVerificationError,
+
+    #[error("No valid signature found for checkpoint")]
+    CheckpointSignatureVerificationError,
 
     #[error("X.509 certificate version is not V3")]
     CertificateUnsupportedVersionError,
@@ -114,6 +130,12 @@ pub enum SigstoreError {
 
     #[error("Certificate pool error: {0}")]
     CertificatePoolError(String),
+
+    #[error("Consistency proof error: {0:?}")]
+    ConsistencyProofError(MerkleProofError),
+
+    #[error("Inclusion Proof error: {0:?}")]
+    InclusionProofError(MerkleProofError),
 
     #[error("Signing session expired")]
     ExpiredSigningSession(),
