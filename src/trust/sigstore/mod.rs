@@ -20,14 +20,20 @@
 //!
 //! These can later be given to [`cosign::ClientBuilder`](crate::cosign::ClientBuilder)
 //! to enable Fulcio and Rekor integrations.
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use futures_util::TryStreamExt;
 use pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::dev::sigstore::{
     common::v1::TimeRange,
-    trustroot::v1::{CertificateAuthority, TransparencyLogInstance, TrustedRoot},
+    trustroot::v1::{
+        CertificateAuthority, ClientTrustConfig, TransparencyLogInstance, TrustedRoot,
+    },
 };
 use tokio_util::bytes::BytesMut;
 use tough::TargetName;
@@ -88,6 +94,36 @@ impl SigstoreTrustRoot {
     pub fn from_trusted_root_json_unchecked(data: &[u8]) -> Result<Self> {
         let trusted_root: TrustedRoot = serde_json::from_slice(data)?;
         Ok(Self { trusted_root })
+    }
+
+    /// Constructs a `SigstoreTrustRoot` instance from a Sigstore client trust configuration file.
+    ///
+    /// Reads the specified PKI file, parses its JSON content into a `ClientTrustConfig`,
+    /// and attempts to convert it into the SigstoreTrustRoot type. Returns an error if the file
+    /// cannot be read, the JSON is malformed, or the conversion fails.
+    ///
+    /// # Arguments
+    ///
+    /// * `pki_file` - Path to the Sigstore PKI trust configuration file.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SigstoreError::SigstoreBundleMalformedError` if the file cannot be read
+    /// or parsed, or if the conversion fails.
+    pub fn from_client_trust_config(pki_file: &PathBuf) -> Result<Self> {
+        let json_bytes = fs::read(pki_file).map_err(|e| SigstoreError::IOErrorWithContext {
+            context: format!("could not read Sigstore PKI file {}", pki_file.display()),
+            source: e,
+        })?;
+        let client_trust_config: ClientTrustConfig = serde_json::from_slice(json_bytes.as_slice())
+            .map_err(|e| {
+                SigstoreError::SigstorePKIFileMalformedError(format!(
+                    "could not parse trust config file {}: {:?}",
+                    pki_file.display(),
+                    e
+                ))
+            })?;
+        client_trust_config.try_into()
     }
 
     async fn fetch_target<N>(
@@ -192,6 +228,21 @@ impl SigstoreTrustRoot {
     }
 }
 
+impl TryFrom<ClientTrustConfig> for SigstoreTrustRoot {
+    type Error = SigstoreError;
+
+    fn try_from(value: ClientTrustConfig) -> Result<Self> {
+        let trusted_root =
+            value
+                .trusted_root
+                .ok_or(SigstoreError::SigstorePKIFileMalformedError(
+                    "trusted_root field is missing".to_owned(),
+                ))?;
+
+        Ok(SigstoreTrustRoot { trusted_root })
+    }
+}
+
 impl crate::trust::TrustRoot for SigstoreTrustRoot {
     /// Fetch Fulcio certificates from the given TUF repository or reuse
     /// the local cache if its contents are not outdated.
@@ -269,9 +320,10 @@ mod tests {
     use super::*;
     use rstest::{fixture, rstest};
     use std::fs;
+    use std::io::prelude::*;
     use std::path::Path;
     use std::time::SystemTime;
-    use tempfile::TempDir;
+    use tempfile::{NamedTempFile, TempDir};
 
     fn verify(root: &SigstoreTrustRoot, cache_dir: Option<&Path>) {
         if let Some(cache_dir) = cache_dir {
@@ -360,5 +412,66 @@ mod tests {
         assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
         // Valid: 1 ago, 1 ago
         assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
+    }
+
+    #[rstest]
+    #[case::missing_file(None, Some("could not read Sigstore PKI file"))]
+    #[case::missing_trusted_root_field(Some(ClientTrustConfig{
+        media_type: "application/vnd.dev.sigstore.clienttrustconfig.v0.1+json".to_owned(),
+        trusted_root: None,
+        ..Default::default()
+    }), Some("trusted_root field is missing"))]
+    #[case::trusted_root_present(Some(ClientTrustConfig{
+        media_type: "application/vnd.dev.sigstore.clienttrustconfig.v0.1+json".to_owned(),
+        trusted_root: Some(TrustedRoot{
+            media_type: "application/vnd.dev.sigstore.trustedroot.v0.2+json".to_owned(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }), None)]
+    fn test_load_missing_trust_client_config(
+        #[case] content: Option<ClientTrustConfig>,
+        #[case] error: Option<&str>,
+    ) {
+        let mut trust_client_config_file =
+            NamedTempFile::new().expect("failed to create temp file");
+
+        if let Some(content) = content.as_ref() {
+            trust_client_config_file
+                .write_all(
+                    serde_json::to_string(&content)
+                        .expect("failed to serialize content")
+                        .as_bytes(),
+                )
+                .expect("failed to write to temp file");
+            trust_client_config_file
+                .flush()
+                .expect("failed to flush temp file");
+        }
+        let trust_client_config_file_path = if content.is_some() {
+            trust_client_config_file.path().to_path_buf()
+        } else {
+            PathBuf::from("non_existent_file.json")
+        };
+        let trust_root =
+            SigstoreTrustRoot::from_client_trust_config(&trust_client_config_file_path);
+
+        if let Some(expected_msg) = error {
+            let error = trust_root.expect_err("should fail");
+            assert!(
+                error.to_string().contains(expected_msg),
+                "error message does not contain expected substring. Got: {}, expected to contain: {}",
+                error,
+                expected_msg
+            );
+            return;
+        }
+        assert_eq!(
+            content
+                .expect("expected content")
+                .trusted_root
+                .expect("missing trusted_root"),
+            trust_root.expect("failed to parse file").trusted_root
+        );
     }
 }
