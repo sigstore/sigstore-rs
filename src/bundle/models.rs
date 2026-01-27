@@ -62,7 +62,7 @@ impl TryFrom<RekorInclusionProof> for InclusionProof {
             hashes,
             log_index: value.log_index,
             root_hash: decode_hex(value.root_hash)?,
-            tree_size: value.tree_size,
+            tree_size: value.tree_size as i64,
         })
     }
 }

@@ -64,6 +64,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      # Checkout transparency-dev/merkle test vectors for Merkle tree validation
+      - name: Checkout transparency-dev/merkle test vectors
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: transparency-dev/merkle
+          path: tests/data/merkle
+          persist-credentials: false
+
       - uses: dtolnay/rust-toolchain@351f82a4dc29e4159746a068ed925da17341219f # 1.89.0
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
       - run: |
@@ -76,6 +85,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      # Checkout transparency-dev/merkle test vectors for Merkle tree validation
+      - name: Checkout transparency-dev/merkle test vectors
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: transparency-dev/merkle
+          path: tests/data/merkle
+          persist-credentials: false
+
       - uses: dtolnay/rust-toolchain@351f82a4dc29e4159746a068ed925da17341219f # 1.89.0
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
       - run: |
