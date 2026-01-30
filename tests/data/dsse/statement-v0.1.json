@@ -1,0 +1,18 @@
+{
+  "_type": "https://in-toto.io/Statement/v0.1",
+  "subject": [
+    {
+      "name": "slsa-provenance-0.0.7.tgz",
+      "digest": {
+        "sha512": "bbfd372fc9beeb777fe35d05bb10c0c70a9733d366a75fed7dd18866ac3391de3ee7e88ba74dd47abf3e15c845e547fcf0e5c3da80854c751554224d3a6d4e55f"
+      }
+    }
+  ],
+  "predicateType": "https://slsa.dev/provenance/v0.2",
+  "predicate": {
+    "buildType": "https://github.com/npm/slsa-provenance/gha@v0",
+    "builder": {
+      "id": "https://github.com/npm/slsa-provenance@0.0.1"
+    }
+  }
+}
