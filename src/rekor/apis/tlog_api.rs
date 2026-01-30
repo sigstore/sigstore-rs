@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 pub enum GetLogInfoError {
     DefaultResponse(crate::rekor::models::Error),
     UnknownValue(serde_json::Value),
+    ConversionError(String),
 }
 
 /// struct for typed errors of method [`get_log_proof`]
@@ -27,9 +28,16 @@ pub enum GetLogProofError {
     Status400(crate::rekor::models::Error),
     DefaultResponse(crate::rekor::models::Error),
     UnknownValue(serde_json::Value),
+    ConversionError(String),
 }
 
-/// Returns the current root hash and size of the merkle tree used to store the log entries.
+/// Fetches the current state of the Rekor transparency log.
+///
+/// It queries the Rekor API for the latest log information, and returns a
+/// [`LogInfo`](crate::rekor::models::LogInfo).
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed, or the log info
+/// cannot be converted from the raw API format.
 pub async fn get_log_info(
     configuration: &configuration::Configuration,
 ) -> Result<crate::rekor::models::LogInfo, Error<GetLogInfoError>> {
@@ -53,7 +61,16 @@ pub async fn get_log_info(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        let raw: crate::rekor::models::RekorLogInfo =
+            serde_json::from_str(&local_var_content).map_err(Error::from)?;
+        let proof = crate::rekor::models::LogInfo::try_from(raw).map_err(|e| {
+            Error::ResponseError(ResponseContent {
+                status: local_var_status,
+                content: local_var_content.clone(),
+                entity: Some(GetLogInfoError::ConversionError(e.to_string())),
+            })
+        })?;
+        Ok(proof)
     } else {
         let local_var_entity: Option<GetLogInfoError> =
             serde_json::from_str(&local_var_content).ok();
@@ -66,7 +83,19 @@ pub async fn get_log_info(
     }
 }
 
-/// Returns a list of hashes for specified tree sizes that can be used to confirm the consistency of the transparency log
+/// Fetches a Merkle consistency proof between two tree sizes from the Rekor transparency log.
+///
+/// It queries the Rekor API for a consistency proof, returned in a
+/// [`ConsistencyProof`](crate::rekor::models::ConsistencyProof).
+///
+/// # Arguments
+/// * `configuration` - Rekor API client configuration.
+/// * `last_size` - The size of the newer tree (as an integer).
+/// * `first_size` - The size of the older tree (as a string, optional).
+/// * `tree_id` - The tree ID to query (optional).
+///
+/// Returns an error if the HTTP request fails, the response cannot be parsed, or the proof
+/// cannot be converted from the raw API format.
 pub async fn get_log_proof(
     configuration: &configuration::Configuration,
     last_size: i32,
@@ -102,7 +131,16 @@ pub async fn get_log_proof(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        let raw: crate::rekor::models::RekorConsistencyProof =
+            serde_json::from_str(&local_var_content).map_err(Error::from)?;
+        let proof = crate::rekor::models::ConsistencyProof::try_from(raw).map_err(|e| {
+            Error::ResponseError(ResponseContent {
+                status: local_var_status,
+                content: local_var_content.clone(),
+                entity: Some(GetLogProofError::ConversionError(e.to_string())),
+            })
+        })?;
+        Ok(proof)
     } else {
         let local_var_entity: Option<GetLogProofError> =
             serde_json::from_str(&local_var_content).ok();

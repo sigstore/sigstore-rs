@@ -88,4 +88,4 @@
 
 pub mod apis;
 pub mod models;
-type TreeSize = i64;
+type TreeSize = u64;
