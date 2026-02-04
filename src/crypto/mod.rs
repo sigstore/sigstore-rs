@@ -15,7 +15,7 @@
 
 //! Structures and constants required to perform cryptographic operations.
 
-use sha2::{Sha256, Sha384};
+use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P384_SHA384_ASN1_SIGNING};
 
 use crate::errors::*;
 
@@ -100,10 +100,10 @@ impl SigningScheme {
     pub fn create_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
             SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(
-                EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<p256::NistP256>::new()?)?,
+                EcdsaSigner::from_ecdsa_keys(&EcdsaKeys::new(&ECDSA_P256_SHA256_ASN1_SIGNING)?)?,
             ),
             SigningScheme::ECDSA_P384_SHA384_ASN1 => SigStoreSigner::ECDSA_P384_SHA384_ASN1(
-                EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<p384::NistP384>::new()?)?,
+                EcdsaSigner::from_ecdsa_keys(&EcdsaKeys::new(&ECDSA_P384_SHA384_ASN1_SIGNING)?)?,
             ),
             SigningScheme::ED25519 => {
                 SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)

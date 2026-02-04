@@ -16,7 +16,7 @@ default = ["full", "native-tls"]
 
 bundle = ["sign", "verify"]
 cached-client = ["dep:cached"]
-cert = ["dep:aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+cert = ["rustls-webpki/aws-lc-rs"]
 cosign = [
     "cert",
     "dep:async-trait",
@@ -238,10 +238,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_arch = "powerpc64"))'.dependencies]
-aws-lc-rs = { version = "1", optional = true }
+aws-lc-rs = { version = "1" }
 
 [target.'cfg(target_arch = "powerpc64")'.dependencies]
-aws-lc-rs = { version = "1", optional = true, features = ["bindgen"] }
+aws-lc-rs = { version = "1", features = ["bindgen"] }
 
 # cosign example mappings
 

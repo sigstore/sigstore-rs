@@ -72,6 +72,9 @@
 //!
 //! // verify
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature_data),message).is_ok());
+
+use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P384_SHA384_ASN1_SIGNING};
+
 /// ```
 use crate::errors::*;
 
@@ -82,8 +85,8 @@ use super::{KeyPair, SigStoreSigner};
 pub mod ec;
 
 pub enum ECDSAKeys {
-    P256(EcdsaKeys<p256::NistP256>),
-    P384(EcdsaKeys<p384::NistP384>),
+    P256(EcdsaKeys),
+    P384(EcdsaKeys),
 }
 
 impl std::fmt::Display for ECDSAKeys {
@@ -106,9 +109,9 @@ pub enum EllipticCurve {
 /// This macro helps to reduce duplicated code.
 macro_rules! iterate_on_curves {
     ($func: ident ($($args:expr),*), $errorinfo: literal) => {
-        if let Ok(keys) = EcdsaKeys::<p256::NistP256>::$func($($args,)*) {
+        if let Ok(keys) = EcdsaKeys::$func($($args,)* &ECDSA_P256_SHA256_ASN1_SIGNING) {
             Ok(ECDSAKeys::P256(keys))
-        } else if let Ok(keys) = EcdsaKeys::<p384::NistP384>::$func($($args,)*) {
+        } else if let Ok(keys) = EcdsaKeys::$func($($args,)* &ECDSA_P384_SHA384_ASN1_SIGNING) {
             Ok(ECDSAKeys::P384(keys))
         } else {
             Err(SigstoreError::KeyParseError($errorinfo.to_string()))
@@ -120,8 +123,12 @@ impl ECDSAKeys {
     /// Create a new [`ECDSAKeys`] due to the given [`EllipticCurve`].
     pub fn new(curve: EllipticCurve) -> Result<Self> {
         Ok(match curve {
-            EllipticCurve::P256 => ECDSAKeys::P256(EcdsaKeys::<p256::NistP256>::new()?),
-            EllipticCurve::P384 => ECDSAKeys::P384(EcdsaKeys::<p384::NistP384>::new()?),
+            EllipticCurve::P256 => {
+                ECDSAKeys::P256(EcdsaKeys::new(&ECDSA_P256_SHA256_ASN1_SIGNING)?)
+            }
+            EllipticCurve::P384 => {
+                ECDSAKeys::P384(EcdsaKeys::new(&ECDSA_P384_SHA384_ASN1_SIGNING)?)
+            }
         })
     }
 
@@ -163,14 +170,10 @@ impl ECDSAKeys {
     pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
             ECDSAKeys::P256(inner) => {
-                SigStoreSigner::ECDSA_P256_SHA256_ASN1(
-                    EcdsaSigner::<_, sha2::Sha256>::from_ecdsa_keys(inner)?,
-                )
+                SigStoreSigner::ECDSA_P256_SHA256_ASN1(EcdsaSigner::from_ecdsa_keys(inner)?)
             }
             ECDSAKeys::P384(inner) => {
-                SigStoreSigner::ECDSA_P384_SHA384_ASN1(
-                    EcdsaSigner::<_, sha2::Sha384>::from_ecdsa_keys(inner)?,
-                )
+                SigStoreSigner::ECDSA_P384_SHA384_ASN1(EcdsaSigner::from_ecdsa_keys(inner)?)
             }
         })
     }
