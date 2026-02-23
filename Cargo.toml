@@ -106,7 +106,7 @@ crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",
 ] }
-digest = { version = "0.10", default-features = false }
+digest = { version = "0.11", default-features = false }
 ecdsa = { version = "0.16", default-features = false, features = [
     "der",
     "digest",
