@@ -20,7 +20,7 @@ use tracing::info;
 
 use crate::{
     cosign::client::Client,
-    crypto::{CosignVerificationKey, SigningScheme, certificate_pool::CertificatePool},
+    crypto::{CosignVerificationKey, certificate_pool::CertificatePool},
     errors::Result,
     registry::ClientConfig,
     trust::TrustRoot,
@@ -100,15 +100,15 @@ impl<'a> ClientBuilder<'a> {
             .rekor_pub_keys
             .map(|keys| {
                 keys.iter()
-                    .filter_map(|(key_id, data)| {
-                        match CosignVerificationKey::from_der(data, &SigningScheme::default()) {
+                    .filter_map(
+                        |(key_id, data)| match CosignVerificationKey::try_from_der(data) {
                             Ok(key) => Some((key_id.clone(), key)),
                             Err(e) => {
                                 info!("Cannot parse Rekor public key with id {key_id}: {e}");
                                 None
                             }
-                        }
-                    })
+                        },
+                    )
                     .collect::<BTreeMap<String, CosignVerificationKey>>()
             })
             .filter(|m| !m.is_empty());
@@ -148,5 +148,58 @@ impl<'a> ClientBuilder<'a> {
             rekor_pub_keys,
             fulcio_cert_pool,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trust::ManualTrustRoot;
+
+    const OLD_REKOR_ED25519_KEY_DER: &[u8] = &[
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, 0xb7, 0xca, 0xe5,
+        0xa7, 0x59, 0x27, 0x1b, 0x08, 0xdf, 0x6d, 0xc5, 0xc0, 0x60, 0xf6, 0x00, 0x92, 0x7d, 0x17,
+        0x88, 0xbc, 0xf5, 0xc7, 0xc3, 0xb8, 0xb7, 0x46, 0x24, 0x12, 0x18, 0x9e, 0xdb, 0x8e,
+    ];
+
+    const OLD_REKOR_ED25519_KEY_ID: &str =
+        "cf1199155bddd051268d1f16ac5c0c75c009f6fb5a63f4177f8e18d7051e3fa0";
+
+    // Regression test for the ClientBuilder bug:
+    // https://github.com/sigstore/sigstore-rs/issues/508. When the TUF trust root contains an
+    // Ed25519 Rekor key, the resulting Client must have that key in its rekor_pub_keys map.
+    #[test]
+    fn client_builder_parses_ed25519_rekor_key() {
+        let mut trust_root = ManualTrustRoot::default();
+        trust_root.rekor_keys.insert(
+            OLD_REKOR_ED25519_KEY_ID.to_string(),
+            OLD_REKOR_ED25519_KEY_DER.to_vec(),
+        );
+
+        let client = ClientBuilder::default()
+            .with_trust_repository(&trust_root)
+            .expect("with_trust_repository failed")
+            .build()
+            .expect("build failed");
+
+        assert!(
+            client.rekor_pub_keys.is_some(),
+            "Expected rekor_pub_keys to be Some after providing an Ed25519 Rekor key, \
+             but it was None — the key was silently dropped. \
+             Fix: use CosignVerificationKey::try_from_der(data) instead of \
+             from_der(data, &SigningScheme::default()) in client_builder.rs"
+        );
+
+        let keys = client.rekor_pub_keys.unwrap();
+        assert_eq!(
+            keys.len(),
+            1,
+            "Expected exactly 1 parsed Rekor key, got {}",
+            keys.len()
+        );
+        assert!(
+            keys.contains_key(OLD_REKOR_ED25519_KEY_ID),
+            "Expected parsed key to have the correct key ID"
+        );
     }
 }
