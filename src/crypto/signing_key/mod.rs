@@ -316,8 +316,8 @@ pub enum SigStoreSigner {
     RSA_PKCS1_SHA256(RSASigner),
     RSA_PKCS1_SHA384(RSASigner),
     RSA_PKCS1_SHA512(RSASigner),
-    ECDSA_P256_SHA256_ASN1(EcdsaSigner<p256::NistP256, sha2::Sha256>),
-    ECDSA_P384_SHA384_ASN1(EcdsaSigner<p384::NistP384, sha2::Sha384>),
+    ECDSA_P256_SHA256_ASN1(EcdsaSigner),
+    ECDSA_P384_SHA384_ASN1(EcdsaSigner),
     ED25519(Ed25519Signer),
 }
 

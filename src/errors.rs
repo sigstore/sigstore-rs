@@ -263,6 +263,9 @@ pub enum SigstoreError {
     #[error(transparent)]
     ECDSAError(#[from] ecdsa::Error),
 
+    #[error("Failed to generate ECDSA key pair")]
+    FailedToGenerateEcdsaKeys,
+
     #[error(transparent)]
     ECError(#[from] elliptic_curve::Error),
 
@@ -304,4 +307,10 @@ pub enum SigstoreError {
 
     #[error(transparent)]
     X509BuilderError(#[from] x509_cert::builder::Error),
+
+    #[error("Failed to sign the data")]
+    FailedToSignError,
+
+    #[error("Unsupported ECDSA signing algorithm")]
+    UnsupportedAlgorithmError,
 }
