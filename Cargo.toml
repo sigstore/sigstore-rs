@@ -182,7 +182,7 @@ serde_with = { version = "3.9", default-features = false, features = [
     "base64",
     "json",
 ], optional = true }
-sha2 = { version = "0.10", default-features = false, features = ["oid"] }
+sha2 = { version = "0.11", default-features = false, features = ["oid"] }
 signature = { version = "2.2", default-features = false }
 sigstore_protobuf_specs = { version = "0.5", default-features = false, optional = true }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
