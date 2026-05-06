@@ -15,5 +15,7 @@
 
 pub mod openidflow;
 
+pub(crate) mod http_client;
+
 pub mod token;
 pub use token::IdentityToken;

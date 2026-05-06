@@ -43,27 +43,17 @@ full = [
     "sigstore-trust-root",
 ]
 mock-client = ["dep:async-trait", "dep:oci-client"]
-native-tls = [
-    "oci-client?/native-tls",
-    "openidconnect?/native-tls",
-    "reqwest?/native-tls",
-]
-oauth = ["dep:openidconnect", "dep:reqwest"]
+native-tls = ["oci-client?/native-tls", "reqwest?/native-tls"]
+oauth = ["dep:openidconnect", "dep:reqwest", "reqwest?/blocking"]
 registry = ["dep:async-trait", "dep:oci-client", "dep:serde_json_canonicalizer"]
 rekor = [
     "dep:hex",
     "dep:hex-literal",
     "dep:reqwest",
     "dep:serde_json_canonicalizer",
+    "reqwest?/query",
 ]
-rustls-tls = [
-    "oci-client?/rustls-tls",
-    "openidconnect?/rustls-tls",
-    "reqwest?/rustls-tls",
-]
-# This feature flag is used to allow using the platform's native certificate store
-# when using rustls suites
-rustls-tls-native-roots = ["oci-client?/rustls-tls-native-roots"]
+rustls-tls = ["oci-client?/rustls-tls", "reqwest?/rustls"]
 sign = [
     "cert",
     "dep:hex",
@@ -73,12 +63,14 @@ sign = [
     "rekor",
 ]
 sigstore-trust-root = [
+    "dep:async-trait",
     "dep:futures",
     "dep:futures-util",
     "dep:hex",
     "dep:reqwest",
     "dep:sigstore_protobuf_specs",
     "dep:tough",
+    "reqwest?/stream",
     "tokio/sync",
 ]
 test-registry = [] # used for testing against a test registry
@@ -131,12 +123,8 @@ hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
 hex-literal = { version = "1.1", optional = true }
-
-oci-client = { version = "0.15", default-features = false, optional = true }
-openidconnect = { version = "4.0", default-features = false, features = [
-    "reqwest",
-    "reqwest-blocking",
-], optional = true }
+oci-client = { version = "0.16", default-features = false, optional = true }
+openidconnect = { version = "4.0", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = [
     "arithmetic",
     "ecdsa",
@@ -191,9 +179,7 @@ tokio = { version = "1", default-features = false, features = ["rt"] }
 tokio-util = { version = "0.7", default-features = false, features = [
     "io-util",
 ] }
-tough = { version = "0.22", default-features = false, features = [
-    "http",
-], optional = true }
+tough = { version = "0.22", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false }
 url = { version = "2.5", default-features = false }
 webbrowser = { version = "1.0", default-features = false, optional = true }

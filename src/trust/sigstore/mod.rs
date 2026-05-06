@@ -40,6 +40,7 @@ use tough::TargetName;
 use tracing::debug;
 
 mod constants;
+mod transport;
 
 use crate::errors::{Result, SigstoreError};
 pub use crate::trust::{ManualTrustRoot, TrustRoot};
@@ -70,11 +71,15 @@ impl SigstoreTrustRoot {
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
+        let client = reqwest::Client::new();
+        let transport = transport::ReqwestTransport::new(client);
+
         let repository = tough::RepositoryLoader::new(
             &constants::static_resource("root.json").expect("Failed to fetch embedded TUF root!"),
             metadata_base,
             target_base,
         )
+        .transport(transport)
         .expiration_enforcement(tough::ExpirationEnforcement::Safe)
         .load()
         .await
