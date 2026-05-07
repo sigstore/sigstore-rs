@@ -282,7 +282,7 @@ impl SignatureLayer {
 
         Ok(SignatureLayer {
             oci_digest: descriptor.digest.clone(),
-            raw_data: layer.data.clone(),
+            raw_data: layer.data.to_vec(),
             simple_signing,
             signature: Some(signature),
             bundle,
@@ -679,7 +679,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         };
         let layer = oci_client::client::ImageLayer {
             media_type: super::SIGSTORE_OCI_MEDIA_TYPE.to_string(),
-            data: Vec::new(),
+            data: Vec::new().into(),
             annotations: None,
         };
 
@@ -709,7 +709,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         };
         let layer = oci_client::client::ImageLayer {
             media_type: "not what you would expect".into(),
-            data: Vec::new(),
+            data: Vec::new().into(),
             annotations: None,
         };
 

@@ -15,14 +15,17 @@
 
 //! This provides a method for retreiving a OpenID Connect ID Token and scope from the sigstore project.
 //!
-//! The main entry point is the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) function.
-//! This requires four parameters:
+//! The main entry points are:
+//! - [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) (synchronous, non-wasm only)
+//! - [`OpenIDAuthorize::auth_url_async`](OpenIDAuthorize::auth_url_async) (async)
+//!
+//! Both require four parameters:
 //! - `client_id`: the client ID of the application
 //! - `client_secret`: the client secret of the application
 //! - `issuer`: the URL of the OpenID Connect server
 //! - `redirect_uri`: the URL of the callback endpoint
 //!
-//! The `auth_url` function returns the following:
+//! They return the following:
 //!
 //! - `authorize_url` is a URL that can be opened in a browser. The user will be
 //!   prompted to login and authorize the application. The user will be redirected to
@@ -36,24 +39,23 @@
 //! - `pkce_verifier` is a PKCE verifier that can be used to generate the code_verifier
 //!   value.
 //!
-//! Once you have recieved the above tuple, you can use the [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener)
-//! function to get the ID Token and scope.
+//! Once you have recieved the above tuple, you can use:
+//! - [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) (synchronous, non-wasm only)
+//! - [`RedirectListener::redirect_listener_async`](RedirectListener::redirect_listener_async) (async)
 //!
-//! The `redirect_listener` function requires the following parameters:
-//! - `client_redirect_host`: the address for callback.
-//! - `client`: the client object
-//! - `nonce`: the nonce value
-//! - `pkce_verifier`: the PKCE verifier
+//! to get the ID Token and scope.
 //!
 //! The `IdTokenClaims` this contains params such as `email` and the `access_token`.
 //!
 //! It maybe prefered to instead develop your own listener. If so bypass using the
-//! [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) function and
-//! simply send the values retrieved from the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url)
+//! [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) /
+//! [`RedirectListener::redirect_listener_async`](RedirectListener::redirect_listener_async) function and
+//! simply send the values retrieved from the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) /
+//! [`OpenIDAuthorize::auth_url_async`](OpenIDAuthorize::auth_url_async)
 //! to your own listener.
 //!
 //!
-//! **Warning:** one of the dependencies of the [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) performs
+//! **Warning:** [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) performs
 //! blocking operations. Because of that it can cause panics at runtime if invoked inside of `async` code.
 //! If you need to use this function inside of an async code you must wrap it inside of a `spawn_blocking` instruction:
 //!
@@ -92,12 +94,14 @@ use openidconnect::{
         CoreAuthenticationFlow, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier,
         CoreProviderMetadata, CoreTokenResponse,
     },
-    reqwest,
 };
 use tracing::error;
 use url::Url;
 
 use crate::errors::{Result, SigstoreError};
+use crate::oauth::http_client::AsyncReqwestClient;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::oauth::http_client::SyncReqwestClient;
 
 pub(crate) type OpenIdClient = openidconnect::core::CoreClient<
     openidconnect::EndpointSet,      // HasAuthUrl
@@ -170,10 +174,12 @@ impl OpenIDAuthorize {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn auth_url(&self) -> Result<(Url, OpenIdClient, Nonce, PkceCodeVerifier)> {
-        let http_client = reqwest::blocking::ClientBuilder::new()
-            // Following redirects opens the client up to SSRF vulnerabilities.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let http_client = SyncReqwestClient(
+            reqwest::blocking::ClientBuilder::new()
+                // Following redirects opens the client up to SSRF vulnerabilities.
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        );
 
         let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
@@ -187,16 +193,21 @@ impl OpenIDAuthorize {
     }
 
     pub async fn auth_url_async(&self) -> Result<(Url, OpenIdClient, Nonce, PkceCodeVerifier)> {
-        let async_http_client = reqwest::ClientBuilder::new()
-            // Following redirects opens the client up to SSRF vulnerabilities.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let async_http_client = AsyncReqwestClient(
+            reqwest::ClientBuilder::new()
+                // Following redirects opens the client up to SSRF vulnerabilities.
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        );
 
         let issuer = IssuerUrl::new(self.oidc_issuer.to_owned()).expect("Missing the OIDC_ISSUER.");
 
         let provider_metadata = CoreProviderMetadata::discover_async(issuer, &async_http_client)
             .await
-            .map_err(|_| SigstoreError::ClaimsVerificationError)?;
+            .map_err(|err| {
+                error!("Error is: {:?}", err);
+                SigstoreError::ClaimsVerificationError
+            })?;
 
         self.auth_url_internal(provider_metadata)
     }
@@ -223,7 +234,7 @@ impl RedirectListener {
     //! ```rust,ignore
     //! use sigstore::oauth::openidflow::RedirectListener;
     //!
-    //! let oidc = RedirectListener::new("127.0.0.1:8080", client, nonce, pkce_verifier).redirect_listener();
+    //! let oidc = RedirectListener::new("127.0.0.1:8080", client, nonce, pkce_verifier).redirect_listener_async().await;
     //! ```
     pub fn new(
         client_redirect_host: &str,
@@ -292,11 +303,12 @@ impl RedirectListener {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
-        use openidconnect::reqwest::blocking::ClientBuilder;
-        let http_client = ClientBuilder::new()
-            // Following redirects opens the client up to SSRF vulnerabilities.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let http_client = SyncReqwestClient(
+            reqwest::blocking::ClientBuilder::new()
+                // Following redirects opens the client up to SSRF vulnerabilities.
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        );
 
         let code = self.redirect_listener_internal()?;
 
@@ -315,11 +327,12 @@ impl RedirectListener {
     }
 
     pub async fn redirect_listener_async(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
-        use openidconnect::reqwest::ClientBuilder;
-        let async_http_client = ClientBuilder::new()
-            // Following redirects opens the client up to SSRF vulnerabilities.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let async_http_client = AsyncReqwestClient(
+            reqwest::ClientBuilder::new()
+                // Following redirects opens the client up to SSRF vulnerabilities.
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        );
 
         let code = self.redirect_listener_internal()?;
 
@@ -358,23 +371,42 @@ impl RedirectListener {
     }
 }
 
-#[test]
-fn test_auth_url() {
-    let oidc_url = OpenIDAuthorize::new(
-        "sigstore",
-        "some_secret",
-        "https://oauth2.sigstore.dev/auth",
-        "http://localhost:8080",
-    )
-    .auth_url();
-    let oidc_url = oidc_url.unwrap();
-    assert!(
-        oidc_url
-            .0
-            .to_string()
-            .contains("https://oauth2.sigstore.dev/auth")
-    );
-    assert!(oidc_url.0.to_string().contains("response_type=code"));
-    assert!(oidc_url.0.to_string().contains("client_id=sigstore"));
-    assert!(oidc_url.0.to_string().contains("scope=openid+email"));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_auth_url(url: &str) {
+        assert!(url.contains("https://oauth2.sigstore.dev/auth"));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("client_id=sigstore"));
+        assert!(url.contains("scope=openid+email"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_auth_url() {
+        let oidc_url = OpenIDAuthorize::new(
+            "sigstore",
+            "some_secret",
+            "https://oauth2.sigstore.dev/auth",
+            "http://localhost:8080",
+        )
+        .auth_url()
+        .unwrap();
+        assert_auth_url(oidc_url.0.to_string().as_str());
+    }
+
+    #[tokio::test]
+    async fn test_auth_url_async() {
+        let oidc_url = OpenIDAuthorize::new(
+            "sigstore",
+            "some_secret",
+            "https://oauth2.sigstore.dev/auth",
+            "http://localhost:8080",
+        )
+        .auth_url_async()
+        .await
+        .unwrap();
+        assert_auth_url(oidc_url.0.to_string().as_str());
+    }
 }
