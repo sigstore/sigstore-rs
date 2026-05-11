@@ -57,3 +57,5 @@ pub use self::tuf_all_of::TufAllOf;
 pub mod checkpoint;
 pub mod log_entry;
 pub use self::log_entry::LogEntry;
+pub mod dsse;
+pub use self::dsse::Dsse;
