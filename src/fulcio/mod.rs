@@ -61,16 +61,11 @@ impl Serialize for PublicKey {
         pk.serialize_field(
             "algorithm",
             match self.1 {
-                SigningScheme::ECDSA_P256_SHA256_ASN1 | SigningScheme::ECDSA_P384_SHA384_ASN1 => {
-                    "ecdsa"
-                }
+                SigningScheme::ECDSA_P256_SHA256_ASN1
+                | SigningScheme::ECDSA_P384_SHA384_ASN1
+                | SigningScheme::ECDSA_P521_SHA512_ASN1 => "ecdsa",
                 SigningScheme::ED25519 => "ed25519",
-                SigningScheme::RSA_PSS_SHA256(_)
-                | SigningScheme::RSA_PSS_SHA384(_)
-                | SigningScheme::RSA_PSS_SHA512(_)
-                | SigningScheme::RSA_PKCS1_SHA256(_)
-                | SigningScheme::RSA_PKCS1_SHA384(_)
-                | SigningScheme::RSA_PKCS1_SHA512(_) => "rsa",
+                SigningScheme::RSA_PSS_SHA256(_) | SigningScheme::RSA_PKCS1_SHA256(_) => "rsa",
             },
         )?;
         pk.end()

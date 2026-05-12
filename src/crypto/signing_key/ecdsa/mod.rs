@@ -1,4 +1,3 @@
-//
 // Copyright 2022 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,20 +14,18 @@
 
 //! # ECDSA Key Enums
 //!
-//! This is a wrapper for [`EcdsaKeys`] and [`EcdsaSigner`]. Because
-//! both [`EcdsaKeys`] and [`EcdsaSigner`] are generic types, they
-//! may let the user to manually include concrete underlying elliptic
-//! curves like `p256`, `p384`, and concrete digest algorithm crates
-//! like `sha2`. To avoid this, we use [`ECDSAKeys`] enum to wrap
-//! the generic type [`EcdsaKeys`].
+//! This module provides [`ECDSAKeys`], a curve-tagged enum that wraps
+//! [`EcdsaKeys`] for each supported elliptic curve. The curve is selected
+//! at runtime rather than via generic type parameters.
 //!
 //! # EC Key Pair Operations
 //!
-//! This wrapper provides two underlying elliptic curves, s.t.
-//! * `P256`: `P-256`, also known as `secp256r1` or `prime256v1`.
-//! * `P384`: `P-384`, also known as `secp384r1`.
+//! Three elliptic curves are supported:
+//! * `P256`: P-256, also known as secp256r1 or prime256v1 (paired with SHA-256)
+//! * `P384`: P-384, also known as secp384r1 (paired with SHA-384)
+//! * `P521`: P-521, also known as secp521r1 (paired with SHA-512)
 //!
-//! We take `P256` for example to show the operaions:
+//! We take `P256` as an example to show the operations:
 //! ```rust
 //! use sigstore::crypto::signing_key::ecdsa::{ECDSAKeys, EllipticCurve};
 //! use sigstore::crypto::Signature;
@@ -37,53 +34,70 @@
 //! let ec_key_pair = ECDSAKeys::new(EllipticCurve::P256).unwrap();
 //!
 //! // export the pem encoded public key.
-//! // here `as_inner()` will return the reference of `KeyPair` trait object
-//! // underlying this `ECDSAKeys` for key pair operaions.
+//! // here `as_inner()` returns a reference to the [`KeyPair`] trait object
+//! // underlying this [`ECDSAKeys`] for key pair operations.
 //! let pubkey = ec_key_pair.as_inner().public_key_to_pem().unwrap();
 //!
 //! // export the private key using sigstore encryption.
 //! let privkey = ec_key_pair.as_inner().private_key_to_encrypted_pem(b"password").unwrap();
 //!
-//! // also, we can import an [`ECDSAKeys`] of unknown elliptic curve at compile
-//! // time using functions with the prefix `ECDSAKeys::from_`. These functions
-//! // will try to decode the given ecdsa private key using all [`EllipticCurve`]
-//! // enums (suppose the given private key is in PKCS8 format. The PKCS8
-//! // format will carry the key algorithm and its underlying elliptic curve
-//! // identity). If one of them succeeds, return the enum. If all fail, return
-//! // an error. For example:
+//! // also, we can import an [`ECDSAKeys`] of unknown elliptic curve using
+//! // functions with the prefix `ECDSAKeys::from_`. These functions try to
+//! // decode the given ECDSA private key (in PKCS#8 format) against each
+//! // supported curve in order, returning the first that succeeds.
+//! // For example:
 //! // let ec_key_pair_import = ECDSAKeys::from_pem(PEM_CONTENT).unwrap();
 //!
-//! // convert this EC key into an [`SigStoreSigner`] enum to sign some data.
-//! // Although different EC key can combine with different digest algorithms to
-//! // form a signing scheme, `P256` is recommended to work with `Sha256` and
-//! // `P384` is recommended to work with `Sha384`. So here we do not include
-//! // extra parameter `SignatureDigestAlgorithm` for `to_sigstore_signer()`.
+//! // convert this EC key into a [`sigstore::crypto::signing_key::SigStoreSigner`]
+//! // enum to sign some data. The digest algorithm is chosen automatically
+//! // based on the curve (P-256→SHA-256, P-384→SHA-384, P-521→SHA-512).
 //! let ec_signer = ec_key_pair.to_sigstore_signer().unwrap();
 //!
 //! // test message to be signed
 //! let message = b"some message";
 //!
-//! // sign using
+//! // sign the message
 //! let signature_data = ec_signer.sign(message).unwrap();
 //!
-//! // export the [`CosignVerificationKey`] from the [`SigStoreSigner`], which
-//! // is used to verify the signature.
+//! // export the [`sigstore::crypto::verification_key::CosignVerificationKey`]
+//! // from the [`sigstore::crypto::signing_key::SigStoreSigner`],
+//! // which is used to verify the signature.
 //! let verification_key = ec_signer.to_verification_key().unwrap();
 //!
 //! // verify
-//! assert!(verification_key.verify_signature(Signature::Raw(&signature_data),message).is_ok());
-/// ```
+//! assert!(verification_key.verify_signature(Signature::Raw(&signature_data), message).is_ok());
+//! ```
+
 use crate::errors::*;
 
 use self::ec::{EcdsaKeys, EcdsaSigner};
-
 use super::{KeyPair, SigStoreSigner};
 
 pub mod ec;
 
+/// The elliptic curves supported for ECDSA operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EllipticCurve {
+    P256,
+    P384,
+    P521,
+}
+
+impl std::fmt::Display for EllipticCurve {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EllipticCurve::P256 => write!(f, "P256"),
+            EllipticCurve::P384 => write!(f, "P384"),
+            EllipticCurve::P521 => write!(f, "P521"),
+        }
+    }
+}
+
+/// An ECDSA key pair for one of the supported curves.
 pub enum ECDSAKeys {
-    P256(EcdsaKeys<p256::NistP256>),
-    P384(EcdsaKeys<p384::NistP384>),
+    P256(EcdsaKeys),
+    P384(EcdsaKeys),
+    P521(EcdsaKeys),
 }
 
 impl std::fmt::Display for ECDSAKeys {
@@ -91,87 +105,65 @@ impl std::fmt::Display for ECDSAKeys {
         match self {
             ECDSAKeys::P256(_) => write!(f, "ECDSA P256"),
             ECDSAKeys::P384(_) => write!(f, "ECDSA P384"),
+            ECDSAKeys::P521(_) => write!(f, "ECDSA P521"),
         }
     }
 }
 
-/// The types of supported elliptic curves:
-/// * `P256`: `P-256`, also known as `secp256r1` or `prime256v1`.
-/// * `P384`: `P-384`, also known as `secp384r1`.
-pub enum EllipticCurve {
-    P256,
-    P384,
-}
-
-/// This macro helps to reduce duplicated code.
-macro_rules! iterate_on_curves {
-    ($func: ident ($($args:expr),*), $errorinfo: literal) => {
-        if let Ok(keys) = EcdsaKeys::<p256::NistP256>::$func($($args,)*) {
-            Ok(ECDSAKeys::P256(keys))
-        } else if let Ok(keys) = EcdsaKeys::<p384::NistP384>::$func($($args,)*) {
-            Ok(ECDSAKeys::P384(keys))
-        } else {
-            Err(SigstoreError::KeyParseError($errorinfo.to_string()))
-        }
-    }
+/// Try to parse a key for each curve in order; return the first that succeeds.
+macro_rules! try_curves {
+    ($func:ident($($args:expr),*)) => {
+        EcdsaKeys::$func(EllipticCurve::P256, $($args,)*)
+            .map(ECDSAKeys::P256)
+            .or_else(|_| EcdsaKeys::$func(EllipticCurve::P384, $($args,)*).map(ECDSAKeys::P384))
+            .or_else(|_| EcdsaKeys::$func(EllipticCurve::P521, $($args,)*).map(ECDSAKeys::P521))
+            .map_err(|_| SigstoreError::KeyParseError("ECDSA key parse failed for all curves".into()))
+    };
 }
 
 impl ECDSAKeys {
-    /// Create a new [`ECDSAKeys`] due to the given [`EllipticCurve`].
+    /// Create a new key pair for the given curve.
     pub fn new(curve: EllipticCurve) -> Result<Self> {
-        Ok(match curve {
-            EllipticCurve::P256 => ECDSAKeys::P256(EcdsaKeys::<p256::NistP256>::new()?),
-            EllipticCurve::P384 => ECDSAKeys::P384(EcdsaKeys::<p384::NistP384>::new()?),
-        })
-    }
-
-    /// Return the inner `KeyPair` of the enum. This function
-    /// is useful in the inner interface conversion.
-    pub fn as_inner(&self) -> &dyn KeyPair {
-        match self {
-            ECDSAKeys::P256(inner) => inner,
-            ECDSAKeys::P384(inner) => inner,
+        match curve {
+            EllipticCurve::P256 => EcdsaKeys::new(EllipticCurve::P256).map(ECDSAKeys::P256),
+            EllipticCurve::P384 => EcdsaKeys::new(EllipticCurve::P384).map(ECDSAKeys::P384),
+            EllipticCurve::P521 => EcdsaKeys::new(EllipticCurve::P521).map(ECDSAKeys::P521),
         }
     }
 
-    /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encoded private key.
-    /// The label should be [`super::COSIGN_PRIVATE_KEY_PEM_LABEL`] or
-    /// [`super::SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
+    /// Return a reference to the inner [`KeyPair`] trait object.
+    pub fn as_inner(&self) -> &dyn KeyPair {
+        match self {
+            ECDSAKeys::P256(k) | ECDSAKeys::P384(k) | ECDSAKeys::P521(k) => k,
+        }
+    }
+
+    pub(crate) fn inner(&self) -> &EcdsaKeys {
+        match self {
+            ECDSAKeys::P256(k) | ECDSAKeys::P384(k) | ECDSAKeys::P521(k) => k,
+        }
+    }
+
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
-        iterate_on_curves!(
-            from_encrypted_pem(private_key, password),
-            "Ecdsa keys from encrypted PEM private key"
-        )
+        try_curves!(from_encrypted_pem(private_key, password))
     }
 
-    /// Builds a `EcdsaKeys` from a pkcs8 PEM-encoded private key.
-    /// The label of PEM should be [`super::PRIVATE_KEY_PEM_LABEL`]
     pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
-        iterate_on_curves!(from_pem(pem_data), "Ecdsa keys from PEM private key")
+        try_curves!(from_pem(pem_data))
     }
 
-    /// Builds a `EcdsaKeys` from a pkcs8 asn.1 private key.
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
-        iterate_on_curves!(from_der(private_key), "Ecdsa keys from DER private key")
+        try_curves!(from_der(private_key))
     }
 
-    /// `to_sigstore_signer` will create the [`SigStoreSigner`] using
-    /// this Ecdsa private key. This function does not receive any parameter
-    /// to indicate the digest algorthm, because the common signing schemes
-    /// for ecdsa-p256 is `ECDSA_P256_SHA256`, and for ecdsa-p384 is
-    /// `ECDSA_P384_SHA384`.
+    /// Build a [`SigStoreSigner`] from this key pair using the default scheme
+    /// for each curve (P256→SHA256, P384→SHA384, P521→SHA512).
     pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
+        let signer = EcdsaSigner::from_ecdsa_keys(self.inner())?;
         Ok(match self {
-            ECDSAKeys::P256(inner) => {
-                SigStoreSigner::ECDSA_P256_SHA256_ASN1(
-                    EcdsaSigner::<_, sha2::Sha256>::from_ecdsa_keys(inner)?,
-                )
-            }
-            ECDSAKeys::P384(inner) => {
-                SigStoreSigner::ECDSA_P384_SHA384_ASN1(
-                    EcdsaSigner::<_, sha2::Sha384>::from_ecdsa_keys(inner)?,
-                )
-            }
+            ECDSAKeys::P256(_) => SigStoreSigner::ECDSA_P256_SHA256_ASN1(signer),
+            ECDSAKeys::P384(_) => SigStoreSigner::ECDSA_P384_SHA384_ASN1(signer),
+            ECDSAKeys::P521(_) => SigStoreSigner::ECDSA_P521_SHA512_ASN1(signer),
         })
     }
 }

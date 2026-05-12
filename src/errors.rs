@@ -261,12 +261,6 @@ pub enum SigstoreError {
     PKCS8DerError(String),
 
     #[error(transparent)]
-    ECDSAError(#[from] ecdsa::Error),
-
-    #[error(transparent)]
-    ECError(#[from] elliptic_curve::Error),
-
-    #[error(transparent)]
     ScryptKDFInvalidParamsError(#[from] scrypt::errors::InvalidParams),
 
     #[error(transparent)]
@@ -289,15 +283,6 @@ pub enum SigstoreError {
 
     #[error("Failed to parse the key: {0}")]
     KeyParseError(String),
-
-    #[error(transparent)]
-    RSAError(#[from] rsa::errors::Error),
-
-    #[error(transparent)]
-    PKCS1Error(#[from] pkcs1::Error),
-
-    #[error(transparent)]
-    Ed25519PKCS8Error(#[from] ed25519_dalek::pkcs8::spki::Error),
 
     #[error(transparent)]
     X509ParseError(#[from] x509_cert::der::Error),

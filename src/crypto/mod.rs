@@ -15,8 +15,6 @@
 
 //! Structures and constants required to perform cryptographic operations.
 
-use sha2::{Sha256, Sha384};
-
 use crate::errors::*;
 
 pub use signing_key::SigStoreSigner;
@@ -24,39 +22,24 @@ pub use verification_key::CosignVerificationKey;
 pub(crate) mod merkle;
 
 /// Different digital signature algorithms.
-/// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256
-///   for RSA signatures. All the `usize` member inside
-///   an RSA enum represents the key size of the RSA key.
-/// * `RSA_PSS_SHA384`: RSA PSS padding using SHA-384
-///   for RSA signatures.
-/// * `RSA_PSS_SHA512`: RSA PSS padding using SHA-512
-///   for RSA signatures.
-/// * `RSA_PKCS1_SHA256`: PKCS#1 1.5 padding using
-///   SHA-256 for RSA signatures.
-/// * `RSA_PKCS1_SHA384`: PKCS#1 1.5 padding using
-///   SHA-384 for RSA signatures.
-/// * `RSA_PKCS1_SHA512`: PKCS#1 1.5 padding using
-///   SHA-512 for RSA signatures.
-/// * `ECDSA_P256_SHA256_ASN1`: ASN.1 DER-encoded ECDSA
-///   signatures using the P-256 curve and SHA-256. It
-///   is the default signing scheme.
-/// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA
-///   signatures using the P-384 curve and SHA-384.
-/// * `ED25519`: ECDSA signature using SHA2-512
-///   as the digest function and curve edwards25519. The
-///   signature format please refer
-///   to [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html#section-5.1.6).
+/// * `RSA_PSS_SHA256`: RSA PSS padding using SHA-256 for RSA signatures.
+///   The `usize` member represents the RSA key size in bits (2048/3072/4096).
+/// * `RSA_PKCS1_SHA256`: PKCS#1 1.5 padding using SHA-256 for RSA signatures.
+/// * `ECDSA_P256_SHA256_ASN1`: ASN.1 DER-encoded ECDSA signatures using P-256
+///   and SHA-256. This is the default signing scheme.
+/// * `ECDSA_P384_SHA384_ASN1`: ASN.1 DER-encoded ECDSA signatures using P-384
+///   and SHA-384.
+/// * `ECDSA_P521_SHA512_ASN1`: ASN.1 DER-encoded ECDSA signatures using P-521
+///   and SHA-512.
+/// * `ED25519`: Ed25519 signature using curve edwards25519.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SigningScheme {
     RSA_PSS_SHA256(usize),
-    RSA_PSS_SHA384(usize),
-    RSA_PSS_SHA512(usize),
     RSA_PKCS1_SHA256(usize),
-    RSA_PKCS1_SHA384(usize),
-    RSA_PKCS1_SHA512(usize),
     ECDSA_P256_SHA256_ASN1,
     ECDSA_P384_SHA384_ASN1,
+    ECDSA_P521_SHA512_ASN1,
     ED25519,
 }
 
@@ -64,13 +47,10 @@ impl std::fmt::Display for SigningScheme {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SigningScheme::RSA_PSS_SHA256(_) => write!(f, "RSA_PSS_SHA256"),
-            SigningScheme::RSA_PSS_SHA384(_) => write!(f, "RSA_PSS_SHA384"),
-            SigningScheme::RSA_PSS_SHA512(_) => write!(f, "RSA_PSS_SHA512"),
             SigningScheme::RSA_PKCS1_SHA256(_) => write!(f, "RSA_PKCS1_SHA256"),
-            SigningScheme::RSA_PKCS1_SHA384(_) => write!(f, "RSA_PKCS1_SHA384"),
-            SigningScheme::RSA_PKCS1_SHA512(_) => write!(f, "RSA_PKCS1_SHA512"),
             SigningScheme::ECDSA_P256_SHA256_ASN1 => write!(f, "ECDSA_P256_SHA256_ASN1"),
             SigningScheme::ECDSA_P384_SHA384_ASN1 => write!(f, "ECDSA_P384_SHA384_ASN1"),
+            SigningScheme::ECDSA_P521_SHA512_ASN1 => write!(f, "ECDSA_P521_SHA512_ASN1"),
             SigningScheme::ED25519 => write!(f, "ED25519"),
         }
     }
@@ -83,13 +63,10 @@ impl TryFrom<&str> for SigningScheme {
         match value {
             "ECDSA_P256_SHA256_ASN1" => Ok(Self::ECDSA_P256_SHA256_ASN1),
             "ECDSA_P384_SHA384_ASN1" => Ok(Self::ECDSA_P384_SHA384_ASN1),
+            "ECDSA_P521_SHA512_ASN1" => Ok(Self::ECDSA_P521_SHA512_ASN1),
             "ED25519" => Ok(Self::ED25519),
             "RSA_PSS_SHA256" => Ok(Self::RSA_PSS_SHA256(DEFAULT_KEY_SIZE)),
-            "RSA_PSS_SHA384" => Ok(Self::RSA_PSS_SHA384(DEFAULT_KEY_SIZE)),
-            "RSA_PSS_SHA512" => Ok(Self::RSA_PSS_SHA512(DEFAULT_KEY_SIZE)),
             "RSA_PKCS1_SHA256" => Ok(Self::RSA_PKCS1_SHA256(DEFAULT_KEY_SIZE)),
-            "RSA_PKCS1_SHA384" => Ok(Self::RSA_PKCS1_SHA384(DEFAULT_KEY_SIZE)),
-            "RSA_PKCS1_SHA512" => Ok(Self::RSA_PKCS1_SHA512(DEFAULT_KEY_SIZE)),
             unknown => Err(format!("Unsupported signing algorithm: {unknown}")),
         }
     }
@@ -99,12 +76,18 @@ impl SigningScheme {
     /// Create a key-pair due to the given signing scheme.
     pub fn create_signer(&self) -> Result<SigStoreSigner> {
         Ok(match self {
-            SigningScheme::ECDSA_P256_SHA256_ASN1 => SigStoreSigner::ECDSA_P256_SHA256_ASN1(
-                EcdsaSigner::<_, Sha256>::from_ecdsa_keys(&EcdsaKeys::<p256::NistP256>::new()?)?,
-            ),
-            SigningScheme::ECDSA_P384_SHA384_ASN1 => SigStoreSigner::ECDSA_P384_SHA384_ASN1(
-                EcdsaSigner::<_, Sha384>::from_ecdsa_keys(&EcdsaKeys::<p384::NistP384>::new()?)?,
-            ),
+            SigningScheme::ECDSA_P256_SHA256_ASN1 => {
+                let keys = ECDSAKeys::new(EllipticCurve::P256)?;
+                SigStoreSigner::ECDSA_P256_SHA256_ASN1(EcdsaSigner::from_ecdsa_keys(keys.inner())?)
+            }
+            SigningScheme::ECDSA_P384_SHA384_ASN1 => {
+                let keys = ECDSAKeys::new(EllipticCurve::P384)?;
+                SigStoreSigner::ECDSA_P384_SHA384_ASN1(EcdsaSigner::from_ecdsa_keys(keys.inner())?)
+            }
+            SigningScheme::ECDSA_P521_SHA512_ASN1 => {
+                let keys = ECDSAKeys::new(EllipticCurve::P521)?;
+                SigStoreSigner::ECDSA_P521_SHA512_ASN1(EcdsaSigner::from_ecdsa_keys(keys.inner())?)
+            }
             SigningScheme::ED25519 => {
                 SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(&Ed25519Keys::new()?)?)
             }
@@ -115,38 +98,10 @@ impl SigningScheme {
                     PaddingScheme::PSS,
                 ))
             }
-            SigningScheme::RSA_PSS_SHA384(bit_size) => {
-                SigStoreSigner::RSA_PSS_SHA384(RSASigner::from_rsa_keys(
-                    &RSAKeys::new(*bit_size)?,
-                    DigestAlgorithm::Sha384,
-                    PaddingScheme::PSS,
-                ))
-            }
-            SigningScheme::RSA_PSS_SHA512(bit_size) => {
-                SigStoreSigner::RSA_PSS_SHA512(RSASigner::from_rsa_keys(
-                    &RSAKeys::new(*bit_size)?,
-                    DigestAlgorithm::Sha512,
-                    PaddingScheme::PSS,
-                ))
-            }
             SigningScheme::RSA_PKCS1_SHA256(bit_size) => {
                 SigStoreSigner::RSA_PKCS1_SHA256(RSASigner::from_rsa_keys(
                     &RSAKeys::new(*bit_size)?,
                     DigestAlgorithm::Sha256,
-                    PaddingScheme::PKCS1v15,
-                ))
-            }
-            SigningScheme::RSA_PKCS1_SHA384(bit_size) => {
-                SigStoreSigner::RSA_PKCS1_SHA384(RSASigner::from_rsa_keys(
-                    &RSAKeys::new(*bit_size)?,
-                    DigestAlgorithm::Sha384,
-                    PaddingScheme::PKCS1v15,
-                ))
-            }
-            SigningScheme::RSA_PKCS1_SHA512(bit_size) => {
-                SigStoreSigner::RSA_PKCS1_SHA512(RSASigner::from_rsa_keys(
-                    &RSAKeys::new(*bit_size)?,
-                    DigestAlgorithm::Sha512,
                     PaddingScheme::PKCS1v15,
                 ))
             }
@@ -184,7 +139,7 @@ pub(crate) mod keyring;
 pub mod verification_key;
 
 use self::signing_key::{
-    ecdsa::ec::{EcdsaKeys, EcdsaSigner},
+    ecdsa::{ECDSAKeys, EllipticCurve, ec::EcdsaSigner},
     ed25519::{Ed25519Keys, Ed25519Signer},
     rsa::{DEFAULT_KEY_SIZE, DigestAlgorithm, PaddingScheme, RSASigner, keypair::RSAKeys},
 };

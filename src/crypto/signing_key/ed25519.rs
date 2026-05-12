@@ -1,4 +1,3 @@
-//
 // Copyright 2022 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,16 +14,16 @@
 
 //! # Ed25519 Keys
 //!
-//! This is a wrapper for Rust Crypto. There two main types in this mod:
-//! * [`Ed25519Keys`]: provides basic key pair operaions
-//! * [`Ed25519Signer`]: provides signing operaion
+//! This module provides Ed25519 key pair operations backed by `aws-lc-rs`.
+//! There are two main types:
+//! * [`Ed25519Keys`]: provides key pair operations
+//! * [`Ed25519Signer`]: provides signing operations
 //!
-//! The `signing_key` will wrap [`Ed25519Keys`] into [`super::SigStoreKeyPair`] enum,
-//! and [`Ed25519Signer`] into [`SigStoreSigner`] enum.
+//! The `signing_key` module wraps [`Ed25519Keys`] into [`super::SigStoreKeyPair`],
+//! and [`Ed25519Signer`] into [`SigStoreSigner`].
 //!
-//! # Ed25519 Key Operaions
+//! # Ed25519 Key Operations
 //!
-//! We give an example for the mod
 //! ```rust
 //! use sigstore::crypto::signing_key::ed25519::Ed25519Keys;
 //! use sigstore::crypto::{signing_key::KeyPair, Signature};
@@ -38,32 +37,33 @@
 //! // export the private key using sigstore encryption.
 //! let privkey = ed25519_key_pair.private_key_to_encrypted_pem(b"password").unwrap();
 //!
-//! // also, we can import a Ed25519 using functions with the prefix
-//! // `Ed25519Keys::from_`. These functions will treat the given
-//! // data as Ed25519 private key in PKCS8 format. For example:
+//! // also, we can import an Ed25519 key using functions with the prefix
+//! // `Ed25519Keys::from_`. These functions treat the given data as an
+//! // Ed25519 private key in PKCS#8 format. For example:
 //! // let ed25519_key_pair_import = Ed25519Keys::from_pem(PEM_CONTENT).unwrap();
 //!
-//! // convert this Ed25519 key into an [`super::SigStoreSigner`] enum to sign some data.
+//! // convert this Ed25519 key into a [`super::SigStoreSigner`] enum to sign some data.
 //! let ed25519_signer = ed25519_key_pair.to_sigstore_signer().unwrap();
 //!
 //! // test message to be signed
 //! let message = b"some message";
 //!
-//! // sign using
+//! // sign the message
 //! let signature = ed25519_signer.sign(message).unwrap();
 //!
-//! // export the [`CosignVerificationKey`] from the [`super::SigStoreSigner`], which
-//! // is used to verify the signature.
+//! // export the [`sigstore::crypto::verification_key::CosignVerificationKey`] from the
+//! // [`super::SigStoreSigner`], which is used to verify the signature.
 //! let verification_key = ed25519_signer.to_verification_key().unwrap();
 //!
 //! // verify
-//! assert!(verification_key.verify_signature(Signature::Raw(&signature),message).is_ok());
+//! assert!(verification_key.verify_signature(Signature::Raw(&signature), message).is_ok());
 //! ```
 
-use ed25519::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
-
-use ed25519::KeypairBytes;
-use ed25519_dalek::{Signer as _, SigningKey};
+use aws_lc_rs::{
+    encoding::AsDer,
+    rand::SystemRandom,
+    signature::{Ed25519KeyPair, KeyPair as AwsKeyPair},
+};
 
 use crate::{
     crypto::{SigningScheme, verification_key::CosignVerificationKey},
@@ -75,30 +75,45 @@ use super::{
     SigStoreSigner, Signer, kdf,
 };
 
-#[derive(Debug, Clone)]
+/// An Ed25519 key pair.
+#[derive(Clone)]
 pub struct Ed25519Keys {
-    signing_key: ed25519_dalek::SigningKey,
-    verifying_key: ed25519_dalek::VerifyingKey,
+    /// PKCS#8 DER encoding of the private key.
+    pkcs8_der: zeroize::Zeroizing<Vec<u8>>,
+    /// DER-encoded SubjectPublicKeyInfo.
+    spki_der: Vec<u8>,
+}
+
+impl std::fmt::Debug for Ed25519Keys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ed25519Keys").finish_non_exhaustive()
+    }
 }
 
 impl Ed25519Keys {
-    /// Create a new `Ed25519Keys` Object.
-    /// The private key will be randomly
-    /// generated.
+    /// Create a new `Ed25519Keys` object.
+    /// The private key will be randomly generated.
     pub fn new() -> Result<Self> {
-        let mut csprng = rand::rngs::OsRng {};
-        let signing_key = SigningKey::generate(&mut csprng);
-        let verifying_key = signing_key.verifying_key();
-        Ok(Self {
-            signing_key,
-            verifying_key,
-        })
+        let rng = SystemRandom::new();
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
+            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        Self::from_pkcs8_der(pkcs8.as_ref())
     }
 
-    /// Create a new `Ed25519Keys` Object from given `Ed25519Keys` Object.
-    pub fn from_ed25519key(key: &Ed25519Keys) -> Result<Self> {
-        let priv_key = key.private_key_to_der()?;
-        Ed25519Keys::from_der(&priv_key[..])
+    /// Build from raw PKCS#8 DER bytes.
+    pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
+        let kp = Ed25519KeyPair::from_pkcs8(der)
+            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        let spki_der = kp
+            .public_key()
+            .as_der()
+            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?
+            .as_ref()
+            .to_vec();
+        Ok(Self {
+            pkcs8_der: zeroize::Zeroizing::new(der.to_vec()),
+            spki_der,
+        })
     }
 
     /// Builds a `Ed25519Keys` from encrypted pkcs8 PEM-encoded private key.
@@ -109,16 +124,7 @@ impl Ed25519Keys {
         match key.tag() {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(key.contents(), password)?;
-                let pkcs8 =
-                    ed25519_dalek::pkcs8::PrivateKeyInfo::try_from(&der[..]).map_err(|e| {
-                        SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
-                    })?;
-                let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
-                    ))
-                })?;
-                Self::from_key_pair_bytes(key_pair_bytes)
+                Self::from_pkcs8_der(&der)
             }
             PRIVATE_KEY_PEM_LABEL if password.is_empty() => Self::from_pem(encrypted_pem),
             PRIVATE_KEY_PEM_LABEL if !password.is_empty() => {
@@ -133,26 +139,11 @@ impl Ed25519Keys {
     }
 
     /// Builds a `Ed25519Keys` from a pkcs8 PEM-encoded private key.
-    /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`]
-    pub fn from_pem(pem: &[u8]) -> Result<Self> {
-        let pem = std::str::from_utf8(pem)?;
-        let (label, document) = pkcs8::SecretDocument::from_pem(pem)
-            .map_err(|e| SigstoreError::PKCS8DerError(e.to_string()))?;
-
-        match label {
-            PRIVATE_KEY_PEM_LABEL => {
-                let pkcs8 = ed25519_dalek::pkcs8::PrivateKeyInfo::try_from(document.as_bytes())
-                    .map_err(|e| {
-                        SigstoreError::PKCS8Error(format!("Read PrivateKeyInfo failed: {e}"))
-                    })?;
-                let key_pair_bytes = KeypairBytes::try_from(pkcs8).map_err(|e| {
-                    SigstoreError::PKCS8Error(format!(
-                        "Convert from pkcs8 pem to ed25519 private key failed: {e}"
-                    ))
-                })?;
-                Self::from_key_pair_bytes(key_pair_bytes)
-            }
-
+    /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`].
+    pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
+        let key = pem::parse(pem_data)?;
+        match key.tag() {
+            PRIVATE_KEY_PEM_LABEL => Self::from_pkcs8_der(key.contents()),
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
                 "Unsupported pem tag {tag}"
             ))),
@@ -160,32 +151,17 @@ impl Ed25519Keys {
     }
 
     /// Builds a `Ed25519Keys` from a pkcs8 asn.1 private key.
-    pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
-        let key_pair_bytes = KeypairBytes::from_pkcs8_der(der_bytes).map_err(|e| {
-            SigstoreError::PKCS8Error(format!(
-                "Convert from pkcs8 der to ed25519 private key failed: {e}"
-            ))
-        })?;
-        Self::from_key_pair_bytes(key_pair_bytes)
+    pub fn from_der(der: &[u8]) -> Result<Self> {
+        Self::from_pkcs8_der(der)
     }
 
-    /// Builds a `Ed25519Keys` from a `KeypairBytes`.
-    fn from_key_pair_bytes(key_pair_bytes: KeypairBytes) -> Result<Self> {
-        let signing_key = ed25519_dalek::SigningKey::from_keypair_bytes(
-            &key_pair_bytes.to_bytes().ok_or_else(|| {
-                SigstoreError::PKCS8SpkiError("No public key info in given key_pair_bytes.".into())
-            })?,
-        )?;
-        let verifying_key = signing_key.verifying_key();
-
-        Ok(Self {
-            signing_key,
-            verifying_key,
-        })
+    /// Create a new `Ed25519Keys` object from a given `Ed25519Keys` object.
+    pub fn from_ed25519key(key: &Ed25519Keys) -> Result<Self> {
+        Self::from_pkcs8_der(&key.pkcs8_der)
     }
 
     /// `to_sigstore_signer` will create the [`SigStoreSigner`] using
-    /// this ed25519 private key.
+    /// this Ed25519 private key.
     pub fn to_sigstore_signer(&self) -> Result<SigStoreSigner> {
         Ok(SigStoreSigner::ED25519(Ed25519Signer::from_ed25519_keys(
             self,
@@ -196,88 +172,73 @@ impl Ed25519Keys {
 impl KeyPair for Ed25519Keys {
     /// Return the public key in PEM-encoded SPKI format.
     fn public_key_to_pem(&self) -> Result<String> {
-        self.verifying_key
-            .to_public_key_pem(pkcs8::LineEnding::LF)
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
+        let pem = pem::Pem::new("PUBLIC KEY", self.spki_der.clone());
+        Ok(pem::encode(&pem))
     }
 
     /// Return the public key in asn.1 SPKI format.
     fn public_key_to_der(&self) -> Result<Vec<u8>> {
-        Ok(self
-            .verifying_key
-            .to_public_key_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?
-            .to_vec())
+        Ok(self.spki_der.clone())
     }
 
     /// Return the encrypted asn.1 pkcs8 private key.
     fn private_key_to_encrypted_pem(&self, password: &[u8]) -> Result<zeroize::Zeroizing<String>> {
-        let der = self.private_key_to_der()?;
-        let pem = pem::Pem::new(
-            SIGSTORE_PRIVATE_KEY_PEM_LABEL,
-            kdf::encrypt(&der, password)?,
-        );
-        let pem = pem::encode(&pem);
-        Ok(zeroize::Zeroizing::new(pem))
+        let encrypted = kdf::encrypt(&self.pkcs8_der, password)?;
+        let pem = pem::Pem::new(SIGSTORE_PRIVATE_KEY_PEM_LABEL, encrypted);
+        Ok(zeroize::Zeroizing::new(pem::encode(&pem)))
     }
 
     /// Return the private key in pkcs8 PEM-encoded format.
     fn private_key_to_pem(&self) -> Result<zeroize::Zeroizing<String>> {
-        self.signing_key
-            .to_pkcs8_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?
-            .to_pem(PRIVATE_KEY_PEM_LABEL, pkcs8::LineEnding::LF)
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))
+        let pem = pem::Pem::new(PRIVATE_KEY_PEM_LABEL, self.pkcs8_der.as_slice().to_vec());
+        Ok(zeroize::Zeroizing::new(pem::encode(&pem)))
     }
 
     /// Return the private key in asn.1 pkcs8 format.
     fn private_key_to_der(&self) -> Result<zeroize::Zeroizing<Vec<u8>>> {
-        let pkcs8 = self
-            .signing_key
-            .to_pkcs8_der()
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
-        Ok(pkcs8.to_bytes())
+        Ok(self.pkcs8_der.clone())
     }
 
     /// Derive the relative [`CosignVerificationKey`].
     fn to_verification_key(
         &self,
-        _signature_digest_algorithm: &SigningScheme,
+        _signing_scheme: &SigningScheme,
     ) -> Result<CosignVerificationKey> {
-        let der = self.public_key_to_der()?;
-        let res = CosignVerificationKey::from_der(&der, &SigningScheme::ED25519)?;
-        Ok(res)
+        CosignVerificationKey::from_der(&self.spki_der, &SigningScheme::ED25519)
     }
 }
 
+/// An Ed25519 signer.
 #[derive(Debug)]
 pub struct Ed25519Signer {
     key_pair: Ed25519Keys,
 }
 
 impl Ed25519Signer {
+    /// Create a new `Ed25519Signer` from the given `Ed25519Keys`.
     pub fn from_ed25519_keys(ed25519_keys: &Ed25519Keys) -> Result<Self> {
         Ok(Self {
             key_pair: ed25519_keys.clone(),
         })
     }
 
-    /// Return the ref to the keypair inside the signer
+    /// Return the ref to the keypair inside the signer.
     pub fn ed25519_keys(&self) -> &Ed25519Keys {
         &self.key_pair
     }
 }
 
 impl Signer for Ed25519Signer {
-    /// Return the ref to the keypair inside the signer
+    /// Return the ref to the keypair inside the signer.
     fn key_pair(&self) -> &dyn KeyPair {
         &self.key_pair
     }
 
-    /// Sign the given message using Ed25519
+    /// Sign the given message using Ed25519.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let signature = self.key_pair.signing_key.try_sign(msg)?;
-        Ok(signature.to_vec())
+        let kp = Ed25519KeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
+            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        Ok(kp.sign(msg).as_ref().to_vec())
     }
 }
 
@@ -307,7 +268,8 @@ mod tests {
         let key = Ed25519Keys::from_pem(&content);
         assert!(
             key.is_ok(),
-            "can not create Ed25519Keys from unencrypted PEM file."
+            "can not create Ed25519Keys from unencrypted PEM file: {:?}",
+            key
         );
     }
 
@@ -321,20 +283,20 @@ mod tests {
         let key = Ed25519Keys::from_encrypted_pem(&content, password);
         assert!(
             key.is_ok(),
-            "can not create Ed25519Keys from encrypted PEM file"
+            "can not create Ed25519Keys from encrypted PEM file: {:?}",
+            key
         );
     }
 
-    /// This test will try to encrypt a ed25519 keypair and
+    /// This test will try to encrypt an ed25519 keypair and
     /// return the pem-encoded contents.
     #[rstest]
     #[case(PASSWORD)]
     #[case::empty_password(EMPTY_PASSWORD)]
     fn ed25519_to_encrypted_pem(#[case] password: &[u8]) {
         let key = Ed25519Keys::new().expect("create Ed25519 keys failed.");
-        let key = key.private_key_to_encrypted_pem(password);
         assert!(
-            key.is_ok(),
+            key.private_key_to_encrypted_pem(password).is_ok(),
             "can not export private key in encrypted PEM format."
         );
     }
@@ -354,20 +316,18 @@ mod tests {
         );
     }
 
-    /// This test will generate a Ed25519Keys, encode the private key
+    /// This test will generate an Ed25519Keys, encode the private key
     /// into pem, and decode a new key from the generated pem-encoded
     /// private key.
     #[test]
     fn ed25519_to_and_from_pem() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
-        let key = key
-            .private_key_to_pem()
-            .expect("export private key to PEM format failed.");
-        let key = Ed25519Keys::from_pem(key.as_bytes());
-        assert!(key.is_ok(), "can not create Ed25519Keys from PEM string.");
+        let pem = key.private_key_to_pem().expect("export to PEM failed.");
+        let key2 = Ed25519Keys::from_pem(pem.as_bytes());
+        assert!(key2.is_ok(), "can not create Ed25519Keys from PEM string.");
     }
 
-    /// This test will generate a Ed25519Keys, encode the private key
+    /// This test will generate an Ed25519Keys, encode the private key
     /// into pem, and decode a new key from the generated pem-encoded
     /// private key.
     #[rstest]
@@ -375,84 +335,74 @@ mod tests {
     #[case::empty_password(EMPTY_PASSWORD)]
     fn ed25519_to_and_from_encrypted_pem(#[case] password: &[u8]) {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
-        let key = key
+        let pem = key
             .private_key_to_encrypted_pem(password)
-            .expect("export private key to PEM format failed.");
-        let key = Ed25519Keys::from_encrypted_pem(key.as_bytes(), password);
-        assert!(key.is_ok(), "can not create Ed25519Keys from PEM string.");
+            .expect("export to encrypted PEM failed.");
+        let key2 = Ed25519Keys::from_encrypted_pem(pem.as_bytes(), password);
+        assert!(key2.is_ok(), "can not create Ed25519Keys from PEM string.");
     }
 
-    /// This test will generate a Ed25519Keys, encode the private key
-    /// it into der, and decode a new key from the generated der-encoded
+    /// This test will generate an Ed25519Keys, encode the private key
+    /// into der, and decode a new key from the generated der-encoded
     /// private key.
     #[test]
     fn ed25519_to_and_from_der() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
-        let key = key
-            .private_key_to_der()
-            .expect("export private key to DER format failed.");
-        let key = Ed25519Keys::from_der(&key);
-        assert!(key.is_ok(), "can not create Ed25519Keys from DER bytes.")
+        let der = key.private_key_to_der().expect("export to DER failed.");
+        let key2 = Ed25519Keys::from_der(&der);
+        assert!(key2.is_ok(), "can not create Ed25519Keys from DER bytes.");
     }
 
     /// This test will generate a ed25519 keypair.
-    /// And then use the verification key interface to instantial
+    /// And then use the verification key interface to instantiate
     /// a VerificationKey object.
     #[test]
     fn ed25519_generate_public_key() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
-        let pubkey = key
+        let pubkey_pem = key
             .public_key_to_pem()
-            .expect("export private key to PEM format failed.");
+            .expect("export public key to PEM format failed.");
         assert!(
-            CosignVerificationKey::from_pem(pubkey.as_bytes(), &SigningScheme::ED25519).is_ok(),
-            "can not convert public key in PEM format into CosignVerificationKey.",
+            CosignVerificationKey::from_pem(pubkey_pem.as_bytes(), &SigningScheme::default())
+                .is_ok(),
+            "can not create CosignVerificationKey from PEM bytes."
         );
-        let pubkey = key
+        let pubkey_der = key
             .public_key_to_der()
-            .expect("export private key to DER format failed.");
+            .expect("export public key to DER format failed.");
         assert!(
-            CosignVerificationKey::from_der(&pubkey, &SigningScheme::ED25519).is_ok(),
-            "can not create CosignVerificationKey from der bytes."
+            CosignVerificationKey::from_der(&pubkey_der, &SigningScheme::default()).is_ok(),
+            "can not create CosignVerificationKey from DER bytes."
         );
     }
 
     /// This test will generate a ed25519 keypair.
     /// And then derive a `CosignVerificationKey` from it.
     #[test]
-    fn ecdsa_derive_verification_key() {
+    fn ed25519_derive_verification_key() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
         assert!(
-            key.to_verification_key(&SigningScheme::ED25519).is_ok(),
-            "can not create CosignVerificationKey from EcdsaKeys via `to_verification_key`.",
+            key.to_verification_key(&SigningScheme::default()).is_ok(),
+            "can not create CosignVerificationKey from Ed25519Keys via `to_verification_key`."
         );
     }
 
     /// This test will do the following things:
-    /// * Generate a ed25519 keypair.
-    /// * Sign the MESSAGE with the private key then generate a signature.
+    /// * Generate an ed25519 keypair.
+    /// * Sign the MESSAGE with the private key,
+    ///   then generate a signature.
     /// * Verify the signature using the public key.
     #[test]
     fn ed25519_sign_and_verify() {
         let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
-        let pubkey = key
-            .public_key_to_pem()
-            .expect("export private key to PEM format failed.");
-        let signer = Ed25519Signer::from_ed25519_keys(&key)
-            .expect("create Ed25519Signer from ed25519 keys failed.");
-
-        let sig = signer
-            .sign(MESSAGE.as_bytes())
-            .expect("signing message failed.");
-        let verification_key =
-            CosignVerificationKey::from_pem(pubkey.as_bytes(), &SigningScheme::ED25519)
-                .expect("convert CosignVerificationKey from public key failed.");
-        let signature = Signature::Raw(&sig);
+        let signer = Ed25519Signer::from_ed25519_keys(&key).expect("create signer failed.");
+        let sig = signer.sign(MESSAGE.as_bytes()).expect("signing failed.");
+        let pubkey_pem = key.public_key_to_pem().expect("export public key failed.");
+        let vk = CosignVerificationKey::from_pem(pubkey_pem.as_bytes(), &SigningScheme::ED25519)
+            .expect("create CosignVerificationKey failed.");
         assert!(
-            verification_key
-                .verify_signature(signature, MESSAGE.as_bytes())
-                .is_ok(),
-            "can not verify the signature.",
+            vk.verify_signature(Signature::Raw(&sig), MESSAGE.as_bytes())
+                .is_ok()
         );
     }
 }

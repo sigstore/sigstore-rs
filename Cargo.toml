@@ -16,7 +16,7 @@ default = ["full", "native-tls"]
 
 bundle = ["sign", "verify"]
 cached-client = ["dep:cached"]
-cert = ["dep:aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+cert = ["rustls-webpki/aws-lc-rs"]
 cosign = [
     "cert",
     "dep:async-trait",
@@ -56,8 +56,12 @@ rekor = [
 rustls-tls = ["oci-client?/rustls-tls", "reqwest?/rustls"]
 sign = [
     "cert",
+    "dep:ecdsa",
     "dep:hex",
+    "dep:p256",
+    "dep:rand",
     "dep:serde_json_canonicalizer",
+    "dep:signature",
     "dep:sigstore_protobuf_specs",
     "fulcio",
     "rekor",
@@ -82,7 +86,6 @@ verify = [
     "fulcio",
     "rekor",
 ]
-wasm = ["chrono/wasmbind", "ring/wasm32_unknown_unknown_js"]
 
 [dependencies]
 async-trait = { version = "0.1", optional = true, default-features = false }
@@ -105,18 +108,7 @@ ecdsa = { version = "0.16", default-features = false, features = [
     "pkcs8",
     "signing",
     "std",
-] }
-ed25519 = { version = "2.2", default-features = false, features = ["alloc"] }
-ed25519-dalek = { version = "2.1", default-features = false, features = [
-    "alloc",
-    "pkcs8",
-    "rand_core",
-] }
-elliptic-curve = { version = "0.13", default-features = false, features = [
-    "arithmetic",
-    "pem",
-    "std",
-] }
+], optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
 hex = { version = "0.4", default-features = false, optional = true, features = [
@@ -130,15 +122,8 @@ p256 = { version = "0.13", default-features = false, features = [
     "ecdsa",
     "pem",
     "std",
-] }
-p384 = { version = "0.13", default-features = false, features = [
-    "arithmetic",
-    "ecdsa",
-    "pem",
-    "std",
-] }
+], optional = true }
 pem = { version = "3.0", default-features = false, features = ["serde", "std"] }
-pkcs1 = { version = "0.7", default-features = false, features = ["std"] }
 pkcs8 = { version = "0.10", default-features = false, features = [
     "encryption",
     "pem",
@@ -146,15 +131,14 @@ pkcs8 = { version = "0.10", default-features = false, features = [
     "std",
 ] }
 pki-types = { package = "rustls-pki-types", version = "1.11", default-features = false }
-rand = { version = "0.8", default-features = false, features = ["std"] }
+rand = { version = "0.8", default-features = false, features = [
+    "std",
+], optional = true }
 regex = { version = "1.10", default-features = false, optional = true }
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "multipart",
 ], optional = true }
-# used only by the wasm feature
-ring = { version = "0", default-features = false, optional = true }
-rsa = { version = "0.9", default-features = false, features = ["std"] }
 rustls-webpki = { version = "0.103", default-features = false, features = [
     "std",
 ] }
@@ -171,7 +155,7 @@ serde_with = { version = "3.9", default-features = false, features = [
     "json",
 ], optional = true }
 sha2 = { version = "0.10", default-features = false, features = ["oid"] }
-signature = { version = "2.2", default-features = false }
+signature = { version = "2.2", default-features = false, optional = true }
 sigstore_protobuf_specs = { version = "0.5", default-features = false, optional = true }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 tls_codec = { version = "0.4", default-features = false, features = ["derive"] }
@@ -224,10 +208,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_arch = "powerpc64"))'.dependencies]
-aws-lc-rs = { version = "1", optional = true }
+aws-lc-rs = { version = "1" }
 
 [target.'cfg(target_arch = "powerpc64")'.dependencies]
-aws-lc-rs = { version = "1", optional = true, features = ["bindgen"] }
+aws-lc-rs = { version = "1", features = ["bindgen"] }
 
 # cosign example mappings
 
