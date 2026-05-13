@@ -21,7 +21,7 @@ pub(crate) mod test {
     use oci_client::{
         Reference,
         client::{ImageData, PushResponse},
-        manifest::OciManifest,
+        manifest::{OciImageIndex, OciManifest},
         secrets::RegistryAuth,
     };
 
@@ -31,6 +31,7 @@ pub(crate) mod test {
         pub pull_response: Option<anyhow::Result<ImageData>>,
         pub pull_manifest_response: Option<anyhow::Result<(OciManifest, String)>>,
         pub push_response: Option<anyhow::Result<PushResponse>>,
+        pub pull_referrers_response: Option<anyhow::Result<OciImageIndex>>,
     }
 
     impl crate::registry::ClientCapabilitiesDeps for MockOciClient {}
@@ -126,6 +127,28 @@ pub(crate) mod test {
                 }),
                 Err(e) => Err(SigstoreError::RegistryPushError {
                     image: image_ref.whole(),
+                    error: e.to_string(),
+                }),
+            }
+        }
+
+        async fn pull_referrers(
+            &mut self,
+            image: &oci_client::Reference,
+            _auth: &oci_client::secrets::RegistryAuth,
+            _artifact_type: Option<&str>,
+        ) -> Result<OciImageIndex> {
+            let mock_response = self.pull_referrers_response.as_ref().ok_or_else(|| {
+                SigstoreError::RegistryPullManifestError {
+                    image: image.whole(),
+                    error: String::from("No pull_referrers_response provided!"),
+                }
+            })?;
+
+            match mock_response {
+                Ok(r) => Ok(r.clone()),
+                Err(e) => Err(SigstoreError::RegistryPullManifestError {
+                    image: image.whole(),
                     error: e.to_string(),
                 }),
             }

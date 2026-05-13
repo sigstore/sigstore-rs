@@ -18,9 +18,11 @@ use std::ops::Add;
 
 use async_trait::async_trait;
 use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
-use tracing::warn;
+use tracing::{debug, warn};
 
-use super::constants::{SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION};
+use super::constants::{
+    SIGSTORE_BUNDLE_V03_MEDIA_TYPE, SIGSTORE_OCI_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION,
+};
 use super::{CosignCapabilities, SignatureLayer};
 use crate::cosign::signature_layers::build_signature_layers;
 use crate::crypto::CosignVerificationKey;
@@ -29,7 +31,6 @@ use crate::{
     crypto::certificate_pool::CertificatePool,
     errors::{Result, SigstoreError},
 };
-use tracing::debug;
 
 /// Used to generate an empty [OCI Configuration](https://github.com/opencontainers/image-spec/blob/v1.0.0/config.md).
 pub const CONFIG_DATA: &str = "{}";
@@ -67,30 +68,47 @@ impl CosignCapabilities for Client {
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
-        source_image_digest: &str,
-        cosign_image: &OciReference,
+        source_image: &OciReference,
     ) -> Result<Vec<SignatureLayer>> {
-        let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
-        let image_manifest = match manifest {
-            oci_client::manifest::OciManifest::Image(im) => im,
-            oci_client::manifest::OciManifest::ImageIndex(_) => {
-                return Err(SigstoreError::RegistryPullManifestError {
-                    image: cosign_image.to_string(),
-                    error: "Found a OciImageIndex instead of a OciImageManifest".to_string(),
-                });
+        let (cosign_image, source_image_digest) = self.triangulate(source_image, auth).await?;
+
+        let mut all_layers: Vec<SignatureLayer> = Vec::new();
+
+        // --- SimpleSigning path: .sig tag ------------------------------------
+        match self
+            .fetch_signature_layers_from_tag(auth, &source_image_digest, &cosign_image)
+            .await
+        {
+            Ok(mut layers) => {
+                debug!(
+                    count = layers.len(),
+                    "fetched SimpleSigning (.sig tag) signature layers"
+                );
+                all_layers.append(&mut layers);
             }
-        };
+            Err(e) => {
+                warn!(error = ?e, "Could not fetch SimpleSigning (.sig tag) signature layers");
+            }
+        }
 
-        let sl = build_signature_layers(
-            &image_manifest,
-            source_image_digest,
-            &layers,
-            self.rekor_pub_keys.as_ref(),
-            self.fulcio_cert_pool.as_ref(),
-        )?;
+        // --- Sigstore Bundle path: OCI referrers -----------------------------
+        match self
+            .fetch_signature_layers_from_referrers(auth, source_image, &source_image_digest)
+            .await
+        {
+            Ok(mut layers) => {
+                debug!(
+                    count = layers.len(),
+                    "fetched Sigstore Bundle (OCI referrers) signature layers"
+                );
+                all_layers.append(&mut layers);
+            }
+            Err(e) => {
+                warn!(error = ?e, "Could not fetch Sigstore Bundle (OCI referrers) signature layers");
+            }
+        }
 
-        debug!(signature_layers=?sl, ?cosign_image, "trusted signature layers");
-        Ok(sl)
+        Ok(all_layers)
     }
 
     async fn push_signature(
@@ -165,6 +183,112 @@ impl Client {
 
         Ok((manifest, image_data.layers))
     }
+
+    /// Fetch SimpleSigning signature layers via the cosign `.sig` tag.
+    async fn fetch_signature_layers_from_tag(
+        &mut self,
+        auth: &Auth,
+        source_image_digest: &str,
+        cosign_image: &OciReference,
+    ) -> Result<Vec<SignatureLayer>> {
+        let (manifest, layers) = self.fetch_manifest_and_layers(auth, cosign_image).await?;
+        let image_manifest = match manifest {
+            oci_client::manifest::OciManifest::Image(im) => im,
+            oci_client::manifest::OciManifest::ImageIndex(_) => {
+                return Err(SigstoreError::RegistryPullManifestError {
+                    image: cosign_image.to_string(),
+                    error: "Found a OciImageIndex instead of a OciImageManifest".to_string(),
+                });
+            }
+        };
+
+        let sl = build_signature_layers(
+            &image_manifest,
+            source_image_digest,
+            &layers,
+            self.rekor_pub_keys.as_ref(),
+            self.fulcio_cert_pool.as_ref(),
+        )?;
+
+        debug!(signature_layers=?sl, ?cosign_image, "SimpleSigning (.sig tag) signature layers");
+        Ok(sl)
+    }
+
+    /// Fetch Sigstore Bundle signature layers via the OCI referrers API.
+    async fn fetch_signature_layers_from_referrers(
+        &mut self,
+        auth: &Auth,
+        source_image: &OciReference,
+        source_image_digest: &str,
+    ) -> Result<Vec<SignatureLayer>> {
+        let oci_auth: oci_client::secrets::RegistryAuth = auth.into();
+
+        // Build a reference using the digest so we can query referrers.
+        let digest_ref = OciReference::with_digest(
+            source_image.registry().to_string(),
+            source_image.repository().to_string(),
+            source_image_digest.to_string(),
+        );
+
+        let referrers = self
+            .registry_client
+            .pull_referrers(
+                &digest_ref.oci_reference,
+                &oci_auth,
+                Some(SIGSTORE_BUNDLE_V03_MEDIA_TYPE),
+            )
+            .await?;
+
+        let mut layers: Vec<SignatureLayer> = Vec::new();
+
+        for entry in &referrers.manifests {
+            // Build a reference for the referrer manifest using its digest.
+            let referrer_ref = OciReference::with_digest(
+                source_image.registry().to_string(),
+                source_image.repository().to_string(),
+                entry.digest.clone(),
+            );
+
+            // Pull the bundle layer data.
+            let image_data = match self
+                .registry_client
+                .pull(
+                    &referrer_ref.oci_reference,
+                    &oci_auth,
+                    vec![SIGSTORE_BUNDLE_V03_MEDIA_TYPE],
+                )
+                .await
+            {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!(referrer = ?entry.digest, error = ?e, "Failed to pull Sigstore Bundle referrer layer");
+                    continue;
+                }
+            };
+
+            for layer in &image_data.layers {
+                if layer.media_type != SIGSTORE_BUNDLE_V03_MEDIA_TYPE {
+                    continue;
+                }
+                let layer_digest = layer.sha256_digest();
+                match SignatureLayer::from_sigstore_bundle(
+                    &layer.data,
+                    &layer_digest,
+                    source_image_digest,
+                    source_image,
+                    self.fulcio_cert_pool.as_ref(),
+                    self.rekor_pub_keys.as_ref(),
+                ) {
+                    Ok(sl) => layers.push(sl),
+                    Err(e) => {
+                        warn!(error = ?e, "Skipping Sigstore Bundle layer due to error");
+                    }
+                }
+            }
+        }
+
+        Ok(layers)
+    }
 }
 
 #[cfg(feature = "mock-client")]
@@ -199,6 +323,7 @@ mod tests {
             pull_response: None,
             pull_manifest_response: None,
             push_response: None,
+            pull_referrers_response: None,
         };
         let mut cosign_client = build_test_client(mock_client);
 

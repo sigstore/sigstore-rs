@@ -51,6 +51,7 @@ use x509_cert::Certificate;
 
 pub mod bundle;
 pub(crate) mod constants;
+mod intoto;
 pub mod signature_layers;
 pub use signature_layers::SignatureLayer;
 
@@ -83,9 +84,16 @@ pub trait CosignCapabilities {
     ) -> Result<(OciReference, String)>;
 
     /// Returns the list of [`SignatureLayer`]
-    /// objects that are associated with the given signature object.
+    /// objects associated with the given image, checking both the cosign
+    /// SimpleSigning (`.sig` tag) format and the Sigstore Bundle (OCI referrers)
+    /// format transparently.
     ///
-    /// Each layer is verified, to ensure it contains legitimate data.
+    /// Triangulation is performed internally: the caller only needs to supply
+    /// the original image reference.  Both signature sources are attempted;
+    /// individual failures are logged as warnings.  Returns an empty vector
+    /// when no layers are found from either source.
+    ///
+    /// Each layer is verified to ensure it contains legitimate data.
     ///
     /// ## Layers with embedded certificate
     ///
@@ -101,7 +109,7 @@ pub trait CosignCapabilities {
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
     ///   have been created with Rekor integration enabled (see [`crate::trust::sigstore::ManualTrustRoot`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see [`crate::trust::sigstore::ManualTrustRoot])
+    ///   have been created with Fulcio integration enabled (see [`crate::trust::sigstore::ManualTrustRoot`])
     /// * The layer must include a bundle produced by Rekor
     ///
     /// > Note well: the [`trust::sigstore`](crate::trust::sigstore) module provides helper structs and methods
@@ -118,8 +126,7 @@ pub trait CosignCapabilities {
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
-        source_image_digest: &str,
-        cosign_image: &OciReference,
+        source_image: &OciReference,
     ) -> Result<Vec<SignatureLayer>>;
 
     /// Push [`SignatureLayer`] objects to the registry. This function will do
@@ -627,12 +634,8 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 
         dbg!("start to verify");
 
-        let (cosign_image, manifest_digest) = client
-            .triangulate(&image_ref, &Auth::Anonymous)
-            .await
-            .expect("triangulate failed");
         let signature_layers = client
-            .trusted_signature_layers(&Auth::Anonymous, &manifest_digest, &cosign_image)
+            .trusted_signature_layers(&Auth::Anonymous, &image_ref)
             .await
             .expect("get trusted signature layers failed");
         let pk_verifier =

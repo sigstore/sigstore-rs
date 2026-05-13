@@ -15,6 +15,7 @@ use crate::rekor::models::{LogEntry as RekorLogEntry, log_entry::RekorInclusionP
 pub enum Version {
     Bundle0_1,
     Bundle0_2,
+    Bundle0_3,
 }
 
 impl Display for Version {
@@ -22,6 +23,7 @@ impl Display for Version {
         f.write_str(match &self {
             Version::Bundle0_1 => "application/vnd.dev.sigstore.bundle+json;version=0.1",
             Version::Bundle0_2 => "application/vnd.dev.sigstore.bundle+json;version=0.2",
+            Version::Bundle0_3 => "application/vnd.dev.sigstore.bundle.v0.3+json",
         })
     }
 }
@@ -33,6 +35,7 @@ impl FromStr for Version {
         match s {
             "application/vnd.dev.sigstore.bundle+json;version=0.1" => Ok(Version::Bundle0_1),
             "application/vnd.dev.sigstore.bundle+json;version=0.2" => Ok(Version::Bundle0_2),
+            "application/vnd.dev.sigstore.bundle.v0.3+json" => Ok(Version::Bundle0_3),
             _ => Err(()),
         }
     }

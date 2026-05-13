@@ -317,4 +317,26 @@ impl ClientCapabilities for OciCachingClient {
                 error: e.to_string(),
             })
     }
+
+    async fn pull_referrers(
+        &mut self,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
+        artifact_type: Option<&str>,
+    ) -> Result<oci_client::manifest::OciImageIndex> {
+        self.registry_client
+            .auth(image, auth, oci_client::RegistryOperation::Pull)
+            .await
+            .map_err(|e| SigstoreError::RegistryFetchManifestError {
+                image: image.whole(),
+                error: e.to_string(),
+            })?;
+        self.registry_client
+            .pull_referrers(image, artifact_type)
+            .await
+            .map_err(|e| SigstoreError::RegistryPullManifestError {
+                image: image.whole(),
+                error: e.to_string(),
+            })
+    }
 }

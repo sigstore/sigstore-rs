@@ -69,4 +69,11 @@ pub(crate) trait ClientCapabilities: ClientCapabilitiesDeps {
         auth: &oci_client_dep::secrets::RegistryAuth,
         manifest: Option<oci_client_dep::manifest::OciImageManifest>,
     ) -> Result<oci_client_dep::client::PushResponse>;
+
+    async fn pull_referrers(
+        &mut self,
+        image: &oci_client_dep::Reference,
+        auth: &oci_client_dep::secrets::RegistryAuth,
+        artifact_type: Option<&str>,
+    ) -> Result<oci_client_dep::manifest::OciImageIndex>;
 }
