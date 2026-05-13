@@ -67,6 +67,10 @@ use aws_lc_rs::{
     },
 };
 
+use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
+use pkcs8::PrivateKeyInfo;
+use x509_cert::der::Decode;
+
 use crate::{
     crypto::{
         SigningScheme,
@@ -90,6 +94,28 @@ fn signing_alg(curve: EllipticCurve) -> &'static EcdsaSigningAlgorithm {
     }
 }
 
+/// Detect the [`EllipticCurve`] from a PKCS#8 DER blob by inspecting the
+/// named-curve OID embedded in the `AlgorithmIdentifier` parameters.
+fn curve_from_pkcs8_der(der: &[u8]) -> Result<EllipticCurve> {
+    let pki =
+        PrivateKeyInfo::from_der(der).map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+    let params = pki
+        .algorithm
+        .parameters
+        .ok_or_else(|| SigstoreError::PKCS8Error("missing algorithm parameters".into()))?;
+    let oid = params
+        .decode_as::<const_oid::ObjectIdentifier>()
+        .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+    match oid {
+        SECP_256_R_1 => Ok(EllipticCurve::P256),
+        SECP_384_R_1 => Ok(EllipticCurve::P384),
+        SECP_521_R_1 => Ok(EllipticCurve::P521),
+        other => Err(SigstoreError::PKCS8Error(format!(
+            "unsupported curve OID: {other}"
+        ))),
+    }
+}
+
 /// An ECDSA key pair.  Supports P-256, P-384, and P-521.
 #[derive(Clone)]
 pub struct EcdsaKeys {
@@ -105,6 +131,10 @@ impl std::fmt::Debug for EcdsaKeys {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EcdsaKeys")
             .field("curve", &self.curve)
+            .field(
+                "spki",
+                &pem::encode(&pem::Pem::new("PUBLIC KEY", self.spki_der.clone())),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -133,7 +163,9 @@ impl EcdsaKeys {
     }
 
     /// Build an `EcdsaKeys` from raw PKCS#8 DER bytes.
-    pub fn from_pkcs8_der(curve: EllipticCurve, der: &[u8]) -> Result<Self> {
+    /// The elliptic curve is detected automatically from the key's OID.
+    pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
+        let curve = curve_from_pkcs8_der(der)?;
         let alg = signing_alg(curve);
         let kp = EcdsaKeyPair::from_pkcs8(alg, der)
             .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
@@ -153,19 +185,16 @@ impl EcdsaKeys {
     /// Builds a `EcdsaKeys` from encrypted pkcs8 PEM-encoded private key.
     /// The label should be [`COSIGN_PRIVATE_KEY_PEM_LABEL`] or
     /// [`SIGSTORE_PRIVATE_KEY_PEM_LABEL`].
-    pub fn from_encrypted_pem(
-        curve: EllipticCurve,
-        pem_data: &[u8],
-        password: &[u8],
-    ) -> Result<Self> {
+    /// The elliptic curve is detected automatically from the key's OID.
+    pub fn from_encrypted_pem(pem_data: &[u8], password: &[u8]) -> Result<Self> {
         let key = pem::parse(pem_data)?;
         match key.tag() {
             COSIGN_PRIVATE_KEY_PEM_LABEL | SIGSTORE_PRIVATE_KEY_PEM_LABEL => {
                 let der = kdf::decrypt(key.contents(), password)?;
                 // The KDF payload is a PKCS#8 blob.
-                Self::from_pkcs8_der(curve, &der)
+                Self::from_pkcs8_der(&der)
             }
-            PRIVATE_KEY_PEM_LABEL if password.is_empty() => Self::from_pem(curve, pem_data),
+            PRIVATE_KEY_PEM_LABEL if password.is_empty() => Self::from_pem(pem_data),
             PRIVATE_KEY_PEM_LABEL if !password.is_empty() => {
                 Err(SigstoreError::PrivateKeyDecryptError(
                     "Unencrypted private key but password provided".into(),
@@ -179,10 +208,11 @@ impl EcdsaKeys {
 
     /// Builds a `EcdsaKeys` from a pkcs8 PEM-encoded private key.
     /// The label of PEM should be [`PRIVATE_KEY_PEM_LABEL`].
-    pub fn from_pem(curve: EllipticCurve, pem_data: &[u8]) -> Result<Self> {
+    /// The elliptic curve is detected automatically from the key's OID.
+    pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
         let key = pem::parse(pem_data)?;
         match key.tag() {
-            PRIVATE_KEY_PEM_LABEL => Self::from_pkcs8_der(curve, key.contents()),
+            PRIVATE_KEY_PEM_LABEL => Self::from_pkcs8_der(key.contents()),
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(
                 "Unsupported pem tag {tag}"
             ))),
@@ -190,8 +220,9 @@ impl EcdsaKeys {
     }
 
     /// Builds a `EcdsaKeys` from a pkcs8 asn.1 private key.
-    pub fn from_der(curve: EllipticCurve, der: &[u8]) -> Result<Self> {
-        Self::from_pkcs8_der(curve, der)
+    /// The elliptic curve is detected automatically from the key's OID.
+    pub fn from_der(der: &[u8]) -> Result<Self> {
+        Self::from_pkcs8_der(der)
     }
 
     /// Return a signer backed by this key pair.
@@ -308,8 +339,9 @@ mod tests {
         verification_key::CosignVerificationKey,
     };
 
-    use super::{EcdsaKeys, EcdsaSigner};
+    use super::{EcdsaKeys, EcdsaSigner, curve_from_pkcs8_der};
     use crate::crypto::signing_key::ecdsa::EllipticCurve;
+    use crate::crypto::signing_key::ed25519::Ed25519Keys;
 
     const PASSWORD: &[u8] = b"123";
     const EMPTY_PASSWORD: &[u8] = b"";
@@ -320,7 +352,7 @@ mod tests {
     fn ecdsa_from_unencrypted_pem() {
         let content = fs::read("tests/data/keys/ecdsa_private.key")
             .expect("read tests/data/keys/ecdsa_private.key failed.");
-        let key = EcdsaKeys::from_pem(EllipticCurve::P256, &content);
+        let key = EcdsaKeys::from_pem(&content);
         assert!(
             key.is_ok(),
             "can not create EcdsaKeys from unencrypted PEM file: {:?}",
@@ -339,7 +371,7 @@ mod tests {
     #[case::empty_password_unencrypted("tests/data/keys/ecdsa_private.key", EMPTY_PASSWORD)]
     fn ecdsa_from_encrypted_pem(#[case] keypath: &str, #[case] password: &[u8]) {
         let content = fs::read(keypath).expect("read key failed.");
-        let key = EcdsaKeys::from_encrypted_pem(EllipticCurve::P256, &content, password);
+        let key = EcdsaKeys::from_encrypted_pem(&content, password);
         assert!(
             key.is_ok(),
             "can not create EcdsaKeys from encrypted PEM file: {:?}",
@@ -367,7 +399,7 @@ mod tests {
     #[test]
     fn ecdsa_error_unencrypted_pem_password() {
         let content = fs::read("tests/data/keys/ecdsa_private.key").expect("read key failed.");
-        let key = EcdsaKeys::from_encrypted_pem(EllipticCurve::P256, &content, PASSWORD);
+        let key = EcdsaKeys::from_encrypted_pem(&content, PASSWORD);
         assert!(
             key.is_err_and(|e| e
                 .to_string()
@@ -385,7 +417,7 @@ mod tests {
         let pem = key
             .private_key_to_pem()
             .expect("export private key to PEM format failed.");
-        let key2 = EcdsaKeys::from_pem(EllipticCurve::P256, pem.as_bytes());
+        let key2 = EcdsaKeys::from_pem(pem.as_bytes());
         assert!(key2.is_ok(), "can not create EcdsaKeys from PEM string.");
     }
 
@@ -400,7 +432,7 @@ mod tests {
         let pem = key
             .private_key_to_encrypted_pem(password)
             .expect("export private key to PEM format failed.");
-        let key2 = EcdsaKeys::from_encrypted_pem(EllipticCurve::P256, pem.as_bytes(), password);
+        let key2 = EcdsaKeys::from_encrypted_pem(pem.as_bytes(), password);
         assert!(key2.is_ok(), "can not create EcdsaKeys from PEM string.");
     }
 
@@ -413,7 +445,7 @@ mod tests {
         let der = key
             .private_key_to_der()
             .expect("export private key to DER format failed.");
-        let key2 = EcdsaKeys::from_der(EllipticCurve::P256, &der);
+        let key2 = EcdsaKeys::from_der(&der);
         assert!(key2.is_ok(), "can not create EcdsaKeys from DER bytes.");
     }
 
@@ -477,5 +509,39 @@ mod tests {
                 .is_ok(),
             "can not verify the signature."
         );
+    }
+
+    /// Verify that `curve_from_pkcs8_der` correctly detects the curve for each
+    /// supported elliptic curve.
+    #[rstest]
+    #[case(EllipticCurve::P256)]
+    #[case(EllipticCurve::P384)]
+    #[case(EllipticCurve::P521)]
+    fn curve_from_pkcs8_der_detects_curve(#[case] curve: EllipticCurve) {
+        let key = EcdsaKeys::new(curve).expect("create ecdsa keys failed.");
+        let der = key
+            .private_key_to_der()
+            .expect("export private key to DER failed.");
+        let detected = curve_from_pkcs8_der(&der).expect("curve detection failed.");
+        assert_eq!(detected, curve);
+    }
+
+    /// Verify that `curve_from_pkcs8_der` returns an error on garbage input.
+    #[test]
+    fn curve_from_pkcs8_der_invalid_der() {
+        let result = curve_from_pkcs8_der(b"not valid der");
+        assert!(result.is_err(), "expected error on invalid DER");
+    }
+
+    /// Verify that `curve_from_pkcs8_der` returns an error when the OID is not
+    /// one of the three supported EC curves (e.g. an Ed25519 key).
+    #[test]
+    fn curve_from_pkcs8_der_unsupported_oid() {
+        let key = Ed25519Keys::new().expect("create ed25519 keys failed.");
+        let der = key
+            .private_key_to_der()
+            .expect("export ed25519 key to DER failed.");
+        let result = curve_from_pkcs8_der(&der);
+        assert!(result.is_err(), "expected error for non-EC key");
     }
 }

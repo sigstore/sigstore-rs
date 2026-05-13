@@ -110,17 +110,6 @@ impl std::fmt::Display for ECDSAKeys {
     }
 }
 
-/// Try to parse a key for each curve in order; return the first that succeeds.
-macro_rules! try_curves {
-    ($func:ident($($args:expr),*)) => {
-        EcdsaKeys::$func(EllipticCurve::P256, $($args,)*)
-            .map(ECDSAKeys::P256)
-            .or_else(|_| EcdsaKeys::$func(EllipticCurve::P384, $($args,)*).map(ECDSAKeys::P384))
-            .or_else(|_| EcdsaKeys::$func(EllipticCurve::P521, $($args,)*).map(ECDSAKeys::P521))
-            .map_err(|_| SigstoreError::KeyParseError("ECDSA key parse failed for all curves".into()))
-    };
-}
-
 impl ECDSAKeys {
     /// Create a new key pair for the given curve.
     pub fn new(curve: EllipticCurve) -> Result<Self> {
@@ -144,16 +133,22 @@ impl ECDSAKeys {
         }
     }
 
+    /// Build an [`ECDSAKeys`] from encrypted pkcs8 PEM-encoded private key.
+    /// The elliptic curve is detected automatically from the key's OID.
     pub fn from_encrypted_pem(private_key: &[u8], password: &[u8]) -> Result<Self> {
-        try_curves!(from_encrypted_pem(private_key, password))
+        EcdsaKeys::from_encrypted_pem(private_key, password).and_then(|k| k.to_wrapped_ecdsa_keys())
     }
 
+    /// Build an [`ECDSAKeys`] from a pkcs8 PEM-encoded private key.
+    /// The elliptic curve is detected automatically from the key's OID.
     pub fn from_pem(pem_data: &[u8]) -> Result<Self> {
-        try_curves!(from_pem(pem_data))
+        EcdsaKeys::from_pem(pem_data).and_then(|k| k.to_wrapped_ecdsa_keys())
     }
 
+    /// Build an [`ECDSAKeys`] from pkcs8 DER bytes.
+    /// The elliptic curve is detected automatically from the key's OID.
     pub fn from_der(private_key: &[u8]) -> Result<Self> {
-        try_curves!(from_der(private_key))
+        EcdsaKeys::from_der(private_key).and_then(|k| k.to_wrapped_ecdsa_keys())
     }
 
     /// Build a [`SigStoreSigner`] from this key pair using the default scheme
