@@ -146,13 +146,13 @@ impl EcdsaKeys {
         let rng = SystemRandom::new();
         let alg = signing_alg(curve);
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(alg, &rng)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         let kp = EcdsaKeyPair::from_pkcs8(alg, pkcs8.as_ref())
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         let spki_der = kp
             .public_key()
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?
             .as_ref()
             .to_vec();
         Ok(Self {
@@ -317,7 +317,7 @@ impl Signer for EcdsaSigner {
         let sig = self
             .inner
             .sign(&self.rng, msg)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         Ok(sig.as_ref().to_vec())
     }
 

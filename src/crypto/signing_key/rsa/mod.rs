@@ -150,7 +150,7 @@ impl Signer for RSASigner {
 
         let mut sig = vec![0u8; kp.public_modulus_len()];
         kp.sign(alg, &rng, msg, &mut sig)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         Ok(sig)
     }
 

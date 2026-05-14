@@ -254,6 +254,12 @@ pub enum SigstoreError {
     #[error("Pkcs8 error : {0}")]
     PKCS8Error(String),
 
+    #[error("Key generation error: {0}")]
+    KeyGenerationError(String),
+
+    #[error("Signing error: {0}")]
+    SigningError(String),
+
     #[error("Pkcs8 spki error : {0}")]
     PKCS8SpkiError(String),
 

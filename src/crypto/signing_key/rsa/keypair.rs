@@ -83,15 +83,15 @@ impl RSAKeys {
     /// `bit_size` must be 2048, 3072, or 4096.
     pub fn new(bit_size: usize) -> Result<Self> {
         let key_size = bit_size_to_key_size(bit_size)?;
-        let kp =
-            RsaKeyPair::generate(key_size).map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        let kp = RsaKeyPair::generate(key_size)
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         let pkcs8 = kp
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         let spki = kp
             .public_key()
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         Ok(Self {
             pkcs8_der: zeroize::Zeroizing::new(pkcs8.as_ref().to_vec()),
             spki_der: spki.as_ref().to_vec(),
