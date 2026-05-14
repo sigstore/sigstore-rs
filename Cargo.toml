@@ -77,6 +77,9 @@ sigstore-trust-root = [
     "tokio/sync",
 ]
 test-registry = [] # used for testing against a test registry
+test-remote-registry = [
+    "sigstore-trust-root",
+] # integration tests against remote registries
 verify = [
     "cert",
     "dep:hex",

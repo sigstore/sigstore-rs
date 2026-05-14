@@ -214,6 +214,87 @@ impl Client {
         Ok(sl)
     }
 
+    /// Fetch the OCI referrers index for `source_image_digest`, trying the native
+    /// referrers API first and falling back to the OCI referrers tag schema.
+    ///
+    /// The [OCI Distribution Spec][oci-fallback] defines a fallback for registries
+    /// that do not support the native `/v2/…/referrers/<digest>` endpoint: the
+    /// referrer index is stored as a regular tag derived from the subject digest
+    /// by replacing the colon separator with a hyphen
+    /// (e.g. `sha256:abcd…` → tag `sha256-abcd…`).
+    ///
+    /// ghcr.io is a prominent example of a registry that returns 404 for the
+    /// native endpoint while fully supporting the tag-schema fallback — meaning
+    /// images signed with `cosign` (which also implements this fallback) are only
+    /// discoverable via the tag.
+    ///
+    /// This method is intentionally kept as a **separate, self-contained helper**
+    /// so that it can be dropped and callers updated to use `pull_referrers`
+    /// directly once `oci-client` implements the fallback itself.
+    ///
+    /// [oci-fallback]: https://github.com/opencontainers/distribution-spec/blob/main/spec.md#pushing-manifests-with-subject
+    async fn fetch_referrers_with_tag_fallback(
+        &mut self,
+        auth: &Auth,
+        source_image: &OciReference,
+        source_image_digest: &str,
+        artifact_type: Option<&str>,
+    ) -> Result<oci_client::manifest::OciImageIndex> {
+        let oci_auth: oci_client::secrets::RegistryAuth = auth.into();
+
+        let digest_ref = OciReference::with_digest(
+            source_image.registry().to_string(),
+            source_image.repository().to_string(),
+            source_image_digest.to_string(),
+        );
+
+        // --- Attempt 1: native referrers API ---
+        match self
+            .registry_client
+            .pull_referrers(&digest_ref.oci_reference, &oci_auth, artifact_type)
+            .await
+        {
+            Ok(index) => return Ok(index),
+            Err(e) => {
+                debug!(
+                    error = ?e,
+                    "Native referrers API unavailable; falling back to OCI referrers tag schema"
+                );
+            }
+        }
+
+        // --- Attempt 2: referrers tag schema fallback ---
+        //
+        // The tag is the digest with ':' replaced by '-',
+        // e.g. "sha256:abc123" → "sha256-abc123".
+        let fallback_tag = source_image_digest.replace(':', "-");
+        let fallback_ref = OciReference::with_tag(
+            source_image.registry().to_string(),
+            source_image.repository().to_string(),
+            fallback_tag,
+        );
+
+        let (manifest, _) = self
+            .registry_client
+            .pull_manifest(&fallback_ref.oci_reference, &oci_auth)
+            .await
+            .map_err(|e| SigstoreError::RegistryPullManifestError {
+                image: fallback_ref.to_string(),
+                error: format!("referrers tag schema fallback failed: {e}"),
+            })?;
+
+        match manifest {
+            oci_client::manifest::OciManifest::ImageIndex(index) => Ok(index),
+            oci_client::manifest::OciManifest::Image(_) => {
+                Err(SigstoreError::RegistryPullManifestError {
+                    image: fallback_ref.to_string(),
+                    error: "referrers tag schema: expected OCI Image Index, got Image manifest"
+                        .to_string(),
+                })
+            }
+        }
+    }
+
     /// Fetch Sigstore Bundle signature layers via the OCI referrers API.
     async fn fetch_signature_layers_from_referrers(
         &mut self,
@@ -223,18 +304,11 @@ impl Client {
     ) -> Result<Vec<SignatureLayer>> {
         let oci_auth: oci_client::secrets::RegistryAuth = auth.into();
 
-        // Build a reference using the digest so we can query referrers.
-        let digest_ref = OciReference::with_digest(
-            source_image.registry().to_string(),
-            source_image.repository().to_string(),
-            source_image_digest.to_string(),
-        );
-
         let referrers = self
-            .registry_client
-            .pull_referrers(
-                &digest_ref.oci_reference,
-                &oci_auth,
+            .fetch_referrers_with_tag_fallback(
+                auth,
+                source_image,
+                source_image_digest,
                 Some(SIGSTORE_BUNDLE_V03_MEDIA_TYPE),
             )
             .await?;
