@@ -148,12 +148,12 @@ mod tests {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let ca_cert = registry::Certificate {
             encoding: registry::CertificateEncoding::Pem,
-            data: ca_data.cert.to_pem()?,
+            data: ca_data.cert_pem.clone(),
         };
         let cert_chain = vec![ca_cert];
 
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
 
         let verifier = CertificateVerifier::from_pem(&issued_cert_pem, false, Some(&cert_chain));
         assert!(verifier.is_ok());
@@ -162,7 +162,7 @@ mod tests {
         let another_ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let another_ca_cert = registry::Certificate {
             encoding: registry::CertificateEncoding::Pem,
-            data: another_ca_data.cert.to_pem()?,
+            data: another_ca_data.cert_pem.clone(),
         };
         let cert_chain = vec![another_ca_cert];
         let verifier = CertificateVerifier::from_pem(&issued_cert_pem, false, Some(&cert_chain));

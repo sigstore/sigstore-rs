@@ -327,7 +327,7 @@ mod tests {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
         assert!(verify_key_usages(&cert).is_ok());
@@ -346,7 +346,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -371,7 +371,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -394,7 +394,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -413,7 +413,7 @@ mod tests {
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
 
         let issued_cert = generate_certificate(Some(&ca_data), CertGenerationOptions::default())?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -438,7 +438,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -467,7 +467,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 
@@ -496,7 +496,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let issued_cert_pem = issued_cert.cert.to_pem().unwrap();
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = x509_cert::Certificate::from_der(pem.contents())?;
 

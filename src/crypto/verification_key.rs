@@ -368,16 +368,15 @@ DwIDAQAB
 
     #[test]
     fn convert_ecdsa_p256_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
-        let (private_key, public_key) = generate_ecdsa_p256_keypair();
+        let key_pair = generate_ecdsa_p256_key_pair();
         let issued_cert_generation_options = CertGenerationOptions {
-            private_key,
-            public_key,
+            key_pair,
             ..Default::default()
         };
 
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
@@ -394,16 +393,15 @@ DwIDAQAB
 
     #[test]
     fn convert_ecdsa_p384_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
-        let (private_key, public_key) = generate_ecdsa_p384_keypair();
+        let key_pair = generate_ecdsa_p384_key_pair();
         let issued_cert_generation_options = CertGenerationOptions {
-            private_key,
-            public_key,
+            key_pair,
             ..Default::default()
         };
 
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
@@ -420,16 +418,15 @@ DwIDAQAB
 
     #[test]
     fn convert_rsa_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
-        let (private_key, public_key) = generate_rsa_keypair(2048);
+        let key_pair = generate_rsa_key_pair();
         let issued_cert_generation_options = CertGenerationOptions {
-            private_key,
-            public_key,
+            key_pair,
             ..Default::default()
         };
 
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
@@ -446,16 +443,15 @@ DwIDAQAB
 
     #[test]
     fn convert_ed25519_subject_public_key_to_cosign_verification_key() -> anyhow::Result<()> {
-        let (private_key, public_key) = generate_ed25519_keypair();
+        let key_pair = generate_ed25519_key_pair();
         let issued_cert_generation_options = CertGenerationOptions {
-            private_key,
-            public_key,
+            key_pair,
             ..Default::default()
         };
 
         let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
         let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
         let spki = cert.tbs_certificate.subject_public_key_info;
@@ -473,19 +469,26 @@ DwIDAQAB
     #[test]
     fn convert_unsupported_curve_subject_public_key_to_cosign_verification_key()
     -> anyhow::Result<()> {
-        let (private_key, public_key) = generate_dsa_keypair(2048);
-        let issued_cert_generation_options = CertGenerationOptions {
-            private_key,
-            public_key,
-            ..Default::default()
-        };
+        // Construct a SubjectPublicKeyInfoOwned with an algorithm OID that is not
+        // supported by CosignVerificationKey (id-Ed448, OID 1.3.101.113). This does
+        // not require generating a real key — we only need the OID to hit the
+        // unsupported-algorithm error path.
+        use const_oid::ObjectIdentifier;
+        use x509_cert::der::asn1::BitString;
+        use x509_cert::spki::AlgorithmIdentifierOwned;
 
-        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
-        let issued_cert = generate_certificate(Some(&ca_data), issued_cert_generation_options)?;
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
-        let pem = pem::parse(issued_cert_pem)?;
-        let cert = Certificate::from_der(pem.contents())?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        // id-Ed448: a real algorithm OID, not in the Sigstore registry
+        let id_ed448: ObjectIdentifier = const_oid::db::rfc8410::ID_ED_448;
+        // <review>
+        // don't pull the magic number, use the constant defineid inside of the const_oid crate
+        // </review>
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: id_ed448,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(&[0u8; 57]).unwrap(),
+        };
 
         let err = CosignVerificationKey::try_from(&spki);
         assert!(matches!(

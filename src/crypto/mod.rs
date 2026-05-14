@@ -152,18 +152,12 @@ pub(crate) mod transparency;
 #[cfg(test)]
 pub(crate) mod tests {
     use chrono::{DateTime, TimeDelta, Utc};
-    use openssl::asn1::{Asn1Integer, Asn1Time};
-    use openssl::bn::{BigNum, MsbOption};
-    use openssl::conf::{Conf, ConfMethod};
-    use openssl::ec::{EcGroup, EcKey};
-    use openssl::hash::MessageDigest;
-    use openssl::nid::Nid;
-    use openssl::pkey::{self, Id, PKey};
-    use openssl::x509::extension::{
-        AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
-        SubjectAlternativeName, SubjectKeyIdentifier,
+    use rcgen::{
+        BasicConstraints, CertificateParams, CustomExtension, DnType, ExtendedKeyUsagePurpose,
+        IsCa, KeyPair, KeyUsagePurpose, PKCS_ECDSA_P256_SHA256, PKCS_ECDSA_P384_SHA384,
+        PKCS_ED25519, PKCS_RSA_SHA256, SanType,
     };
-    use openssl::x509::{X509, X509Extension, X509NameBuilder};
+    use time::OffsetDateTime;
 
     pub(crate) const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
@@ -171,8 +165,11 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
 -----END PUBLIC KEY-----"#;
 
     pub(crate) struct CertData {
-        pub cert: X509,
-        pub private_key: pkey::PKey<pkey::Private>,
+        /// PEM-encoded certificate bytes.
+        pub cert_pem: Vec<u8>,
+        pub key_pair: KeyPair,
+        /// Stored CA params so we can reconstruct an `Issuer` when signing child certs.
+        ca_params: Option<CertificateParams>,
     }
 
     pub(crate) struct CertGenerationOptions {
@@ -180,14 +177,10 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         pub code_signing_extended_key_usage: bool,
         pub subject_email: Option<String>,
         pub subject_url: Option<String>,
-        //TODO: remove macro once https://github.com/sfackler/rust-openssl/issues/1411
-        //is fixed
-        #[allow(dead_code)]
         pub subject_issuer: Option<String>,
         pub not_before: DateTime<chrono::Utc>,
         pub not_after: DateTime<chrono::Utc>,
-        pub private_key: pkey::PKey<pkey::Private>,
-        pub public_key: pkey::PKey<pkey::Public>,
+        pub key_pair: KeyPair,
     }
 
     impl Default for CertGenerationOptions {
@@ -203,7 +196,8 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             // NIST P-256 is a Weierstrass curve specified in FIPS 186-4: Digital Signature Standard (DSS):
             // https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf
             // Also known as prime256v1 (ANSI X9.62) and secp256r1 (SECG)
-            let (private_key, public_key) = generate_ecdsa_p256_keypair();
+            let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
+                .expect("Cannot generate ECDSA P-256 key pair");
 
             CertGenerationOptions {
                 digital_signature_key_usage: true,
@@ -213,164 +207,66 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 subject_url: None,
                 not_before,
                 not_after,
-                private_key,
-                public_key,
+                key_pair,
             }
         }
     }
 
-    pub(crate) fn generate_ecdsa_p256_keypair()
-    -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("Cannot create EcGroup");
-        let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
-        let ec_public_key = ec_private_key.public_key();
-        let ec_pub_key =
-            EcKey::from_public_key(&group, ec_public_key).expect("Cannot create ec pub key");
-
-        let public_key = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
-        let private_key = pkey::PKey::from_ec_key(ec_private_key).expect("Cannot create pkey");
-
-        (private_key, public_key)
+    pub(crate) fn generate_ecdsa_p256_key_pair() -> KeyPair {
+        KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
+            .expect("Cannot generate ECDSA P-256 key pair")
     }
 
-    pub(crate) fn generate_ecdsa_p384_keypair()
-    -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
-        let group = EcGroup::from_curve_name(Nid::SECP384R1).expect("Cannot create EcGroup");
-        let ec_private_key = EcKey::generate(&group).expect("Cannot create private key");
-        let ec_public_key = ec_private_key.public_key();
-        let ec_pub_key =
-            EcKey::from_public_key(&group, ec_public_key).expect("Cannot create ec pub key");
-
-        let public_key = pkey::PKey::from_ec_key(ec_pub_key).expect("Cannot create pkey");
-        let private_key = pkey::PKey::from_ec_key(ec_private_key).expect("Cannot create pkey");
-
-        (private_key, public_key)
+    pub(crate) fn generate_ecdsa_p384_key_pair() -> KeyPair {
+        KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)
+            .expect("Cannot generate ECDSA P-384 key pair")
     }
 
-    pub(crate) fn generate_ed25519_keypair() -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>)
-    {
-        let private_key = PKey::generate_ed25519().expect("Cannot create private key");
-        let public_key = private_key
-            .raw_public_key()
-            .expect("Cannot export public key");
-        let public_key = PKey::public_key_from_raw_bytes(&public_key, Id::ED25519)
-            .expect("Cannot create ec pub key");
-
-        (private_key, public_key)
+    pub(crate) fn generate_ed25519_key_pair() -> KeyPair {
+        KeyPair::generate_for(&PKCS_ED25519).expect("Cannot generate Ed25519 key pair")
     }
 
-    pub(crate) fn generate_rsa_keypair(
-        bits: u32,
-    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
-        use openssl::rsa;
-
-        let rsa_private_key = rsa::Rsa::generate(bits).expect("Cannot generate RSA key");
-        let rsa_public_key_pem = rsa_private_key
-            .public_key_to_pem()
-            .expect("Cannot obtain public key");
-        let rsa_public_key = rsa::Rsa::public_key_from_pem(&rsa_public_key_pem)
-            .expect("Cannot create rsa_public_key");
-
-        let private_key = pkey::PKey::from_rsa(rsa_private_key).expect("cannot create private_key");
-        let public_key = pkey::PKey::from_rsa(rsa_public_key).expect("cannot create public_key");
-
-        (private_key, public_key)
+    pub(crate) fn generate_rsa_key_pair() -> KeyPair {
+        KeyPair::generate_for(&PKCS_RSA_SHA256).expect("Cannot generate RSA key pair")
     }
 
-    pub(crate) fn generate_dsa_keypair(
-        bits: u32,
-    ) -> (pkey::PKey<pkey::Private>, pkey::PKey<pkey::Public>) {
-        use openssl::dsa;
-
-        let dsa_private_key = dsa::Dsa::generate(bits).expect("Cannot generate DSA key");
-        let dsa_public_key_pem = dsa_private_key
-            .public_key_to_pem()
-            .expect("Cannot obtain public key");
-        let dsa_public_key = dsa::Dsa::public_key_from_pem(&dsa_public_key_pem)
-            .expect("Cannot create rsa_public_key");
-
-        let private_key = pkey::PKey::from_dsa(dsa_private_key).expect("cannot create private_key");
-        let public_key = pkey::PKey::from_dsa(dsa_public_key).expect("cannot create public_key");
-
-        (private_key, public_key)
+    fn chrono_to_offset_date_time(dt: DateTime<Utc>) -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(dt.timestamp())
+            .expect("Cannot convert DateTime to OffsetDateTime")
     }
 
     pub(crate) fn generate_certificate(
         issuer: Option<&CertData>,
         settings: CertGenerationOptions,
     ) -> anyhow::Result<CertData> {
-        let mut x509_name_builder = X509NameBuilder::new()?;
-        x509_name_builder.append_entry_by_text("O", "tests")?;
-        x509_name_builder.append_entry_by_text("CN", "sigstore.test")?;
-        let x509_name = x509_name_builder.build();
+        let mut params = CertificateParams::new(vec![])?;
 
-        let mut x509_builder = openssl::x509::X509::builder()?;
-        x509_builder.set_subject_name(&x509_name)?;
-        x509_builder
-            .set_pubkey(&settings.public_key)
-            .expect("Cannot set public key");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "tests");
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "sigstore.test");
 
-        // set serial number
-        let mut big = BigNum::new().expect("Cannot create BigNum");
-        big.rand(152, MsbOption::MAYBE_ZERO, true)?;
-        let serial_number = Asn1Integer::from_bn(&big)?;
-        x509_builder.set_serial_number(&serial_number)?;
+        params.not_before = chrono_to_offset_date_time(settings.not_before);
+        params.not_after = chrono_to_offset_date_time(settings.not_after);
 
-        // set version 3
-        x509_builder.set_version(2)?;
-
-        // x509 v3 extensions
-        let conf = Conf::new(ConfMethod::default())?;
-        let x509v3_context = match issuer {
-            Some(issuer_data) => x509_builder.x509v3_context(Some(&issuer_data.cert), Some(&conf)),
-            None => x509_builder.x509v3_context(None, Some(&conf)),
-        };
-
-        let mut extensions: Vec<X509Extension> = Vec::new();
-
-        let x509_extension_subject_key_identifier =
-            SubjectKeyIdentifier::new().build(&x509v3_context)?;
-        extensions.push(x509_extension_subject_key_identifier);
-
-        // CA usage
         if issuer.is_none() {
-            // CA usage
-            let x509_basic_constraint_ca =
-                BasicConstraints::new().critical().ca().pathlen(1).build()?;
-            extensions.push(x509_basic_constraint_ca);
+            // CA certificate
+            params.is_ca = IsCa::Ca(BasicConstraints::Constrained(1));
+            params.key_usages = vec![KeyUsagePurpose::CrlSign, KeyUsagePurpose::KeyCertSign];
         } else {
-            let x509_basic_constraint_ca = BasicConstraints::new().critical().build()?;
-            extensions.push(x509_basic_constraint_ca);
-        }
+            // end-entity certificate
+            params.is_ca = IsCa::NoCa;
 
-        // set key usage
-        if issuer.is_some() {
             if settings.digital_signature_key_usage {
-                let key_usage = KeyUsage::new().critical().digital_signature().build()?;
-                extensions.push(key_usage);
+                params.key_usages.push(KeyUsagePurpose::DigitalSignature);
             }
-
             if settings.code_signing_extended_key_usage {
-                let extended_key_usage = ExtendedKeyUsage::new().code_signing().build()?;
-                extensions.push(extended_key_usage);
+                params
+                    .extended_key_usages
+                    .push(ExtendedKeyUsagePurpose::CodeSigning);
             }
-        } else {
-            let key_usage = KeyUsage::new()
-                .critical()
-                .crl_sign()
-                .key_cert_sign()
-                .build()?;
-            extensions.push(key_usage);
-        }
-
-        // extensions that diverge, based on whether we're creating the CA or
-        // a certificate issued by it
-        if issuer.is_none() {
-        } else {
-            let x509_extension_authority_key_identifier = AuthorityKeyIdentifier::new()
-                .keyid(true)
-                .build(&x509v3_context)?;
-            extensions.push(x509_extension_authority_key_identifier);
 
             if settings.subject_email.is_some() && settings.subject_url.is_some() {
                 panic!(
@@ -378,75 +274,53 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
                 );
             }
             if let Some(email) = settings.subject_email {
-                let x509_extension_san = SubjectAlternativeName::new()
-                    .critical()
-                    .email(&email)
-                    .build(&x509v3_context)?;
-
-                extensions.push(x509_extension_san);
-            };
-            if let Some(url) = settings.subject_url {
-                let x509_extension_san = SubjectAlternativeName::new()
-                    .critical()
-                    .uri(&url)
-                    .build(&x509v3_context)?;
-
-                extensions.push(x509_extension_san);
+                params.subject_alt_names.push(SanType::Rfc822Name(
+                    email.try_into().expect("invalid email SAN"),
+                ));
             }
-            //
-            // TODO: uncomment once https://github.com/sfackler/rust-openssl/issues/1411
-            // is fixed. This would allow to test also the parsing of the custom fields
-            // added to certificate extensions
-            //if let Some(subject_issuer) = settings.subject_issuer {
-            //    let sigstore_issuer_asn1_obj = Asn1Object::from_str("1.3.6.1.4.1.57264.1.1")?; //&SIGSTORE_ISSUER_OID.to_string())?;
+            if let Some(url) = settings.subject_url {
+                params
+                    .subject_alt_names
+                    .push(SanType::URI(url.try_into().expect("invalid URI SAN")));
+            }
 
-            //    let value = format!("ASN1:UTF8String:{}", subject_issuer);
-
-            //    let sigstore_subject_issuer_extension = X509Extension::new_nid(
-            //        None,
-            //        Some(&x509v3_context),
-            //        sigstore_issuer_asn1_obj.nid(),
-            //        //&subject_issuer,
-            //        &value,
-            //    )?;
-
-            //    extensions.push(sigstore_subject_issuer_extension);
-            //}
+            // Sigstore issuer OID: 1.3.6.1.4.1.57264.1.1
+            if let Some(subject_issuer) = settings.subject_issuer {
+                // The extension value is the raw UTF-8 bytes of the issuer string.
+                // get_cert_extension_by_oid reads extn_value directly as UTF-8,
+                // so we must not add any DER wrapping here.
+                let ext = CustomExtension::from_oid_content(
+                    &[1, 3, 6, 1, 4, 1, 57264, 1, 1],
+                    subject_issuer.into_bytes(),
+                );
+                params.custom_extensions.push(ext);
+            }
         }
 
-        for ext in extensions {
-            x509_builder.append_extension(ext)?;
-        }
-
-        // setup validity
-        let not_before = Asn1Time::from_unix(settings.not_before.timestamp())?;
-        let not_after = Asn1Time::from_unix(settings.not_after.timestamp())?;
-        x509_builder.set_not_after(&not_after)?;
-        x509_builder.set_not_before(&not_before)?;
-
-        // set issuer
-        if let Some(issuer_data) = issuer {
-            let issuer_name = issuer_data.cert.subject_name();
-            x509_builder.set_issuer_name(issuer_name)?;
+        let (cert_pem, ca_params) = if let Some(issuer_data) = issuer {
+            let ca_params = issuer_data
+                .ca_params
+                .as_ref()
+                .expect("issuer CertData must have ca_params");
+            // Reconstruct Issuer from the stored CA params and key pair.
+            // KeyPair doesn't implement Clone, so we re-parse from PEM.
+            let issuer_kp = KeyPair::from_pem(&issuer_data.key_pair.serialize_pem())?;
+            let issuer_obj = rcgen::Issuer::from_params(ca_params, issuer_kp);
+            let cert_pem = params
+                .signed_by(&settings.key_pair, &issuer_obj)?
+                .pem()
+                .into_bytes();
+            (cert_pem, None)
         } else {
-            // self signed cert
-            x509_builder.set_issuer_name(&x509_name)?;
-        }
-
-        // sign the cert
-        let issuer_pkey = match issuer {
-            Some(issuer_data) => issuer_data.private_key.clone(),
-            None => settings.private_key.clone(),
+            let ca_params = params.clone();
+            let cert_pem = params.self_signed(&settings.key_pair)?.pem().into_bytes();
+            (cert_pem, Some(ca_params))
         };
-        x509_builder
-            .sign(&issuer_pkey, MessageDigest::sha256())
-            .expect("Cannot sign certificate");
-
-        let x509 = x509_builder.build();
 
         Ok(CertData {
-            cert: x509,
-            private_key: settings.private_key,
+            cert_pem,
+            key_pair: settings.key_pair,
+            ca_params,
         })
     }
 }

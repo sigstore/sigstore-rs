@@ -544,7 +544,6 @@ impl CertificateSubject {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use openssl::x509::X509;
     use serde_json::json;
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
@@ -873,16 +872,6 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     use crate::crypto::tests::{CertGenerationOptions, generate_certificate};
     use chrono::{TimeDelta, Utc};
 
-    impl TryFrom<X509> for crate::registry::Certificate {
-        type Error = anyhow::Error;
-
-        fn try_from(value: X509) -> std::result::Result<Self, Self::Error> {
-            let data = value.to_pem()?;
-            let encoding = crate::registry::CertificateEncoding::Pem;
-            Ok(Self { data, encoding })
-        }
-    }
-
     #[test]
     fn certificate_signature_from_certificate_using_email() -> anyhow::Result<()> {
         let expected_email = "test@sigstore.dev".to_string();
@@ -896,12 +885,14 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         )?;
 
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
 
         let certs = vec![
-            crate::registry::Certificate::try_from(ca_data.cert)
-                .unwrap()
-                .try_into()?,
+            crate::registry::Certificate {
+                encoding: crate::registry::CertificateEncoding::Pem,
+                data: ca_data.cert_pem.clone(),
+            }
+            .try_into()?,
         ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
@@ -949,12 +940,14 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         )?;
 
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
 
         let certs = vec![
-            crate::registry::Certificate::try_from(ca_data.cert)
-                .unwrap()
-                .try_into()?,
+            crate::registry::Certificate {
+                encoding: crate::registry::CertificateEncoding::Pem,
+                data: ca_data.cert_pem.clone(),
+            }
+            .try_into()?,
         ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
@@ -1001,12 +994,14 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         )?;
 
-        let issued_cert_pem = issued_cert.cert.to_pem()?;
+        let issued_cert_pem = issued_cert.cert_pem.clone();
 
         let certs = vec![
-            crate::registry::Certificate::try_from(ca_data.cert)
-                .unwrap()
-                .try_into()?,
+            crate::registry::Certificate {
+                encoding: crate::registry::CertificateEncoding::Pem,
+                data: ca_data.cert_pem.clone(),
+            }
+            .try_into()?,
         ];
         let cert_pool = CertificatePool::from_certificates(certs, []).unwrap();
 
