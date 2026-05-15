@@ -141,7 +141,7 @@ impl Signer for RSASigner {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
         let rng = SystemRandom::new();
         let kp = RsaKeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
 
         let alg = match (&self.digest, &self.padding) {
             (DigestAlgorithm::Sha256, PaddingScheme::PSS) => &RSA_PSS_SHA256,

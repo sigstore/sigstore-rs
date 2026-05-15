@@ -96,18 +96,18 @@ impl Ed25519Keys {
     pub fn new() -> Result<Self> {
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
         Self::from_pkcs8_der(pkcs8.as_ref())
     }
 
     /// Build from raw PKCS#8 DER bytes.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
         let kp = Ed25519KeyPair::from_pkcs8(der)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
         let spki_der = kp
             .public_key()
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?
             .as_ref()
             .to_vec();
         Ok(Self {
@@ -237,7 +237,7 @@ impl Signer for Ed25519Signer {
     /// Sign the given message using Ed25519.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
         let kp = Ed25519KeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         Ok(kp.sign(msg).as_ref().to_vec())
     }
 }

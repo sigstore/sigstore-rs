@@ -100,12 +100,12 @@ impl RSAKeys {
 
     /// Builds a `RSAKeys` from a pkcs8 asn.1 private key.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
-        let kp =
-            RsaKeyPair::from_pkcs8(der).map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        let kp = RsaKeyPair::from_pkcs8(der)
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
         let spki = kp
             .public_key()
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
         // Validate key size.
         modulus_to_key_size(kp.public_modulus_len())?;
         Ok(Self {
@@ -148,14 +148,14 @@ impl RSAKeys {
             RSA_PRIVATE_KEY_PEM_LABEL => {
                 // Traditional PKCS#1 format — aws-lc-rs can import via from_der.
                 let kp = RsaKeyPair::from_der(key.contents())
-                    .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
                 let pkcs8 = kp
                     .as_der()
-                    .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
                 let spki = kp
                     .public_key()
                     .as_der()
-                    .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?;
+                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
                 modulus_to_key_size(kp.public_modulus_len())?;
                 Ok(Self {
                     pkcs8_der: zeroize::Zeroizing::new(pkcs8.as_ref().to_vec()),

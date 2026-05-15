@@ -251,8 +251,8 @@ pub enum SigstoreError {
     #[error("Failed to get id_token")]
     NoIDToken,
 
-    #[error("Pkcs8 error : {0}")]
-    PKCS8Error(String),
+    #[error("Key parsing error: {0}")]
+    KeyParsingError(String),
 
     #[error("Key generation error: {0}")]
     KeyGenerationError(String),
@@ -260,11 +260,8 @@ pub enum SigstoreError {
     #[error("Signing error: {0}")]
     SigningError(String),
 
-    #[error("Pkcs8 spki error : {0}")]
-    PKCS8SpkiError(String),
-
-    #[error("Pkcs8 der encoding/decoding error : {0}")]
-    PKCS8DerError(String),
+    #[error("Certificate parsing error: {0}")]
+    CertificateParsingError(String),
 
     #[error(transparent)]
     ScryptKDFInvalidParamsError(#[from] scrypt::errors::InvalidParams),

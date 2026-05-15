@@ -98,19 +98,19 @@ fn signing_alg(curve: EllipticCurve) -> &'static EcdsaSigningAlgorithm {
 /// named-curve OID embedded in the `AlgorithmIdentifier` parameters.
 fn curve_from_pkcs8_der(der: &[u8]) -> Result<EllipticCurve> {
     let pki =
-        PrivateKeyInfo::from_der(der).map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        PrivateKeyInfo::from_der(der).map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
     let params = pki
         .algorithm
         .parameters
-        .ok_or_else(|| SigstoreError::PKCS8Error("missing algorithm parameters".into()))?;
+        .ok_or_else(|| SigstoreError::KeyParsingError("missing algorithm parameters".into()))?;
     let oid = params
         .decode_as::<const_oid::ObjectIdentifier>()
-        .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+        .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
     match oid {
         SECP_256_R_1 => Ok(EllipticCurve::P256),
         SECP_384_R_1 => Ok(EllipticCurve::P384),
         SECP_521_R_1 => Ok(EllipticCurve::P521),
-        other => Err(SigstoreError::PKCS8Error(format!(
+        other => Err(SigstoreError::KeyParsingError(format!(
             "unsupported curve OID: {other}"
         ))),
     }
@@ -168,11 +168,11 @@ impl EcdsaKeys {
         let curve = curve_from_pkcs8_der(der)?;
         let alg = signing_alg(curve);
         let kp = EcdsaKeyPair::from_pkcs8(alg, der)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
         let spki_der = kp
             .public_key()
             .as_der()
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?
             .as_ref()
             .to_vec();
         Ok(Self {
@@ -297,7 +297,7 @@ impl EcdsaSigner {
         let rng = SystemRandom::new();
         let alg = signing_alg(keys.curve);
         let inner = EcdsaKeyPair::from_pkcs8(alg, &keys.pkcs8_der)
-            .map_err(|e| SigstoreError::PKCS8Error(e.to_string()))?;
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         Ok(Self {
             key_pair: keys.clone(),
             inner,

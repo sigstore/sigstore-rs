@@ -524,8 +524,12 @@ impl CertificateSubject {
         let (_, san) = certificate
             .tbs_certificate
             .get::<SubjectAltName>()
-            .map_err(|e| SigstoreError::PKCS8Error(format!("get SAN ext failed: {e}")))?
-            .ok_or(SigstoreError::PKCS8Error("No SAN ext found".to_string()))?;
+            .map_err(|e| {
+                SigstoreError::CertificateParsingError(format!("get SAN ext failed: {e}"))
+            })?
+            .ok_or(SigstoreError::CertificateParsingError(
+                "No SAN ext found".to_string(),
+            ))?;
 
         for general_name in &san.0 {
             if let GeneralName::Rfc822Name(name) = general_name {

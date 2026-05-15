@@ -73,7 +73,7 @@ impl TryFrom<&SubjectPublicKeyInfoOwned> for CosignVerificationKey {
         // Encode the full SPKI to DER for aws-lc-rs.
         let spki_der = spki
             .to_der()
-            .map_err(|e| SigstoreError::PKCS8SpkiError(e.to_string()))?;
+            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
 
         let algo_oid = spki.algorithm.oid;
 
@@ -152,7 +152,7 @@ impl CosignVerificationKey {
     pub fn try_from_der(der_data: &[u8]) -> Result<Self> {
         use x509_cert::{der::Decode, spki::SubjectPublicKeyInfoOwned};
         let spki = SubjectPublicKeyInfoOwned::from_der(der_data).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!("Cannot parse SPKI from DER: {e}"))
+            SigstoreError::KeyParsingError(format!("Cannot parse SPKI from DER: {e}"))
         })?;
         Self::try_from(&spki)
     }
@@ -479,9 +479,6 @@ DwIDAQAB
 
         // id-Ed448: a real algorithm OID, not in the Sigstore registry
         let id_ed448: ObjectIdentifier = const_oid::db::rfc8410::ID_ED_448;
-        // <review>
-        // don't pull the magic number, use the constant defineid inside of the const_oid crate
-        // </review>
         let spki = SubjectPublicKeyInfoOwned {
             algorithm: AlgorithmIdentifierOwned {
                 oid: id_ed448,
