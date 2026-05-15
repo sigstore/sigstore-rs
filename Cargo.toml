@@ -194,7 +194,7 @@ tempfile = { version = "3.12", default-features = false }
 testcontainers = { version = "0.27", default-features = false, features = [
     "aws-lc-rs",
 ] }
-time = { version = "0", default-features = false }
+time = { version = "0", default-features = false } # time is a transitive dependency of rcgen, which doesn't unfortunately exposes it. We specify version "0" to just use the version pulled by rcgen.
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "ansi",
     "env-filter",
