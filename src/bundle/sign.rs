@@ -20,11 +20,11 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+use ecdsa::signature::DigestSigner;
 use hex;
 use p256::NistP256;
 use pkcs8::der::{Encode, EncodePem};
 use sha2::{Digest, Sha256};
-use signature::DigestSigner;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
     Bundle, VerificationMaterial, verification_material,
@@ -103,8 +103,8 @@ impl<'ctx> SigningSession<'ctx> {
                     ].try_into()?
                 ].into();
 
-        let mut rng = rand::thread_rng();
-        let private_key = ecdsa::SigningKey::from(p256::SecretKey::random(&mut rng));
+        let private_key =
+            ecdsa::SigningKey::from(p256::SecretKey::random(&mut pkcs8::rand_core::OsRng));
         let mut builder = CertRequestBuilder::new(subject, &private_key)?;
         builder.add_extension(&x509_ext::BasicConstraints {
             ca: false,

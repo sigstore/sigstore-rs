@@ -251,20 +251,17 @@ pub enum SigstoreError {
     #[error("Failed to get id_token")]
     NoIDToken,
 
-    #[error("Pkcs8 error : {0}")]
-    PKCS8Error(String),
+    #[error("Key parsing error: {0}")]
+    KeyParsingError(String),
 
-    #[error("Pkcs8 spki error : {0}")]
-    PKCS8SpkiError(String),
+    #[error("Key generation error: {0}")]
+    KeyGenerationError(String),
 
-    #[error("Pkcs8 der encoding/decoding error : {0}")]
-    PKCS8DerError(String),
+    #[error("Signing error: {0}")]
+    SigningError(String),
 
-    #[error(transparent)]
-    ECDSAError(#[from] ecdsa::Error),
-
-    #[error(transparent)]
-    ECError(#[from] elliptic_curve::Error),
+    #[error("Certificate parsing error: {0}")]
+    CertificateParsingError(String),
 
     #[error(transparent)]
     ScryptKDFInvalidParamsError(#[from] scrypt::errors::InvalidParams),
@@ -289,15 +286,6 @@ pub enum SigstoreError {
 
     #[error("Failed to parse the key: {0}")]
     KeyParseError(String),
-
-    #[error(transparent)]
-    RSAError(#[from] rsa::errors::Error),
-
-    #[error(transparent)]
-    PKCS1Error(#[from] pkcs1::Error),
-
-    #[error(transparent)]
-    Ed25519PKCS8Error(#[from] ed25519_dalek::pkcs8::spki::Error),
 
     #[error(transparent)]
     X509ParseError(#[from] x509_cert::der::Error),

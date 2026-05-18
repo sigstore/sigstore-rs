@@ -1,4 +1,3 @@
-//
 // Copyright 2022 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,16 +14,18 @@
 
 //! # RSA Signer
 //!
-//! RSA Signer support the following padding schemes:
+//! RSA Signer supports the following padding schemes:
 //! * `PSS`
 //! * `PKCS#1 v1.5`
 //!
 //! And the following digest algorithms:
 //! * `Sha256`
-//! * `Sha384`
-//! * `Sha512`
 //!
-//! # RSA Signer Operaion
+//! Per the Sigstore algorithm registry only SHA-256 is required for RSA,
+//! so `RSA_PSS_SHA384`, `RSA_PSS_SHA512`, `RSA_PKCS1_SHA384`, and
+//! `RSA_PKCS1_SHA512` have been removed.
+//!
+//! # RSA Signer Operation
 //!
 //! A [`RSASigner`] can be derived from a [`RSAKeys`]
 //! ```rust
@@ -42,25 +43,22 @@
 //! // sign
 //! let signature_data = signer.sign(message).unwrap();
 //!
-//! // export the [`CosignVerificationKey`] from the [`SigStoreSigner`], which
+//! // export the [`CosignVerificationKey`] from the [`RSASigner`], which
 //! // is used to verify the signature.
 //! let verification_key = signer.to_verification_key().unwrap();
 //!
 //! // verify
-//! assert!(verification_key.verify_signature(Signature::Raw(&signature_data),message).is_ok());
+//! assert!(verification_key.verify_signature(Signature::Raw(&signature_data), message).is_ok());
 //! ```
 
-use ::rsa::{
-    pkcs1v15::SigningKey,
-    pss::BlindedSigningKey,
-    signature::{Keypair, RandomizedSigner, SignatureEncoding},
+use aws_lc_rs::{
+    rand::SystemRandom,
+    signature::{RSA_PKCS1_SHA256, RSA_PSS_SHA256, RsaKeyPair},
 };
 
 use self::keypair::RSAKeys;
-
-use crate::{crypto::CosignVerificationKey, errors::*};
-
 use super::{KeyPair, Signer};
+use crate::{crypto::CosignVerificationKey, errors::*};
 
 pub mod keypair;
 
@@ -70,8 +68,6 @@ pub const DEFAULT_KEY_SIZE: usize = 2048;
 /// RSA-based signing algorithm.
 pub enum DigestAlgorithm {
     Sha256,
-    Sha384,
-    Sha512,
 }
 
 /// Different padding schemes used in
@@ -84,124 +80,83 @@ pub enum PaddingScheme {
     PKCS1v15,
 }
 
-/// Rsa signing scheme families:
+/// RSA signing scheme families:
 /// * `PKCS1v15`: PKCS#1 1.5 padding for RSA signatures.
 /// * `PSS`: RSA PSS padding for RSA signatures.
 ///
 /// Both schemes support the following digest algorithms:
 /// * `Sha256`
-/// * `Sha384`
-/// * `Sha512`
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub enum RSASigner {
-    RSA_PSS_SHA256(BlindedSigningKey<sha2::Sha256>, RSAKeys),
-    RSA_PSS_SHA384(BlindedSigningKey<sha2::Sha384>, RSAKeys),
-    RSA_PSS_SHA512(BlindedSigningKey<sha2::Sha512>, RSAKeys),
-    RSA_PKCS1_SHA256(SigningKey<sha2::Sha256>, RSAKeys),
-    RSA_PKCS1_SHA384(SigningKey<sha2::Sha384>, RSAKeys),
-    RSA_PKCS1_SHA512(SigningKey<sha2::Sha512>, RSAKeys),
+pub struct RSASigner {
+    pub(crate) digest: DigestAlgorithm,
+    pub(crate) padding: PaddingScheme,
+    key_pair: RSAKeys,
 }
 
-/// helper to generate match arms
-macro_rules! iter_on_rsa {
-    ($domain: ident, $match_item: expr, $signer: ident, $key: ident, $func: expr) => {
-        match $match_item {
-            $domain::RSA_PSS_SHA256($signer, $key) => $func,
-            $domain::RSA_PSS_SHA384($signer, $key) => $func,
-            $domain::RSA_PSS_SHA512($signer, $key) => $func,
-            $domain::RSA_PKCS1_SHA256($signer, $key) => $func,
-            $domain::RSA_PKCS1_SHA384($signer, $key) => $func,
-            $domain::RSA_PKCS1_SHA512($signer, $key) => $func,
-        }
-    };
+impl std::fmt::Debug for RSASigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RSASigner").finish_non_exhaustive()
+    }
 }
 
 impl RSASigner {
+    /// Create a new `RSASigner` from an [`RSAKeys`] key pair, digest algorithm,
+    /// and padding scheme.
+    pub fn new(key_pair: RSAKeys, digest: DigestAlgorithm, padding: PaddingScheme) -> Self {
+        Self {
+            digest,
+            padding,
+            key_pair,
+        }
+    }
+
+    /// Create a new `RSASigner` from a reference to an [`RSAKeys`] key pair.
     pub fn from_rsa_keys(
         rsa_keys: &RSAKeys,
         digest_algorithm: DigestAlgorithm,
         padding_scheme: PaddingScheme,
     ) -> Self {
-        let private_key = rsa_keys.private_key.clone();
-        match padding_scheme {
-            PaddingScheme::PSS => match digest_algorithm {
-                DigestAlgorithm::Sha256 => RSASigner::RSA_PSS_SHA256(
-                    BlindedSigningKey::<sha2::Sha256>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-                DigestAlgorithm::Sha384 => RSASigner::RSA_PSS_SHA384(
-                    BlindedSigningKey::<sha2::Sha384>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-                DigestAlgorithm::Sha512 => RSASigner::RSA_PSS_SHA512(
-                    BlindedSigningKey::<sha2::Sha512>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-            },
-            PaddingScheme::PKCS1v15 => match digest_algorithm {
-                DigestAlgorithm::Sha256 => RSASigner::RSA_PKCS1_SHA256(
-                    SigningKey::<sha2::Sha256>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-                DigestAlgorithm::Sha384 => RSASigner::RSA_PKCS1_SHA384(
-                    SigningKey::<sha2::Sha384>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-                DigestAlgorithm::Sha512 => RSASigner::RSA_PKCS1_SHA512(
-                    SigningKey::<sha2::Sha512>::new(private_key),
-                    rsa_keys.clone(),
-                ),
-            },
-        }
+        Self::new(rsa_keys.clone(), digest_algorithm, padding_scheme)
     }
 
-    /// Return the ref to the [`RSAKeys`] inside the RSASigner
+    /// Return the ref to the [`RSAKeys`] inside the `RSASigner`.
     pub fn rsa_keys(&self) -> &RSAKeys {
-        iter_on_rsa!(RSASigner, self, _signer, key, key)
+        &self.key_pair
     }
 
-    /// Return the related [`CosignVerificationKey`] of this RSASigner
+    /// Return the related [`CosignVerificationKey`] of this `RSASigner`.
     pub fn to_verification_key(&self) -> Result<CosignVerificationKey> {
-        Ok(match self {
-            RSASigner::RSA_PSS_SHA256(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA256(signer.verifying_key())
+        use crate::crypto::SigningScheme;
+        let scheme = match (&self.digest, &self.padding) {
+            (DigestAlgorithm::Sha256, PaddingScheme::PSS) => SigningScheme::RSA_PSS_SHA256(0),
+            (DigestAlgorithm::Sha256, PaddingScheme::PKCS1v15) => {
+                SigningScheme::RSA_PKCS1_SHA256(0)
             }
-            RSASigner::RSA_PSS_SHA384(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA384(signer.verifying_key())
-            }
-            RSASigner::RSA_PSS_SHA512(signer, _) => {
-                CosignVerificationKey::RSA_PSS_SHA512(signer.verifying_key())
-            }
-            RSASigner::RSA_PKCS1_SHA256(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA256(signer.verifying_key())
-            }
-            RSASigner::RSA_PKCS1_SHA384(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA384(signer.verifying_key())
-            }
-            RSASigner::RSA_PKCS1_SHA512(signer, _) => {
-                CosignVerificationKey::RSA_PKCS1_SHA512(signer.verifying_key())
-            }
-        })
+        };
+        self.key_pair.to_verification_key(&scheme)
     }
 }
 
 impl Signer for RSASigner {
     /// `sign` will sign the given data, and return the signature.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let mut rng = rand::thread_rng();
-        Ok(iter_on_rsa!(
-            RSASigner,
-            self,
-            signer,
-            _key,
-            signer.sign_with_rng(&mut rng, msg).to_vec()
-        ))
+        let rng = SystemRandom::new();
+        let kp = RsaKeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
+
+        let alg = match (&self.digest, &self.padding) {
+            (DigestAlgorithm::Sha256, PaddingScheme::PSS) => &RSA_PSS_SHA256,
+            (DigestAlgorithm::Sha256, PaddingScheme::PKCS1v15) => &RSA_PKCS1_SHA256,
+        };
+
+        let mut sig = vec![0u8; kp.public_modulus_len()];
+        kp.sign(alg, &rng, msg, &mut sig)
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
+        Ok(sig)
     }
 
-    /// Return the ref to the [`KeyPair`] trait object inside the RSASigner
+    /// Return the ref to the [`KeyPair`] trait object inside the `RSASigner`.
     fn key_pair(&self) -> &dyn KeyPair {
-        iter_on_rsa!(RSASigner, self, _signer, key, key)
+        &self.key_pair
     }
 }
 
@@ -222,29 +177,9 @@ mod tests {
         SigningScheme::RSA_PKCS1_SHA256(0)
     )]
     #[case(
-        DigestAlgorithm::Sha384,
-        PaddingScheme::PKCS1v15,
-        SigningScheme::RSA_PKCS1_SHA384(0)
-    )]
-    #[case(
-        DigestAlgorithm::Sha512,
-        PaddingScheme::PKCS1v15,
-        SigningScheme::RSA_PKCS1_SHA512(0)
-    )]
-    #[case(
         DigestAlgorithm::Sha256,
         PaddingScheme::PSS,
         SigningScheme::RSA_PSS_SHA256(0)
-    )]
-    #[case(
-        DigestAlgorithm::Sha384,
-        PaddingScheme::PSS,
-        SigningScheme::RSA_PSS_SHA384(0)
-    )]
-    #[case(
-        DigestAlgorithm::Sha512,
-        PaddingScheme::PSS,
-        SigningScheme::RSA_PSS_SHA512(0)
     )]
     fn rsa_schemes(
         #[case] digest_algorithm: DigestAlgorithm,

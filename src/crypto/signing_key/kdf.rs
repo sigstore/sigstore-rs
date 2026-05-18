@@ -19,9 +19,9 @@
 //! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
 //! for golang version.
 
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use crypto_secretbox::aead::{AeadMut, KeyInit};
-use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::*;
@@ -110,12 +110,7 @@ impl ScryptKDF {
     /// Derivate a new key from the given password
     fn key(&self, password: &[u8]) -> Result<Vec<u8>> {
         let log_n = (self.params.n as f64).log2() as u8;
-        let params = scrypt::Params::new(
-            log_n,
-            self.params.r,
-            self.params.p,
-            scrypt::Params::RECOMMENDED_LEN,
-        )?;
+        let params = scrypt::Params::new(log_n, self.params.r, self.params.p)?;
         let mut res = vec![0; BOX_KEY_SIZE];
         scrypt::scrypt(password, &self.salt, &params, &mut res)?;
         Ok(res)
@@ -207,11 +202,10 @@ struct Data {
 
 /// Generate a random Vec<u8> of given length.
 fn generate_random(len: u32) -> Vec<u8> {
-    let mut res = Vec::new();
-    for _ in 0..len {
-        res.push(rand::thread_rng().r#gen());
-    }
-    res
+    let rng = SystemRandom::new();
+    let mut buf = vec![0u8; len as usize];
+    rng.fill(&mut buf).expect("SystemRandom::fill failed");
+    buf
 }
 
 /// Encrypt the given plaintext using a derived key from

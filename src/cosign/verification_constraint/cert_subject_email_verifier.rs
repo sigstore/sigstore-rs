@@ -186,11 +186,28 @@ impl VerificationConstraint for CertSubjectEmailVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cosign::signature_layers::tests::{
-        build_correct_signature_layer_with_certificate,
-        build_correct_signature_layer_without_bundle,
+
+    use crate::{
+        cosign::{
+            bundle::{Bundle, Payload},
+            signature_layers::{
+                CertificateSignature, SignatureLayer,
+                tests::{
+                    build_correct_signature_layer_with_certificate,
+                    build_correct_signature_layer_without_bundle,
+                },
+            },
+            verification_constraint::CertSubjectUrlVerifier,
+        },
+        crypto::{
+            certificate_pool::CertificatePool,
+            tests::{CertGenerationOptions, generate_certificate},
+        },
+        registry,
     };
-    use crate::cosign::verification_constraint::CertSubjectUrlVerifier;
+
+    use chrono::{TimeDelta, Utc};
+    use serde_json::json;
 
     #[test]
     fn cert_email_verifier_only_email() {
@@ -374,5 +391,101 @@ mod tests {
             )),
         };
         assert!(!vc.verify(&sl).unwrap());
+    }
+
+    #[test]
+    fn cert_email_verifier_issuer_read_from_certificate_extension() -> anyhow::Result<()> {
+        let expected_email = "test@sigstore.dev".to_string();
+        let expected_issuer = "https://sigstore.dev/oauth".to_string();
+
+        let ca_data = generate_certificate(None, CertGenerationOptions::default())?;
+        let issued_cert = generate_certificate(
+            Some(&ca_data),
+            CertGenerationOptions {
+                subject_email: Some(expected_email.clone()),
+                subject_issuer: Some(expected_issuer.clone()),
+                ..Default::default()
+            },
+        )?;
+
+        let cert_pool = CertificatePool::from_certificates(
+            vec![
+                registry::Certificate {
+                    encoding: registry::CertificateEncoding::Pem,
+                    data: ca_data.cert_pem.clone(),
+                }
+                .try_into()?,
+            ],
+            [],
+        )
+        .unwrap();
+
+        let integrated_time = Utc::now()
+            .checked_sub_signed(TimeDelta::try_minutes(1).unwrap())
+            .unwrap();
+        let bundle = Bundle {
+            signed_entry_timestamp: "not relevant".to_string(),
+            payload: Payload {
+                body: "not relevant".to_string(),
+                integrated_time: integrated_time.timestamp(),
+                log_index: 0,
+                log_id: "not relevant".to_string(),
+            },
+        };
+
+        let certificate_signature =
+            CertificateSignature::from_certificate(&issued_cert.cert_pem, &cert_pool, &bundle)
+                .expect("Cannot create CertificateSignature");
+
+        let sl = SignatureLayer {
+            certificate_signature: Some(certificate_signature),
+            simple_signing: serde_json::from_value(json!({
+                "critical": {
+                    "identity": { "docker-reference": "registry.example.com/test" },
+                    "image": { "docker-manifest-digest": "sha256:aaaa" },
+                    "type": "cosign container image signature"
+                },
+                "optional": null
+            }))
+            .unwrap(),
+            oci_digest: String::new(),
+            signature: None,
+            bundle: None,
+            raw_data: vec![],
+        };
+
+        // Correct email + correct issuer: must pass
+        let vc = CertSubjectEmailVerifier {
+            email: StringVerifier::ExactMatch(expected_email.clone()),
+            issuer: Some(StringVerifier::ExactMatch(expected_issuer.clone())),
+        };
+        assert!(
+            vc.verify(&sl)?,
+            "expected verification to pass with correct email and issuer"
+        );
+
+        // Correct email + wrong issuer: must fail
+        let vc = CertSubjectEmailVerifier {
+            email: StringVerifier::ExactMatch(expected_email.clone()),
+            issuer: Some(StringVerifier::ExactMatch(
+                "https://wrong.issuer.example.com".to_string(),
+            )),
+        };
+        assert!(
+            !vc.verify(&sl)?,
+            "expected verification to fail with wrong issuer"
+        );
+
+        // Correct email + no issuer constraint: must pass
+        let vc = CertSubjectEmailVerifier {
+            email: StringVerifier::ExactMatch(expected_email.clone()),
+            issuer: None,
+        };
+        assert!(
+            vc.verify(&sl)?,
+            "expected verification to pass with no issuer constraint"
+        );
+
+        Ok(())
     }
 }

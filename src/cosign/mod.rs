@@ -163,7 +163,7 @@ pub trait CosignCapabilities {
     fn verify_blob(cert: &str, signature: &str, blob: &[u8]) -> Result<()> {
         let pem = pem::parse(cert)?;
         let cert = Certificate::from_der(pem.contents()).map_err(|e| {
-            SigstoreError::PKCS8SpkiError(format!("parse der into cert failed: {e}"))
+            SigstoreError::CertificateParsingError(format!("parse der into cert failed: {e}"))
         })?;
         let spki = cert.tbs_certificate.subject_public_key_info;
         let ver_key = CosignVerificationKey::try_from(&spki)?;
@@ -560,11 +560,7 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
     #[cfg(feature = "test-registry")]
     #[rstest::rstest]
     #[case(SigningScheme::RSA_PSS_SHA256(2048))]
-    #[case(SigningScheme::RSA_PSS_SHA384(2048))]
-    #[case(SigningScheme::RSA_PSS_SHA512(2048))]
     #[case(SigningScheme::RSA_PKCS1_SHA256(2048))]
-    #[case(SigningScheme::RSA_PKCS1_SHA384(2048))]
-    #[case(SigningScheme::RSA_PKCS1_SHA512(2048))]
     #[case(SigningScheme::ECDSA_P256_SHA256_ASN1)]
     #[case(SigningScheme::ECDSA_P384_SHA384_ASN1)]
     #[case(SigningScheme::ED25519)]
