@@ -1168,7 +1168,6 @@ impl CertificateSubject {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
     use serde_json::json;
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
@@ -1754,7 +1753,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
     mod bundle_tests {
         use super::*;
 
-        const REAL_BUNDLE_V03: &str = include_str!("../../../tests/data/bundle_v03.json");
+        const REAL_BUNDLE_V03: &str = include_str!("../../tests/data/bundle_v03.json");
 
         enum V3BundleMutation {
             Payload,
