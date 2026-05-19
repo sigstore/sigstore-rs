@@ -33,9 +33,6 @@ pub(crate) struct AsyncReqwestClient(pub reqwest::Client);
 impl<'c> AsyncHttpClient<'c> for AsyncReqwestClient {
     type Error = HttpClientError<reqwest::Error>;
 
-    #[cfg(target_arch = "wasm32")]
-    type Future = Pin<Box<dyn Future<Output = Result<HttpResponse, Self::Error>> + 'c>>;
-    #[cfg(not(target_arch = "wasm32"))]
     type Future =
         Pin<Box<dyn Future<Output = Result<HttpResponse, Self::Error>> + Send + Sync + 'c>>;
 
@@ -47,12 +44,9 @@ impl<'c> AsyncHttpClient<'c> for AsyncReqwestClient {
                 .await
                 .map_err(Box::new)?;
 
-            let mut builder = http::Response::builder().status(response.status());
-
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                builder = builder.version(response.version());
-            }
+            let mut builder = http::Response::builder()
+                .status(response.status())
+                .version(response.version());
 
             for (name, value) in response.headers().iter() {
                 builder = builder.header(name, value);
@@ -67,12 +61,8 @@ impl<'c> AsyncHttpClient<'c> for AsyncReqwestClient {
 
 /// A wrapper around [`reqwest::blocking::Client`] that implements [`SyncHttpClient`]
 /// for use with the `openidconnect` crate.
-///
-/// Not available on `wasm32` targets.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct SyncReqwestClient(pub reqwest::blocking::Client);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl SyncHttpClient for SyncReqwestClient {
     type Error = HttpClientError<reqwest::Error>;
 

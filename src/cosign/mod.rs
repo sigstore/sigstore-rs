@@ -70,8 +70,7 @@ pub use payload::simple_signing;
 
 pub mod constraint;
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[async_trait]
 /// Cosign Abilities that have to be implemented by a
 /// Cosign client
 pub trait CosignCapabilities {

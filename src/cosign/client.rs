@@ -43,8 +43,7 @@ pub struct Client {
     pub(crate) fulcio_cert_pool: Option<CertificatePool>,
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[async_trait]
 impl CosignCapabilities for Client {
     async fn triangulate(
         &mut self,

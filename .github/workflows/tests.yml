@@ -40,7 +40,7 @@ jobs:
         with:
           tool: cargo-hack
       - run: |
-          cargo hack check --feature-powerset --features native-tls --skip wasm --skip test-registry --skip rustls-tls --skip rustls-tls-native-roots
+          cargo hack check --feature-powerset --features native-tls --skip test-registry --skip rustls-tls --skip rustls-tls-native-roots
 
   check-rustls-tls:
     name: Check rusttls-tls features
@@ -55,7 +55,7 @@ jobs:
         with:
           tool: cargo-hack
       - run: |
-          cargo hack check --feature-powerset --features rustls-tls --skip wasm --skip test-registry --skip native-tls
+          cargo hack check --feature-powerset --features rustls-tls --skip test-registry --skip native-tls
 
   test-native-tls:
     name: Test Suite

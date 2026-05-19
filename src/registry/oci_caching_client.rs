@@ -243,8 +243,7 @@ async fn pull_manifest_cached(
 
 impl ClientCapabilitiesDeps for OciCachingClient {}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(? Send))]
+#[async_trait]
 impl ClientCapabilities for OciCachingClient {
     async fn fetch_manifest_digest(
         &mut self,
