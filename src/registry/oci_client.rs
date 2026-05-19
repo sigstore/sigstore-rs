@@ -29,8 +29,7 @@ pub(crate) struct OciClient {
 
 impl ClientCapabilitiesDeps for OciClient {}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[async_trait]
 impl ClientCapabilities for OciClient {
     async fn fetch_manifest_digest(
         &mut self,

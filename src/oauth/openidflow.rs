@@ -16,7 +16,7 @@
 //! This provides a method for retreiving a OpenID Connect ID Token and scope from the sigstore project.
 //!
 //! The main entry points are:
-//! - [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) (synchronous, non-wasm only)
+//! - [`OpenIDAuthorize::auth_url`](OpenIDAuthorize::auth_url) (synchronous)
 //! - [`OpenIDAuthorize::auth_url_async`](OpenIDAuthorize::auth_url_async) (async)
 //!
 //! Both require four parameters:
@@ -40,7 +40,7 @@
 //!   value.
 //!
 //! Once you have recieved the above tuple, you can use:
-//! - [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) (synchronous, non-wasm only)
+//! - [`RedirectListener::redirect_listener`](RedirectListener::redirect_listener) (synchronous)
 //! - [`RedirectListener::redirect_listener_async`](RedirectListener::redirect_listener_async) (async)
 //!
 //! to get the ID Token and scope.
@@ -100,7 +100,6 @@ use url::Url;
 
 use crate::errors::{Result, SigstoreError};
 use crate::oauth::http_client::AsyncReqwestClient;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::oauth::http_client::SyncReqwestClient;
 
 pub(crate) type OpenIdClient = openidconnect::core::CoreClient<
@@ -172,7 +171,6 @@ impl OpenIDAuthorize {
         Ok((authorize_url, client, nonce, pkce_verifier))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn auth_url(&self) -> Result<(Url, OpenIdClient, Nonce, PkceCodeVerifier)> {
         let http_client = SyncReqwestClient(
             reqwest::blocking::ClientBuilder::new()
@@ -301,7 +299,6 @@ impl RedirectListener {
         Err(SigstoreError::CodePairError)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn redirect_listener(self) -> Result<(CoreIdTokenClaims, CoreIdToken)> {
         let http_client = SyncReqwestClient(
             reqwest::blocking::ClientBuilder::new()
@@ -382,7 +379,6 @@ mod tests {
         assert!(url.contains("scope=openid+email"));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_auth_url() {
         let oidc_url = OpenIDAuthorize::new(
