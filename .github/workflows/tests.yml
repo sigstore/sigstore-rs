@@ -25,7 +25,7 @@ jobs:
 
       # cosign, full, mock-client, registry will ONLY compile with a *-tls feature
       - run: |
-          cargo hack check --each-feature --skip cosign --skip full --skip mock-client --skip registry
+          cargo hack check --each-feature --skip cosign --skip full --skip mock-client --skip registry --skip test-remote-registry
 
   check-native-tls:
     name: Check native-tls features
@@ -40,7 +40,7 @@ jobs:
         with:
           tool: cargo-hack
       - run: |
-          cargo hack check --feature-powerset --features native-tls --skip test-registry --skip rustls-tls --skip rustls-tls-native-roots
+          cargo hack check --feature-powerset --features native-tls --skip test-registry --skip test-remote-registry --skip rustls-tls --skip rustls-tls-native-roots
 
   check-rustls-tls:
     name: Check rusttls-tls features
@@ -55,7 +55,7 @@ jobs:
         with:
           tool: cargo-hack
       - run: |
-          cargo hack check --feature-powerset --features rustls-tls --skip test-registry --skip native-tls
+          cargo hack check --feature-powerset --features rustls-tls --skip test-registry --skip test-remote-registry --skip native-tls
 
   test-native-tls:
     name: Test Suite
@@ -67,7 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: |
-          cargo test --workspace --no-default-features --features full,native-tls,test-registry
+          cargo test --workspace --no-default-features --features full,native-tls,test-registry,test-remote-registry
 
   test-rustls-tls:
     name: Test Suite
@@ -79,7 +79,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: |
-          cargo test --workspace --no-default-features --features full,rustls-tls,test-registry
+          cargo test --workspace --no-default-features --features full,rustls-tls,test-registry,test-remote-registry
 
   doc:
     name: Build Documentation
