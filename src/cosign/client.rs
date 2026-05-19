@@ -92,6 +92,7 @@ impl CosignCapabilities for Client {
         }
 
         // --- Sigstore Bundle path: OCI referrers -----------------------------
+        #[cfg(any(feature = "verify", feature = "sign"))]
         match self
             .fetch_signature_layers_from_referrers(auth, source_image, &source_image_digest)
             .await
@@ -233,6 +234,7 @@ impl Client {
     /// directly once `oci-client` implements the fallback itself.
     ///
     /// [oci-fallback]: https://github.com/opencontainers/distribution-spec/blob/main/spec.md#pushing-manifests-with-subject
+    #[cfg(any(feature = "verify", feature = "sign"))]
     async fn fetch_referrers_with_tag_fallback(
         &mut self,
         auth: &Auth,
@@ -296,6 +298,7 @@ impl Client {
     }
 
     /// Fetch Sigstore Bundle signature layers via the OCI referrers API.
+    #[cfg(any(feature = "verify", feature = "sign"))]
     async fn fetch_signature_layers_from_referrers(
         &mut self,
         auth: &Auth,

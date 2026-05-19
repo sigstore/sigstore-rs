@@ -401,6 +401,7 @@ impl SignatureLayer {
     /// Rekor public keys are required for v0.3 verification. Missing keys,
     /// missing inclusion promise/proof, or failed transparency verification all
     /// cause the layer to be rejected.
+    #[cfg(any(feature = "verify", feature = "sign"))]
     pub(crate) fn from_sigstore_bundle(
         bundle_data: &[u8],
         layer_digest: &str,
@@ -615,6 +616,7 @@ impl SignatureLayer {
 ///    valid SET + inclusion proof only proves that *some* entry was logged; this
 ///    step ensures the logged entry describes *this* artifact.  See
 ///    [`verify_bundle_tlog_body_consistency`] for the individual checks performed.
+#[cfg(any(feature = "verify", feature = "sign"))]
 fn verify_bundle_tlog_entry(
     tlog_entry: &sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry,
     rekor_pub_keys: &BTreeMap<String, CosignVerificationKey>,
@@ -742,6 +744,7 @@ fn verify_bundle_tlog_entry(
 ///   - `spec.payloadHash` == sha256(raw DSSE payload bytes)
 ///   - `spec.signatures[0].signature` (base64) == base64(raw signature bytes)
 ///   - `spec.signatures[0].verifier` (base64-PEM) decodes to the same DER cert
+#[cfg(any(feature = "verify", feature = "sign"))]
 fn verify_bundle_tlog_body_consistency(
     tlog_entry: &sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry,
     envelope_json: &[u8],
@@ -1169,63 +1172,6 @@ pub(crate) mod tests {
     use serde_json::json;
 
     use crate::cosign::tests::{get_fulcio_cert_pool, get_rekor_public_key};
-
-    const REAL_BUNDLE_V03: &str = include_str!("../../tests/data/bundle_v03.json");
-
-    enum V3BundleMutation {
-        Payload,
-        Statement,
-        Predicate,
-    }
-
-    fn mutated_v3_bundle_fixture(kind: V3BundleMutation) -> Vec<u8> {
-        let mut bundle: serde_json::Value =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
-
-        let dsse = bundle
-            .get_mut("dsseEnvelope")
-            .and_then(serde_json::Value::as_object_mut)
-            .expect("bundle must contain dsseEnvelope object");
-
-        match kind {
-            V3BundleMutation::Payload => {
-                dsse.insert(
-                    "payloadType".to_string(),
-                    serde_json::Value::String("application/json".to_string()),
-                );
-            }
-            V3BundleMutation::Statement | V3BundleMutation::Predicate => {
-                let payload_b64 = dsse
-                    .get("payload")
-                    .and_then(serde_json::Value::as_str)
-                    .expect("dsseEnvelope.payload must be present");
-                let payload_bytes = base64.decode(payload_b64).expect("payload must be base64");
-                let mut statement: serde_json::Value =
-                    serde_json::from_slice(&payload_bytes).expect("payload must be JSON");
-
-                match kind {
-                    V3BundleMutation::Statement => {
-                        statement["_type"] =
-                            serde_json::Value::String("https://example.com/Statement/v1".into());
-                    }
-                    V3BundleMutation::Predicate => {
-                        statement["predicateType"] =
-                            serde_json::Value::String("https://example.com/predicate/v1".into());
-                    }
-                    V3BundleMutation::Payload => unreachable!(),
-                }
-
-                let mutated_payload =
-                    serde_json::to_vec(&statement).expect("mutated statement must serialize");
-                dsse.insert(
-                    "payload".to_string(),
-                    serde_json::Value::String(base64.encode(mutated_payload)),
-                );
-            }
-        }
-
-        serde_json::to_vec(&bundle).expect("mutated bundle must serialize")
-    }
 
     pub(crate) fn build_correct_signature_layer_without_bundle()
     -> (SignatureLayer, CosignVerificationKey) {
@@ -1804,542 +1750,614 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         Ok(())
     }
 
-    /// Verify that the real v0.3 bundle fixture is parseable as the proto `Bundle`
-    /// type directly.
-    #[test]
-    fn proto_bundle_parses_real_fixture() {
-        use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
-            Bundle as ProtoBundle, bundle::Content,
-        };
+    #[cfg(any(feature = "verify", feature = "sign"))]
+    mod bundle_tests {
+        use super::*;
 
-        let bundle: ProtoBundle =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse as proto Bundle");
+        const REAL_BUNDLE_V03: &str = include_str!("../../../tests/data/bundle_v03.json");
 
-        assert_eq!(
-            bundle.media_type,
-            "application/vnd.dev.sigstore.bundle.v0.3+json"
-        );
+        enum V3BundleMutation {
+            Payload,
+            Statement,
+            Predicate,
+        }
 
-        let vm = bundle
-            .verification_material
-            .expect("must have verification_material");
-        assert_eq!(vm.tlog_entries.len(), 1);
-        let tlog = &vm.tlog_entries[0];
-        assert_eq!(tlog.integrated_time, 1775719409);
-        assert_eq!(
-            tlog.kind_version.as_ref().map(|kv| kv.kind.as_str()),
-            Some("dsse")
-        );
+        fn mutated_v3_bundle_fixture(kind: V3BundleMutation) -> Vec<u8> {
+            let mut bundle: serde_json::Value =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
 
-        assert!(
-            matches!(bundle.content, Some(Content::DsseEnvelope(_))),
-            "content must be DsseEnvelope"
-        );
-    }
+            let dsse = bundle
+                .get_mut("dsseEnvelope")
+                .and_then(serde_json::Value::as_object_mut)
+                .expect("bundle must contain dsseEnvelope object");
 
-    /// Parse the real v0.3 bundle fixture through `from_sigstore_bundle` and assert the
-    /// `SignatureLayer` fields are populated correctly, or that a wrong digest is rejected.
-    #[rstest]
-    #[case::correct_digest(
-        "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172",
-        Some("sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172")
-    )]
-    #[case::wrong_digest(
-        "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        None
-    )]
-    fn from_sigstore_bundle(
-        #[case] subject_digest: &str,
-        #[case] expected_manifest_digest: Option<&str>,
-    ) {
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let (key_id, rekor_key) = get_rekor_public_key();
-        let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+            match kind {
+                V3BundleMutation::Payload => {
+                    dsse.insert(
+                        "payloadType".to_string(),
+                        serde_json::Value::String("application/json".to_string()),
+                    );
+                }
+                V3BundleMutation::Statement | V3BundleMutation::Predicate => {
+                    use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+                    let payload_b64 = dsse
+                        .get("payload")
+                        .and_then(serde_json::Value::as_str)
+                        .expect("dsseEnvelope.payload must be present");
+                    let payload_bytes = base64.decode(payload_b64).expect("payload must be base64");
+                    let mut statement: serde_json::Value =
+                        serde_json::from_slice(&payload_bytes).expect("payload must be JSON");
 
-        let result = SignatureLayer::from_sigstore_bundle(
-            REAL_BUNDLE_V03.as_bytes(),
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            None,
-            Some(&rekor_pub_keys),
-        );
+                    match kind {
+                        V3BundleMutation::Statement => {
+                            statement["_type"] = serde_json::Value::String(
+                                "https://example.com/Statement/v1".into(),
+                            );
+                        }
+                        V3BundleMutation::Predicate => {
+                            statement["predicateType"] = serde_json::Value::String(
+                                "https://example.com/predicate/v1".into(),
+                            );
+                        }
+                        V3BundleMutation::Payload => unreachable!(),
+                    }
 
-        match expected_manifest_digest {
-            Some(expected_digest) => {
-                let layer = result.expect("from_sigstore_bundle should succeed");
+                    let mutated_payload =
+                        serde_json::to_vec(&statement).expect("mutated statement must serialize");
+                    dsse.insert(
+                        "payload".to_string(),
+                        serde_json::Value::String(base64.encode(mutated_payload)),
+                    );
+                }
+            }
 
-                assert_eq!(
-                    layer.simple_signing.critical.image.docker_manifest_digest,
-                    expected_digest
+            serde_json::to_vec(&bundle).expect("mutated bundle must serialize")
+        }
+
+        /// Verify that the real v0.3 bundle fixture is parseable as the proto `Bundle`
+        /// type directly.
+        #[test]
+        fn proto_bundle_parses_real_fixture() {
+            use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
+                Bundle as ProtoBundle, bundle::Content,
+            };
+
+            let bundle: ProtoBundle =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse as proto Bundle");
+
+            assert_eq!(
+                bundle.media_type,
+                "application/vnd.dev.sigstore.bundle.v0.3+json"
+            );
+
+            let vm = bundle
+                .verification_material
+                .expect("must have verification_material");
+            assert_eq!(vm.tlog_entries.len(), 1);
+            let tlog = &vm.tlog_entries[0];
+            assert_eq!(tlog.integrated_time, 1775719409);
+            assert_eq!(
+                tlog.kind_version.as_ref().map(|kv| kv.kind.as_str()),
+                Some("dsse")
+            );
+
+            assert!(
+                matches!(bundle.content, Some(Content::DsseEnvelope(_))),
+                "content must be DsseEnvelope"
+            );
+        }
+
+        /// Parse the real v0.3 bundle fixture through `from_sigstore_bundle` and assert the
+        /// `SignatureLayer` fields are populated correctly, or that a wrong digest is rejected.
+        #[rstest]
+        #[case::correct_digest(
+            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172",
+            Some("sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172")
+        )]
+        #[case::wrong_digest(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            None
+        )]
+        fn from_sigstore_bundle(
+            #[case] subject_digest: &str,
+            #[case] expected_manifest_digest: Option<&str>,
+        ) {
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let (key_id, rekor_key) = get_rekor_public_key();
+            let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+
+            let result = SignatureLayer::from_sigstore_bundle(
+                REAL_BUNDLE_V03.as_bytes(),
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                None,
+                Some(&rekor_pub_keys),
+            );
+
+            match expected_manifest_digest {
+                Some(expected_digest) => {
+                    let layer = result.expect("from_sigstore_bundle should succeed");
+
+                    assert_eq!(
+                        layer.simple_signing.critical.image.docker_manifest_digest,
+                        expected_digest
+                    );
+                    assert_eq!(
+                        layer.simple_signing.critical.identity.docker_reference,
+                        "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                    );
+                    assert_eq!(layer.oci_digest, layer_digest);
+                    assert!(layer.signature.is_some(), "signature should be set");
+                    assert!(
+                        !layer.raw_data.is_empty(),
+                        "raw_data (PAE) should be non-empty"
+                    );
+                    assert!(layer.bundle.is_none());
+                    assert!(layer.certificate_signature.is_none());
+                }
+                None => {
+                    assert!(result.is_err(), "mismatched digest should produce an error");
+                }
+            }
+        }
+
+        #[rstest]
+        #[case::wrong_payload_type(V3BundleMutation::Payload, "unsupported DSSE payloadType")]
+        #[case::wrong_statement_type(V3BundleMutation::Statement, "unsupported in-toto _type")]
+        #[case::wrong_predicate_type(
+            V3BundleMutation::Predicate,
+            "unsupported in-toto predicateType"
+        )]
+        fn from_sigstore_bundle_rejects_unexpected_types(
+            #[case] mutation: V3BundleMutation,
+            #[case] expected_error_fragment: &str,
+        ) {
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let subject_digest =
+                "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
+            let (key_id, rekor_key) = get_rekor_public_key();
+            let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+
+            let bundle = mutated_v3_bundle_fixture(mutation);
+
+            let err = SignatureLayer::from_sigstore_bundle(
+                &bundle,
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                None,
+                Some(&rekor_pub_keys),
+            )
+            .expect_err("invalid type fields must be rejected");
+
+            match err {
+                SigstoreError::UnexpectedError(msg) => {
+                    assert!(
+                        msg.contains(expected_error_fragment),
+                        "error message should contain '{expected_error_fragment}', got '{msg}'"
+                    );
+                }
+                other => panic!("unexpected error type: {other:?}"),
+            }
+        }
+
+        /// Drives the Rekor key scenario for `from_sigstore_bundle_rekor_verification_cases`.
+        enum RekorKeyScenario {
+            /// The real production Rekor public key — verification must succeed.
+            Valid,
+            /// A freshly-generated ephemeral key registered under the correct key ID
+            /// — lookup succeeds but cryptographic verification fails.
+            WrongKey,
+            /// No Rekor keys provided at all — must fail closed.
+            Missing,
+        }
+
+        /// Verify Rekor transparency verification behavior for v0.3 bundles:
+        /// valid key succeeds, wrong key fails cryptographically, and missing keys
+        /// fail closed.
+        #[rstest]
+        #[case::valid_rekor_key(RekorKeyScenario::Valid)]
+        #[case::wrong_rekor_key(RekorKeyScenario::WrongKey)]
+        #[case::missing_rekor_keys(RekorKeyScenario::Missing)]
+        fn from_sigstore_bundle_rekor_verification_cases(#[case] scenario: RekorKeyScenario) {
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let subject_digest =
+                "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
+
+            let rekor_pub_keys = match &scenario {
+                RekorKeyScenario::Valid => {
+                    let (key_id, key) = get_rekor_public_key();
+                    Some(BTreeMap::from([(key_id, key)]))
+                }
+                RekorKeyScenario::WrongKey => {
+                    // Generate an ephemeral key and register it under the real key
+                    // ID so the map lookup succeeds but the SET signature check fails.
+                    let ephemeral_key = SigningScheme::ECDSA_P256_SHA256_ASN1
+                        .create_signer()
+                        .expect("create ephemeral signer")
+                        .to_verification_key()
+                        .expect("derive verification key");
+                    let (key_id, _) = get_rekor_public_key();
+                    Some(BTreeMap::from([(key_id, ephemeral_key)]))
+                }
+                RekorKeyScenario::Missing => None,
+            };
+
+            let result = SignatureLayer::from_sigstore_bundle(
+                REAL_BUNDLE_V03.as_bytes(),
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                None,
+                rekor_pub_keys.as_ref(),
+            );
+            let expect_ok = matches!(scenario, RekorKeyScenario::Valid);
+            assert_eq!(
+                result.is_ok(),
+                expect_ok,
+                "unexpected outcome for scenario: {result:?}"
+            );
+        }
+
+        // -----------------------------------------------------------------------
+        // DSSE signature cardinality
+        // -----------------------------------------------------------------------
+
+        /// Build a bundle fixture with `count` copies of the existing DSSE signature
+        /// (0 = clear the array, 2 = duplicate the first entry, etc.).
+        fn bundle_with_dsse_sig_count(count: usize) -> Vec<u8> {
+            let mut bundle: serde_json::Value =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
+
+            let sigs = bundle["dsseEnvelope"]["signatures"]
+                .as_array()
+                .expect("dsseEnvelope.signatures must be an array")
+                .clone();
+            let first = sigs
+                .into_iter()
+                .next()
+                .expect("fixture has at least one sig");
+
+            let new_sigs: Vec<serde_json::Value> = (0..count).map(|_| first.clone()).collect();
+            bundle["dsseEnvelope"]["signatures"] = serde_json::Value::Array(new_sigs);
+
+            serde_json::to_vec(&bundle).expect("re-serialise must succeed")
+        }
+
+        #[rstest]
+        #[case::zero_signatures(0, "must have exactly 1 signature, got 0")]
+        #[case::two_signatures(2, "must have exactly 1 signature, got 2")]
+        fn from_sigstore_bundle_rejects_wrong_dsse_sig_count(
+            #[case] count: usize,
+            #[case] expected_fragment: &str,
+        ) {
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let subject_digest =
+                "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
+            let (key_id, rekor_key) = get_rekor_public_key();
+            let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+
+            let bundle = bundle_with_dsse_sig_count(count);
+
+            let err = SignatureLayer::from_sigstore_bundle(
+                &bundle,
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                None,
+                Some(&rekor_pub_keys),
+            )
+            .expect_err("wrong signature count must be rejected");
+
+            match err {
+                SigstoreError::UnexpectedError(msg) => assert!(
+                    msg.contains(expected_fragment),
+                    "error should contain '{expected_fragment}', got '{msg}'"
+                ),
+                other => panic!("unexpected error type: {other:?}"),
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // Tlog body consistency (verify_bundle_tlog_body_consistency in isolation)
+        // -----------------------------------------------------------------------
+
+        /// Build a minimal `TransparencyLogEntry` with only `canonicalized_body`
+        /// populated — sufficient for calling `verify_bundle_tlog_body_consistency`.
+        fn tlog_entry_with_body(
+            body: serde_json::Value,
+        ) -> sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry {
+            sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry {
+                canonicalized_body: serde_json::to_vec(&body).expect("body must serialise"),
+                ..Default::default()
+            }
+        }
+
+        /// Extracted components of a v0.3 bundle needed for tlog body consistency tests.
+        ///
+        /// Using a named struct instead of a tuple makes call sites self-documenting
+        /// and means adding new fields in future is a non-breaking change for callers
+        /// that use struct-update syntax or field access.
+        struct BundleConsistencyInputs {
+            /// Raw DSSE payload bytes (decoded from the envelope).
+            dsse_payload: Vec<u8>,
+            /// Raw signature bytes from the single DSSE signature entry.
+            raw_sig: Vec<u8>,
+            /// DER-encoded signing certificate extracted from verificationMaterial.
+            cert_der: Vec<u8>,
+            /// Canonical JSON serialization of the DSSE envelope, used to verify
+            /// `spec.envelopeHash` in the tlog body.
+            envelope_json: Vec<u8>,
+        }
+
+        /// Extract the bundle components needed for tlog body consistency tests
+        /// from the real v0.3 bundle fixture.
+        fn real_bundle_consistency_inputs() -> BundleConsistencyInputs {
+            let proto: sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse");
+
+            let dsse = match proto.content.expect("must have content") {
+                sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle::Content::DsseEnvelope(
+                    e,
+                ) => e,
+                _ => panic!("expected DsseEnvelope"),
+            };
+            // Serialize envelope JSON before consuming signatures.
+            let envelope_json = serde_json::to_vec(&dsse).expect("envelope must serialise");
+            let dsse_payload = dsse.payload.clone();
+            let raw_sig = dsse
+                .signatures
+                .into_iter()
+                .next()
+                .expect("must have sig")
+                .sig;
+
+            let vm = proto.verification_material.expect("must have vm");
+            let cert_der = match vm.content.expect("must have vm.content") {
+                sigstore_protobuf_specs::dev::sigstore::bundle::v1::verification_material::Content::Certificate(c) => c.raw_bytes,
+                _ => panic!("expected Certificate"),
+            };
+
+            BundleConsistencyInputs {
+                dsse_payload,
+                raw_sig,
+                cert_der,
+                envelope_json,
+            }
+        }
+
+        /// Extract and parse the real tlog body from the fixture.
+        fn real_tlog_body() -> serde_json::Value {
+            let proto: sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse");
+            let body_bytes = proto
+                .verification_material
+                .expect("vm")
+                .tlog_entries
+                .into_iter()
+                .next()
+                .expect("tlog entry")
+                .canonicalized_body;
+            serde_json::from_slice(&body_bytes).expect("body must be JSON")
+        }
+
+        #[test]
+        fn tlog_body_consistency_accepts_real_fixture() {
+            let inputs = real_bundle_consistency_inputs();
+            let body = real_tlog_body();
+            let entry = tlog_entry_with_body(body);
+
+            verify_bundle_tlog_body_consistency(
+                &entry,
+                &inputs.envelope_json,
+                &inputs.dsse_payload,
+                &inputs.raw_sig,
+                &inputs.cert_der,
+            )
+            .expect("real fixture must pass consistency check");
+        }
+
+        #[rstest]
+        #[case::wrong_kind(
+            "tlog body kind is 'hashedrekord', expected 'dsse'",
+            Box::new(|body: &mut serde_json::Value| {
+                body["kind"] = serde_json::json!("hashedrekord");
+            }) as Box<dyn FnOnce(&mut serde_json::Value)>,
+        )]
+        #[case::wrong_api_version(
+            "tlog body apiVersion is '0.0.2', expected '0.0.1'",
+            Box::new(|body: &mut serde_json::Value| {
+                body["apiVersion"] = serde_json::json!("0.0.2");
+            }),
+        )]
+        #[case::envelope_hash_mismatch(
+            "tlog body envelopeHash mismatch",
+            Box::new(|body: &mut serde_json::Value| {
+                body["spec"]["envelopeHash"]["value"] = serde_json::json!(
+                    "0000000000000000000000000000000000000000000000000000000000000000"
                 );
-                assert_eq!(
-                    layer.simple_signing.critical.identity.docker_reference,
-                    "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+            }),
+        )]
+        #[case::envelope_hash_bad_algorithm(
+            "envelopeHash algorithm is 'sha512', expected 'sha256'",
+            Box::new(|body: &mut serde_json::Value| {
+                body["spec"]["envelopeHash"]["algorithm"] = serde_json::json!("sha512");
+            }),
+        )]
+        #[case::payload_hash_mismatch(
+            "tlog body payloadHash mismatch",
+            Box::new(|body: &mut serde_json::Value| {
+                body["spec"]["payloadHash"]["value"] = serde_json::json!(
+                    "0000000000000000000000000000000000000000000000000000000000000000"
                 );
-                assert_eq!(layer.oci_digest, layer_digest);
-                assert!(layer.signature.is_some(), "signature should be set");
-                assert!(
-                    !layer.raw_data.is_empty(),
-                    "raw_data (PAE) should be non-empty"
-                );
-                assert!(layer.bundle.is_none());
-                assert!(layer.certificate_signature.is_none());
+            }) as Box<dyn FnOnce(&mut serde_json::Value)>,
+        )]
+        #[case::payload_hash_bad_algorithm(
+            "payloadHash algorithm is 'sha512'",
+            Box::new(|body: &mut serde_json::Value| {
+                body["spec"]["payloadHash"]["algorithm"] = serde_json::json!("sha512");
+            }),
+        )]
+        #[case::signature_mismatch(
+            "signature does not match",
+            Box::new(|body: &mut serde_json::Value| {
+                use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+                body["spec"]["signatures"][0]["signature"] =
+                    serde_json::json!(base64.encode([0u8; 64]));
+            }),
+        )]
+        #[case::verifier_cert_mismatch(
+            "cannot parse tlog body verifier PEM certificate",
+            Box::new(|body: &mut serde_json::Value| {
+                use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+                // Replace the verifier with base64 of something that is not a PEM cert.
+                body["spec"]["signatures"][0]["verifier"] =
+                    serde_json::json!(base64.encode(b"not-a-cert"));
+            }),
+        )]
+        fn tlog_body_consistency_rejects_tampered_body(
+            #[case] expected_fragment: &str,
+            #[case] mutate: Box<dyn FnOnce(&mut serde_json::Value)>,
+        ) {
+            let inputs = real_bundle_consistency_inputs();
+            let mut body = real_tlog_body();
+            mutate(&mut body);
+            let entry = tlog_entry_with_body(body);
+
+            let err = verify_bundle_tlog_body_consistency(
+                &entry,
+                &inputs.envelope_json,
+                &inputs.dsse_payload,
+                &inputs.raw_sig,
+                &inputs.cert_der,
+            )
+            .expect_err("tampered body must be rejected");
+
+            match err {
+                SigstoreError::UnexpectedError(msg) => assert!(
+                    msg.contains(expected_fragment),
+                    "error should contain '{expected_fragment}', got '{msg}'"
+                ),
+                other => panic!("unexpected error type: {other:?}"),
             }
-            None => {
-                assert!(result.is_err(), "mismatched digest should produce an error");
+        }
+
+        // -----------------------------------------------------------------------
+        // Certificate validation fail-closed
+        // -----------------------------------------------------------------------
+
+        #[test]
+        fn from_sigstore_bundle_with_unrecognised_cert_produces_no_certificate_signature() {
+            // The real bundle cert was issued by production Fulcio; the test pool
+            // uses different CA certs, so cert validation fails.  The layer must
+            // still be returned — but with `certificate_signature: None` — so that
+            // downstream CertificateVerifier constraints reject it rather than the
+            // layer being silently dropped or causing a hard error.
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let subject_digest =
+                "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
+            let (key_id, rekor_key) = get_rekor_public_key();
+            let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+            let fulcio_pool = get_fulcio_cert_pool();
+
+            let layer = SignatureLayer::from_sigstore_bundle(
+                REAL_BUNDLE_V03.as_bytes(),
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                Some(&fulcio_pool),
+                Some(&rekor_pub_keys),
+            )
+            .expect("layer must be produced even when cert is not in pool");
+
+            assert!(
+                layer.certificate_signature.is_none(),
+                "certificate_signature must be None when cert is not trusted by the pool"
+            );
+        }
+
+        // -----------------------------------------------------------------------
+        // Tlog entry cardinality
+        // -----------------------------------------------------------------------
+
+        /// Build a bundle JSON with the tlog_entries array duplicated to `count`
+        /// copies of the real fixture entry.
+        fn bundle_with_tlog_entry_count(count: usize) -> Vec<u8> {
+            let mut bundle: serde_json::Value =
+                serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
+
+            let entries = bundle["verificationMaterial"]["tlogEntries"]
+                .as_array()
+                .expect("tlogEntries must be an array")
+                .clone();
+            let first = entries
+                .into_iter()
+                .next()
+                .expect("fixture has at least one tlog entry");
+
+            let new_entries: Vec<serde_json::Value> = (0..count).map(|_| first.clone()).collect();
+            bundle["verificationMaterial"]["tlogEntries"] = serde_json::Value::Array(new_entries);
+
+            serde_json::to_vec(&bundle).expect("re-serialise must succeed")
+        }
+
+        #[rstest]
+        #[case::zero_entries(0, "exactly 1 tlog entry, got 0")]
+        #[case::two_entries(2, "exactly 1 tlog entry, got 2")]
+        fn from_sigstore_bundle_rejects_wrong_tlog_entry_count(
+            #[case] count: usize,
+            #[case] expected_fragment: &str,
+        ) {
+            let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
+                .parse()
+                .unwrap();
+            let layer_digest =
+                "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
+            let subject_digest =
+                "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
+            let (key_id, rekor_key) = get_rekor_public_key();
+            let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
+
+            let bundle = bundle_with_tlog_entry_count(count);
+
+            let err = SignatureLayer::from_sigstore_bundle(
+                &bundle,
+                layer_digest,
+                subject_digest,
+                &source_ref,
+                None,
+                Some(&rekor_pub_keys),
+            )
+            .expect_err("wrong tlog entry count must be rejected");
+
+            match err {
+                SigstoreError::UnexpectedError(msg) => assert!(
+                    msg.contains(expected_fragment),
+                    "error should contain '{expected_fragment}', got '{msg}'"
+                ),
+                other => panic!("unexpected error type: {other:?}"),
             }
         }
-    }
-
-    #[rstest]
-    #[case::wrong_payload_type(V3BundleMutation::Payload, "unsupported DSSE payloadType")]
-    #[case::wrong_statement_type(V3BundleMutation::Statement, "unsupported in-toto _type")]
-    #[case::wrong_predicate_type(V3BundleMutation::Predicate, "unsupported in-toto predicateType")]
-    fn from_sigstore_bundle_rejects_unexpected_types(
-        #[case] mutation: V3BundleMutation,
-        #[case] expected_error_fragment: &str,
-    ) {
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let subject_digest =
-            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
-        let (key_id, rekor_key) = get_rekor_public_key();
-        let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
-
-        let bundle = mutated_v3_bundle_fixture(mutation);
-
-        let err = SignatureLayer::from_sigstore_bundle(
-            &bundle,
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            None,
-            Some(&rekor_pub_keys),
-        )
-        .expect_err("invalid type fields must be rejected");
-
-        match err {
-            SigstoreError::UnexpectedError(msg) => {
-                assert!(
-                    msg.contains(expected_error_fragment),
-                    "error message should contain '{expected_error_fragment}', got '{msg}'"
-                );
-            }
-            other => panic!("unexpected error type: {other:?}"),
-        }
-    }
-
-    /// Drives the Rekor key scenario for `from_sigstore_bundle_rekor_verification_cases`.
-    enum RekorKeyScenario {
-        /// The real production Rekor public key — verification must succeed.
-        Valid,
-        /// A freshly-generated ephemeral key registered under the correct key ID
-        /// — lookup succeeds but cryptographic verification fails.
-        WrongKey,
-        /// No Rekor keys provided at all — must fail closed.
-        Missing,
-    }
-
-    /// Verify Rekor transparency verification behavior for v0.3 bundles:
-    /// valid key succeeds, wrong key fails cryptographically, and missing keys
-    /// fail closed.
-    #[rstest]
-    #[case::valid_rekor_key(RekorKeyScenario::Valid)]
-    #[case::wrong_rekor_key(RekorKeyScenario::WrongKey)]
-    #[case::missing_rekor_keys(RekorKeyScenario::Missing)]
-    fn from_sigstore_bundle_rekor_verification_cases(#[case] scenario: RekorKeyScenario) {
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let subject_digest =
-            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
-
-        let rekor_pub_keys = match &scenario {
-            RekorKeyScenario::Valid => {
-                let (key_id, key) = get_rekor_public_key();
-                Some(BTreeMap::from([(key_id, key)]))
-            }
-            RekorKeyScenario::WrongKey => {
-                // Generate an ephemeral key and register it under the real key
-                // ID so the map lookup succeeds but the SET signature check fails.
-                let ephemeral_key = SigningScheme::ECDSA_P256_SHA256_ASN1
-                    .create_signer()
-                    .expect("create ephemeral signer")
-                    .to_verification_key()
-                    .expect("derive verification key");
-                let (key_id, _) = get_rekor_public_key();
-                Some(BTreeMap::from([(key_id, ephemeral_key)]))
-            }
-            RekorKeyScenario::Missing => None,
-        };
-
-        let result = SignatureLayer::from_sigstore_bundle(
-            REAL_BUNDLE_V03.as_bytes(),
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            None,
-            rekor_pub_keys.as_ref(),
-        );
-        let expect_ok = matches!(scenario, RekorKeyScenario::Valid);
-        assert_eq!(
-            result.is_ok(),
-            expect_ok,
-            "unexpected outcome for scenario: {result:?}"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // DSSE signature cardinality
-    // -----------------------------------------------------------------------
-
-    /// Build a bundle fixture with `count` copies of the existing DSSE signature
-    /// (0 = clear the array, 2 = duplicate the first entry, etc.).
-    fn bundle_with_dsse_sig_count(count: usize) -> Vec<u8> {
-        let mut bundle: serde_json::Value =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
-
-        let sigs = bundle["dsseEnvelope"]["signatures"]
-            .as_array()
-            .expect("dsseEnvelope.signatures must be an array")
-            .clone();
-        let first = sigs
-            .into_iter()
-            .next()
-            .expect("fixture has at least one sig");
-
-        let new_sigs: Vec<serde_json::Value> = (0..count).map(|_| first.clone()).collect();
-        bundle["dsseEnvelope"]["signatures"] = serde_json::Value::Array(new_sigs);
-
-        serde_json::to_vec(&bundle).expect("re-serialise must succeed")
-    }
-
-    #[rstest]
-    #[case::zero_signatures(0, "must have exactly 1 signature, got 0")]
-    #[case::two_signatures(2, "must have exactly 1 signature, got 2")]
-    fn from_sigstore_bundle_rejects_wrong_dsse_sig_count(
-        #[case] count: usize,
-        #[case] expected_fragment: &str,
-    ) {
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let subject_digest =
-            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
-        let (key_id, rekor_key) = get_rekor_public_key();
-        let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
-
-        let bundle = bundle_with_dsse_sig_count(count);
-
-        let err = SignatureLayer::from_sigstore_bundle(
-            &bundle,
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            None,
-            Some(&rekor_pub_keys),
-        )
-        .expect_err("wrong signature count must be rejected");
-
-        match err {
-            SigstoreError::UnexpectedError(msg) => assert!(
-                msg.contains(expected_fragment),
-                "error should contain '{expected_fragment}', got '{msg}'"
-            ),
-            other => panic!("unexpected error type: {other:?}"),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Tlog body consistency (verify_bundle_tlog_body_consistency in isolation)
-    // -----------------------------------------------------------------------
-
-    /// Build a minimal `TransparencyLogEntry` with only `canonicalized_body`
-    /// populated — sufficient for calling `verify_bundle_tlog_body_consistency`.
-    fn tlog_entry_with_body(
-        body: serde_json::Value,
-    ) -> sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry {
-        sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry {
-            canonicalized_body: serde_json::to_vec(&body).expect("body must serialise"),
-            ..Default::default()
-        }
-    }
-
-    /// Extracted components of a v0.3 bundle needed for tlog body consistency tests.
-    ///
-    /// Using a named struct instead of a tuple makes call sites self-documenting
-    /// and means adding new fields in future is a non-breaking change for callers
-    /// that use struct-update syntax or field access.
-    struct BundleConsistencyInputs {
-        /// Raw DSSE payload bytes (decoded from the envelope).
-        dsse_payload: Vec<u8>,
-        /// Raw signature bytes from the single DSSE signature entry.
-        raw_sig: Vec<u8>,
-        /// DER-encoded signing certificate extracted from verificationMaterial.
-        cert_der: Vec<u8>,
-        /// Canonical JSON serialization of the DSSE envelope, used to verify
-        /// `spec.envelopeHash` in the tlog body.
-        envelope_json: Vec<u8>,
-    }
-
-    /// Extract the bundle components needed for tlog body consistency tests
-    /// from the real v0.3 bundle fixture.
-    fn real_bundle_consistency_inputs() -> BundleConsistencyInputs {
-        let proto: sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse");
-
-        let dsse = match proto.content.expect("must have content") {
-            sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle::Content::DsseEnvelope(
-                e,
-            ) => e,
-            _ => panic!("expected DsseEnvelope"),
-        };
-        // Serialize envelope JSON before consuming signatures.
-        let envelope_json = serde_json::to_vec(&dsse).expect("envelope must serialise");
-        let dsse_payload = dsse.payload.clone();
-        let raw_sig = dsse
-            .signatures
-            .into_iter()
-            .next()
-            .expect("must have sig")
-            .sig;
-
-        let vm = proto.verification_material.expect("must have vm");
-        let cert_der = match vm.content.expect("must have vm.content") {
-            sigstore_protobuf_specs::dev::sigstore::bundle::v1::verification_material::Content::Certificate(c) => c.raw_bytes,
-            _ => panic!("expected Certificate"),
-        };
-
-        BundleConsistencyInputs {
-            dsse_payload,
-            raw_sig,
-            cert_der,
-            envelope_json,
-        }
-    }
-
-    /// Extract and parse the real tlog body from the fixture.
-    fn real_tlog_body() -> serde_json::Value {
-        let proto: sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse");
-        let body_bytes = proto
-            .verification_material
-            .expect("vm")
-            .tlog_entries
-            .into_iter()
-            .next()
-            .expect("tlog entry")
-            .canonicalized_body;
-        serde_json::from_slice(&body_bytes).expect("body must be JSON")
-    }
-
-    #[test]
-    fn tlog_body_consistency_accepts_real_fixture() {
-        let inputs = real_bundle_consistency_inputs();
-        let body = real_tlog_body();
-        let entry = tlog_entry_with_body(body);
-
-        verify_bundle_tlog_body_consistency(
-            &entry,
-            &inputs.envelope_json,
-            &inputs.dsse_payload,
-            &inputs.raw_sig,
-            &inputs.cert_der,
-        )
-        .expect("real fixture must pass consistency check");
-    }
-
-    #[rstest]
-    #[case::wrong_kind(
-        "tlog body kind is 'hashedrekord', expected 'dsse'",
-        Box::new(|body: &mut serde_json::Value| {
-            body["kind"] = serde_json::json!("hashedrekord");
-        }) as Box<dyn FnOnce(&mut serde_json::Value)>,
-    )]
-    #[case::wrong_api_version(
-        "tlog body apiVersion is '0.0.2', expected '0.0.1'",
-        Box::new(|body: &mut serde_json::Value| {
-            body["apiVersion"] = serde_json::json!("0.0.2");
-        }),
-    )]
-    #[case::envelope_hash_mismatch(
-        "tlog body envelopeHash mismatch",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["envelopeHash"]["value"] =
-                serde_json::json!("0000000000000000000000000000000000000000000000000000000000000000");
-        }),
-    )]
-    #[case::envelope_hash_bad_algorithm(
-        "envelopeHash algorithm is 'sha512', expected 'sha256'",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["envelopeHash"]["algorithm"] = serde_json::json!("sha512");
-        }),
-    )]
-    #[case::payload_hash_mismatch(
-        "tlog body payloadHash mismatch",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["payloadHash"]["value"] =
-                serde_json::json!("0000000000000000000000000000000000000000000000000000000000000000");
-        }) as Box<dyn FnOnce(&mut serde_json::Value)>,
-    )]
-    #[case::payload_hash_bad_algorithm(
-        "payloadHash algorithm is 'sha512'",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["payloadHash"]["algorithm"] = serde_json::json!("sha512");
-        }),
-    )]
-    #[case::signature_mismatch(
-        "signature does not match",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["signatures"][0]["signature"] =
-                serde_json::json!(base64.encode([0u8; 64]));
-        }),
-    )]
-    #[case::verifier_cert_mismatch(
-        "cannot parse tlog body verifier PEM certificate",
-        Box::new(|body: &mut serde_json::Value| {
-            // Replace the verifier with base64 of something that is not a PEM cert.
-            body["spec"]["signatures"][0]["verifier"] =
-                serde_json::json!(base64.encode(b"not-a-cert"));
-        }),
-    )]
-    fn tlog_body_consistency_rejects_tampered_body(
-        #[case] expected_fragment: &str,
-        #[case] mutate: Box<dyn FnOnce(&mut serde_json::Value)>,
-    ) {
-        let inputs = real_bundle_consistency_inputs();
-        let mut body = real_tlog_body();
-        mutate(&mut body);
-        let entry = tlog_entry_with_body(body);
-
-        let err = verify_bundle_tlog_body_consistency(
-            &entry,
-            &inputs.envelope_json,
-            &inputs.dsse_payload,
-            &inputs.raw_sig,
-            &inputs.cert_der,
-        )
-        .expect_err("tampered body must be rejected");
-
-        match err {
-            SigstoreError::UnexpectedError(msg) => assert!(
-                msg.contains(expected_fragment),
-                "error should contain '{expected_fragment}', got '{msg}'"
-            ),
-            other => panic!("unexpected error type: {other:?}"),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Certificate validation fail-closed
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn from_sigstore_bundle_with_unrecognised_cert_produces_no_certificate_signature() {
-        // The real bundle cert was issued by production Fulcio; the test pool
-        // uses different CA certs, so cert validation fails.  The layer must
-        // still be returned — but with `certificate_signature: None` — so that
-        // downstream CertificateVerifier constraints reject it rather than the
-        // layer being silently dropped or causing a hard error.
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let subject_digest =
-            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
-        let (key_id, rekor_key) = get_rekor_public_key();
-        let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
-        let fulcio_pool = get_fulcio_cert_pool();
-
-        let layer = SignatureLayer::from_sigstore_bundle(
-            REAL_BUNDLE_V03.as_bytes(),
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            Some(&fulcio_pool),
-            Some(&rekor_pub_keys),
-        )
-        .expect("layer must be produced even when cert is not in pool");
-
-        assert!(
-            layer.certificate_signature.is_none(),
-            "certificate_signature must be None when cert is not trusted by the pool"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Tlog entry cardinality
-    // -----------------------------------------------------------------------
-
-    /// Build a bundle JSON with the tlog_entries array duplicated to `count`
-    /// copies of the real fixture entry.
-    fn bundle_with_tlog_entry_count(count: usize) -> Vec<u8> {
-        let mut bundle: serde_json::Value =
-            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must be valid JSON");
-
-        let entries = bundle["verificationMaterial"]["tlogEntries"]
-            .as_array()
-            .expect("tlogEntries must be an array")
-            .clone();
-        let first = entries
-            .into_iter()
-            .next()
-            .expect("fixture has at least one tlog entry");
-
-        let new_entries: Vec<serde_json::Value> = (0..count).map(|_| first.clone()).collect();
-        bundle["verificationMaterial"]["tlogEntries"] = serde_json::Value::Array(new_entries);
-
-        serde_json::to_vec(&bundle).expect("re-serialise must succeed")
-    }
-
-    #[rstest]
-    #[case::zero_entries(0, "exactly 1 tlog entry, got 0")]
-    #[case::two_entries(2, "exactly 1 tlog entry, got 2")]
-    fn from_sigstore_bundle_rejects_wrong_tlog_entry_count(
-        #[case] count: usize,
-        #[case] expected_fragment: &str,
-    ) {
-        let source_ref: OciReference = "ghcr.io/kubewarden/kubewarden-controller:v1.34.0"
-            .parse()
-            .unwrap();
-        let layer_digest =
-            "sha256:121ecb638da858178a0d57de5686709769f15b47d9fa5e3270dd7c64aea046d5";
-        let subject_digest =
-            "sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172";
-        let (key_id, rekor_key) = get_rekor_public_key();
-        let rekor_pub_keys = BTreeMap::from([(key_id, rekor_key)]);
-
-        let bundle = bundle_with_tlog_entry_count(count);
-
-        let err = SignatureLayer::from_sigstore_bundle(
-            &bundle,
-            layer_digest,
-            subject_digest,
-            &source_ref,
-            None,
-            Some(&rekor_pub_keys),
-        )
-        .expect_err("wrong tlog entry count must be rejected");
-
-        match err {
-            SigstoreError::UnexpectedError(msg) => assert!(
-                msg.contains(expected_fragment),
-                "error should contain '{expected_fragment}', got '{msg}'"
-            ),
-            other => panic!("unexpected error type: {other:?}"),
-        }
-    }
+    } // end mod bundle_tests
 }
