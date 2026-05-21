@@ -597,16 +597,33 @@ impl SignatureLayer {
 /// Verify a Sigstore bundle transparency log entry end-to-end.
 ///
 /// This is the single entry point for all tlog verification.  It performs
-/// three steps in order:
+/// four steps in order:
 ///
-/// 1. **SET verification** — the Signed Entry Timestamp (inclusion promise) is
+/// 1. **Key ID lookup** — hex-encode the `log_id.key_id` bytes and look up
+///    the matching Rekor public key in the provided key map.  Rejects the
+///    bundle if no matching key is found.
+///
+/// 2. **SET verification** — the Signed Entry Timestamp (inclusion promise) is
 ///    a signature by the Rekor log key over the canonical JSON payload:
 ///    ```json
 ///    {"body":"<base64(body)>","integratedTime":<i64>,"logIndex":<i64>,"logID":"<hex(keyId)>"}
 ///    ```
-/// 2. **Merkle inclusion proof** — offline verification that the entry leaf
-///    hash is included in the log tree at the claimed index.
-/// 3. **Body consistency** — the `canonicalized_body` must bind to the exact
+///
+/// 3. **Merkle inclusion proof** — offline verification that the entry leaf
+///    hash is included in the log tree at the claimed index.  The proof chains
+///    three independent sub-checks; all three are required:
+///    * **(a)** The checkpoint's signature is valid under `rekor_key`, proving
+///      that the log itself attested to some `(root_hash, tree_size)` pair.
+///    * **(b)** The proof's claimed `(root_hash, tree_size)` matches the
+///      *signed* pair from (a).  Without this cross-check, an attacker could
+///      supply a self-consistent Merkle proof against a root the log never
+///      signed.  This is the single line `checkpoint.is_valid_for_proof()` in
+///      `InclusionProof::verify` and is easy to mistake for a redundant
+///      assertion.
+///    * **(c)** The Merkle path proves that `canonicalized_body` is the leaf at
+///      `log_index` under the now-verified-real root.
+///
+/// 4. **Body consistency** — the `canonicalized_body` must bind to the exact
 ///    bundle content provided (`dsse_payload`, `raw_sig`, `cert_der`).  A
 ///    valid SET + inclusion proof only proves that *some* entry was logged; this
 ///    step ensures the logged entry describes *this* artifact.  See
@@ -666,6 +683,22 @@ fn verify_bundle_tlog_entry(
         })?;
 
     // 3) Verify the Merkle inclusion proof (required for v0.3 bundles).
+    //
+    // The proof verification performed by `InclusionProof::verify` chains three
+    // independent sub-checks; all three are required for the result to be
+    // meaningful:
+    //
+    //   a. The checkpoint's signature is valid under `rekor_key`, proving that
+    //      the log itself attested to some (root_hash, tree_size) pair.
+    //   b. The proof's claimed (root_hash, tree_size) matches the *signed* pair
+    //      from (a).  Without this cross-check, an attacker could supply a
+    //      self-consistent Merkle proof against a root the log never signed.
+    //      This is `checkpoint.is_valid_for_proof()` inside `InclusionProof::verify`
+    //      and is easy to mistake for a redundant assertion.
+    //   c. The Merkle path proves that `canonicalized_body` is the leaf at
+    //      `log_index` under the now-verified-real root.
+    //
+    // Removing any one of (a), (b), (c) breaks the security argument.
     let proto_proof = tlog_entry.inclusion_proof.as_ref().ok_or_else(|| {
         SigstoreError::UnexpectedError(
             "Sigstore bundle tlog entry missing inclusionProof".to_string(),
@@ -726,19 +759,25 @@ fn verify_bundle_tlog_entry(
     Ok(())
 }
 
-/// Verify that the tlog entry's canonicalized body binds to the exact same
-/// payload, signature, and certificate that are present in the bundle.
+/// Verify that the tlog entry's `canonicalized_body` is a unique fingerprint
+/// of the bundle we are presenting.  We verify that:
 ///
-/// A valid SET + inclusion proof only proves that *some* entry was logged; it
-/// does not prove that the logged entry describes *this* artifact.  Without
-/// this cross-check, an attacker could substitute any previously-logged tlog
-/// entry whose SET still verifies, making the bundle appear valid for an
-/// unrelated artifact.
+///   1. The entry has `kind == "dsse"` and `apiVersion == "0.0.1"` (anything
+///      else has a different body schema and is not supported here).
+///   2. `spec.envelopeHash` matches `sha256(canonical DSSE envelope JSON)`.
+///   3. `spec.payloadHash` matches `sha256(raw DSSE payload bytes)`.
+///   4. `spec.signatures[0].signature` decodes to the same bytes as the
+///      bundle's DSSE signature.
+///   5. `spec.signatures[0].verifier` is `base64(PEM cert)` that round-trips
+///      to the same DER bytes as the bundle's certificate.
 ///
-/// We check (following cosign-go and sigstore-go behaviour):
-///   - `spec.payloadHash` == sha256(raw DSSE payload bytes)
-///   - `spec.signatures[0].signature` (base64) == base64(raw signature bytes)
-///   - `spec.signatures[0].verifier` (base64-PEM) decodes to the same DER cert
+/// Without these checks, a valid SET + Merkle proof would only prove that
+/// `canonicalized_body` was logged at some point, but it would *not* prove
+/// that the logged entry is about *this* bundle.  An attacker holding the
+/// bundle's Fulcio cert and any other previously-logged entry by that cert
+/// could otherwise present the foreign tlog material as if it were the
+/// bundle's signing record, defeating timestamp- and revocation-based policies
+/// that depend on `integrated_time` being for *this* signature.
 #[cfg(any(feature = "verify", feature = "sign"))]
 fn verify_bundle_tlog_body_consistency(
     tlog_entry: &sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry,
@@ -817,7 +856,7 @@ fn verify_bundle_tlog_body_consistency(
         )));
     }
 
-    // --- 3. payload hash ---
+    // --- 2. payload hash ---
     let tlog_payload_hash = spec
         .pointer("/payloadHash/value")
         .and_then(|v| v.as_str())
