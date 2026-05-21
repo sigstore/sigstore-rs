@@ -819,6 +819,16 @@ fn verify_bundle_tlog_body_consistency(
         .ok_or_else(|| {
             SigstoreError::UnexpectedError("tlog body missing 'apiVersion'".to_string())
         })?;
+    // We pin to exactly "0.0.1" because the field paths parsed below
+    // (spec.envelopeHash, spec.payloadHash, spec.signatures[0].{signature,verifier})
+    // are specific to this schema version.
+    //
+    // Per the in-toto attestation spec versioning rules
+    // (https://github.com/in-toto/attestation/blob/main/spec/v1/README.md#parsing-rules),
+    // 0.X versions are treated as major versions, so a future "0.0.2" could
+    // introduce incompatible body schema changes.  If Rekor ever produces
+    // "0.0.2" DSSE entries, this check — and the field extraction below —
+    // will need to be revisited.
     if api_version != "0.0.1" {
         return Err(SigstoreError::UnexpectedError(format!(
             "tlog body apiVersion is '{api_version}', expected '0.0.1'"
