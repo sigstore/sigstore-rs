@@ -38,6 +38,4 @@ pub(crate) const SIGSTORE_CERT_ANNOTATION: &str = "dev.sigstore.cosign/certifica
 // Cosign v3 / Sigstore Bundle v0.3 constants
 pub(crate) const SIGSTORE_BUNDLE_V03_MEDIA_TYPE: &str =
     "application/vnd.dev.sigstore.bundle.v0.3+json";
-pub(crate) const COSIGN_SIGN_V1_PREDICATE_TYPE: &str = "https://sigstore.dev/cosign/sign/v1";
-pub(crate) const IN_TOTO_STATEMENT_V1_TYPE: &str = "https://in-toto.io/Statement/v1";
 pub(crate) const DSSE_PAYLOAD_TYPE_IN_TOTO_JSON: &str = "application/vnd.in-toto+json";
