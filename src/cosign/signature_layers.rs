@@ -734,7 +734,12 @@ fn verify_bundle_tlog_entry(
     let proof = RekorInclusionProof::new(
         proto_proof.log_index,
         root_hash,
-        proto_proof.tree_size as u64,
+        proto_proof.tree_size.try_into().map_err(|_| {
+            SigstoreError::UnexpectedError(format!(
+                "inclusion proof tree_size is negative: {}",
+                proto_proof.tree_size
+            ))
+        })?,
         hashes,
         checkpoint,
     );
@@ -762,14 +767,14 @@ fn verify_bundle_tlog_entry(
 /// Verify that the tlog entry's `canonicalized_body` is a unique fingerprint
 /// of the bundle we are presenting.  We verify that:
 ///
-///   1. The entry has `kind == "dsse"` and `apiVersion == "0.0.1"` (anything
-///      else has a different body schema and is not supported here).
-///   2. `spec.envelopeHash` matches `sha256(canonical DSSE envelope JSON)`.
-///   3. `spec.payloadHash` matches `sha256(raw DSSE payload bytes)`.
-///   4. `spec.signatures[0].signature` decodes to the same bytes as the
-///      bundle's DSSE signature.
-///   5. `spec.signatures[0].verifier` is `base64(PEM cert)` that round-trips
-///      to the same DER bytes as the bundle's certificate.
+/// - The entry has `kind == "dsse"` and `apiVersion == "0.0.1"` (anything
+///   else has a different body schema and is not supported here).
+/// - `spec.envelopeHash` matches `sha256(canonical DSSE envelope JSON)`.
+/// - `spec.payloadHash` matches `sha256(raw DSSE payload bytes)`.
+/// - `spec.signatures[0].signature` decodes to the same bytes as the
+///   bundle's DSSE signature.
+/// - `spec.signatures[0].verifier` is `base64(PEM cert)` that round-trips
+///   to the same DER bytes as the bundle's certificate.
 ///
 /// Without these checks, a valid SET + Merkle proof would only prove that
 /// `canonicalized_body` was logged at some point, but it would *not* prove
@@ -882,7 +887,7 @@ fn verify_bundle_tlog_body_consistency(
         )));
     }
 
-    // --- 4. signature bytes ---
+    // --- 3. signature bytes ---
     let tlog_sigs = spec
         .get("signatures")
         .and_then(|v| v.as_array())
@@ -914,7 +919,7 @@ fn verify_bundle_tlog_body_consistency(
         ));
     }
 
-    // --- 5. verifier (certificate) ---
+    // --- 4. verifier (certificate) ---
     let tlog_verifier_b64 = tlog_sigs[0]
         .get("verifier")
         .and_then(|v| v.as_str())
