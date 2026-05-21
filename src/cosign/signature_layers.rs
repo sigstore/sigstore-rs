@@ -883,7 +883,11 @@ fn verify_bundle_tlog_body_consistency(
     let tlog_payload_alg = spec
         .pointer("/payloadHash/algorithm")
         .and_then(|v| v.as_str())
-        .unwrap_or("sha256");
+        .ok_or_else(|| {
+            SigstoreError::UnexpectedError(
+                "tlog body 'spec.payloadHash.algorithm' missing or not a string".to_string(),
+            )
+        })?;
     if tlog_payload_alg != "sha256" {
         return Err(SigstoreError::UnexpectedError(format!(
             "tlog body payloadHash algorithm is '{tlog_payload_alg}', expected 'sha256'"
