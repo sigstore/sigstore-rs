@@ -50,6 +50,8 @@ use pkcs8::der::Decode;
 use x509_cert::Certificate;
 
 pub mod bundle;
+pub mod bundle_content;
+pub use bundle_content::BundleContent;
 pub(crate) mod constants;
 pub(crate) mod intoto;
 pub mod signature_layers;

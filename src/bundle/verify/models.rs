@@ -263,10 +263,11 @@ impl TryFrom<Bundle> for CheckedBundle {
                 let pae = compute_pae(&dsse.payload_type, &dsse.payload);
 
                 // Extract the subject sha256 digest from the in-toto statement.
-                let subject_sha256_digest = serde_json::from_slice::<InTotoStatementV1>(&dsse.payload)
-                    .map_err(|_| BundleErrorKind::DssePayloadDecode)?
-                    .subject_sha256_digest()
-                    .map_err(|_| BundleErrorKind::DssePayloadDecode)?;
+                let subject_sha256_digest =
+                    serde_json::from_slice::<InTotoStatementV1>(&dsse.payload)
+                        .map_err(|_| BundleErrorKind::DssePayloadDecode)?
+                        .subject_sha256_digest()
+                        .map_err(|_| BundleErrorKind::DssePayloadDecode)?;
 
                 let payload_bytes = dsse.payload;
 
@@ -432,7 +433,10 @@ impl CheckedBundle {
         // silently parsing the wrong fields.
         let api_version = actual.get("apiVersion").and_then(|v| v.as_str())?;
         if api_version != "0.0.1" {
-            warn!(api_version, "unsupported apiVersion in dsse tlog entry body");
+            warn!(
+                api_version,
+                "unsupported apiVersion in dsse tlog entry body"
+            );
             return None;
         }
 

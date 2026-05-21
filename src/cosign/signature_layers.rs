@@ -26,6 +26,7 @@ use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::ext::pkix::name::GeneralName;
 
 use super::bundle::Bundle;
+use super::bundle_content::BundleContent;
 use super::constants::{
     DSSE_PAYLOAD_TYPE_IN_TOTO_JSON, SIGSTORE_BUNDLE_ANNOTATION, SIGSTORE_CERT_ANNOTATION,
     SIGSTORE_GITHUB_WORKFLOW_NAME_OID, SIGSTORE_GITHUB_WORKFLOW_REF_OID,
@@ -140,8 +141,16 @@ pub struct SignatureLayer {
     /// with a PKCS11 token, but with Rekor's integration disabled at
     /// signature time.
     pub certificate_signature: Option<CertificateSignature>,
-    /// The bundle produced by Rekor.
-    pub bundle: Option<Bundle>,
+    /// The transparency log evidence associated with this layer.
+    ///
+    /// For tag-based cosign signature layers this holds
+    /// [`BundleContent::RekorBundle`] (the legacy SET + payload format).
+    /// For OCI referrers / Sigstore bundle layers this holds
+    /// [`BundleContent::SigstoreBundle`] (the verified protobuf
+    /// `TransparencyLogEntry`).
+    ///
+    /// A `None` value means no transparency log evidence was provided.
+    pub bundle: Option<BundleContent>,
     #[serde(skip_serializing)]
     pub signature: Option<String>,
     #[serde(skip_serializing)]
@@ -303,10 +312,12 @@ impl SignatureLayer {
     fn get_bundle_from_annotations(
         annotations: &BTreeMap<String, String>,
         rekor_pub_keys: Option<&BTreeMap<String, CosignVerificationKey>>,
-    ) -> Result<Option<Bundle>> {
+    ) -> Result<Option<BundleContent>> {
         let bundle = match annotations.get(SIGSTORE_BUNDLE_ANNOTATION) {
             Some(value) => match rekor_pub_keys {
-                Some(keys) => Some(Bundle::new_verified(value, keys)?),
+                Some(keys) => Some(BundleContent::RekorBundle(Bundle::new_verified(
+                    value, keys,
+                )?)),
                 None => {
                     info!(bundle = ?value, "Ignoring bundle, rekor public key not provided to verification client");
                     None
@@ -320,7 +331,7 @@ impl SignatureLayer {
     fn get_certificate_signature_from_annotations(
         annotations: &BTreeMap<String, String>,
         fulcio_cert_pool: Option<&CertificatePool>,
-        bundle: Option<&Bundle>,
+        bundle: Option<&BundleContent>,
     ) -> Option<CertificateSignature> {
         let cert_raw = annotations.get(SIGSTORE_CERT_ANNOTATION)?;
 
@@ -335,8 +346,8 @@ impl SignatureLayer {
             }
         };
 
-        let bundle = match bundle {
-            Some(b) => b,
+        let integrated_time = match bundle {
+            Some(b) => b.integrated_time(),
             None => {
                 info!(
                     reason = "rekor bundle not found",
@@ -346,8 +357,11 @@ impl SignatureLayer {
             }
         };
 
-        match CertificateSignature::from_certificate(cert_raw.as_bytes(), fulcio_cert_pool, bundle)
-        {
+        match CertificateSignature::from_certificate(
+            cert_raw.as_bytes(),
+            fulcio_cert_pool,
+            integrated_time,
+        ) {
             Ok(certificate_signature) => Some(certificate_signature),
             Err(e) => {
                 info!(reason=?e, "Ignoring certificate annotation");
@@ -393,7 +407,7 @@ impl SignatureLayer {
         use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
         use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle as ProtoBundle;
         use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
-            bundle::Content as BundleContent, verification_material::Content as VmContent,
+            bundle::Content as ProtoBundleContent, verification_material::Content as VmContent,
         };
 
         let proto_bundle: ProtoBundle = serde_json::from_slice(bundle_data).map_err(|e| {
@@ -404,7 +418,7 @@ impl SignatureLayer {
         // The proto Bundle.content oneof is DsseEnvelope for v0.3 bundles.
         // io::intoto::Envelope.payload is Vec<u8> (base64-decoded by serde).
         let dsse_env = match proto_bundle.content {
-            Some(BundleContent::DsseEnvelope(env)) => env,
+            Some(ProtoBundleContent::DsseEnvelope(env)) => env,
             _ => {
                 return Err(SigstoreError::UnexpectedError(
                     "Sigstore Bundle v0.3: expected DsseEnvelope content".to_string(),
@@ -551,7 +565,7 @@ impl SignatureLayer {
             simple_signing,
             oci_digest: layer_digest.to_string(),
             certificate_signature,
-            bundle: None,
+            bundle: Some(BundleContent::SigstoreBundle(tlog_entry)),
             signature: Some(dsse_sig),
             raw_data: pae_bytes,
         })
@@ -950,11 +964,10 @@ impl CertificateSignature {
     pub(crate) fn from_certificate(
         cert_pem: &[u8],
         fulcio_cert_pool: &CertificatePool,
-        trusted_bundle: &Bundle,
+        integrated_time: i64,
     ) -> Result<Self> {
         let cert = Certificate::from_pem(cert_pem)
             .map_err(|e| SigstoreError::X509Error(format!("parse from pem: {e}")))?;
-        let integrated_time = trusted_bundle.payload.integrated_time;
 
         // ensure the certificate has been issued by Fulcio
         fulcio_cert_pool.verify_pem_cert(
@@ -1240,9 +1253,12 @@ oXqqo/C9QnOHTto=
 -----END CERTIFICATE-----"#;
 
         let fulcio_cert_pool = get_fulcio_cert_pool();
-        let certificate_signature =
-            CertificateSignature::from_certificate(cert_raw.as_bytes(), &fulcio_cert_pool, &bundle)
-                .expect("Cannot create certificate signature");
+        let certificate_signature = CertificateSignature::from_certificate(
+            cert_raw.as_bytes(),
+            &fulcio_cert_pool,
+            bundle.payload.integrated_time,
+        )
+        .expect("Cannot create certificate signature");
 
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
@@ -1252,7 +1268,7 @@ oXqqo/C9QnOHTto=
             signature: Some(String::from(
                 "MEUCIGqWScz7s9aP2sGXNFKeqivw3B6kPRs56AITIHnvd5igAiEA1kzbaV2Y5yPE81EN92NUFOl31LLJSvwsjFQ07m2XqaA=",
             )),
-            bundle: Some(bundle),
+            bundle: Some(BundleContent::RekorBundle(bundle)),
             certificate_signature: Some(certificate_signature),
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
         }
@@ -1444,7 +1460,7 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         let cert = SignatureLayer::get_certificate_signature_from_annotations(
             &annotations,
             None,
-            Some(&bundle),
+            Some(&BundleContent::RekorBundle(bundle)),
         );
         assert!(cert.is_none());
     }
@@ -1516,9 +1532,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         };
 
-        let certificate_signature =
-            CertificateSignature::from_certificate(&issued_cert_pem, &cert_pool, &bundle)
-                .expect("Didn't expect an error");
+        let certificate_signature = CertificateSignature::from_certificate(
+            &issued_cert_pem,
+            &cert_pool,
+            bundle.payload.integrated_time,
+        )
+        .expect("Didn't expect an error");
 
         let expected_issuer = match certificate_signature.subject.clone() {
             CertificateSubject::Email(mail) => mail == expected_email,
@@ -1571,9 +1590,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         };
 
-        let certificate_signature =
-            CertificateSignature::from_certificate(&issued_cert_pem, &cert_pool, &bundle)
-                .expect("Didn't expect an error");
+        let certificate_signature = CertificateSignature::from_certificate(
+            &issued_cert_pem,
+            &cert_pool,
+            bundle.payload.integrated_time,
+        )
+        .expect("Didn't expect an error");
 
         let expected_issuer = match certificate_signature.subject.clone() {
             CertificateSubject::Uri(url) => url == expected_url,
@@ -1625,8 +1647,12 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             },
         };
 
-        let error = CertificateSignature::from_certificate(&issued_cert_pem, &cert_pool, &bundle)
-            .expect_err("Didn't get an error");
+        let error = CertificateSignature::from_certificate(
+            &issued_cert_pem,
+            &cert_pool,
+            bundle.payload.integrated_time,
+        )
+        .expect_err("Didn't get an error");
         assert!(matches!(
             error,
             SigstoreError::CertificateWithoutSubjectAlternativeName
@@ -1877,7 +1903,10 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
                         !layer.raw_data.is_empty(),
                         "raw_data (PAE) should be non-empty"
                     );
-                    assert!(layer.bundle.is_none());
+                    assert!(
+                        matches!(layer.bundle, Some(BundleContent::SigstoreBundle(_))),
+                        "bundle should be Some(BundleContent::SigstoreBundle)"
+                    );
                     assert!(layer.certificate_signature.is_none());
                 }
                 None => {
