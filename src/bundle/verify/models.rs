@@ -423,6 +423,16 @@ impl CheckedBundle {
             return None;
         }
 
+        // Guard the schema-dependent field traversal below (spec.envelopeHash,
+        // spec.payloadHash, spec.signatures) which are defined by the dsse v0.0.1
+        // body schema.  Fail fast if the version is unexpected rather than
+        // silently parsing the wrong fields.
+        let api_version = actual.get("apiVersion").and_then(|v| v.as_str())?;
+        if api_version != "0.0.1" {
+            warn!(api_version, "unsupported apiVersion in dsse tlog entry body");
+            return None;
+        }
+
         let BundleContent::Dsse {
             envelope_json,
             payload_bytes,
