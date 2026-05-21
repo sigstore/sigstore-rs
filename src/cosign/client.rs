@@ -303,6 +303,10 @@ impl Client {
 #[cfg(feature = "mock-client")]
 #[cfg(test)]
 mod tests {
+    use oci_client::client::{Config, ImageData, ImageLayer};
+    use oci_client::manifest::{ImageIndexEntry, OciImageIndex, OciManifest};
+    use rstest::rstest;
+
     use super::*;
 
     use crate::{
@@ -318,6 +322,26 @@ mod tests {
             registry_client: Box::new(mock_client),
             rekor_pub_keys: Some(rekor_pub_keys),
             fulcio_cert_pool: Some(get_fulcio_cert_pool()),
+        }
+    }
+
+    /// Build a minimal single-entry OciImageIndex whose one manifest has the
+    /// given media type.  Used by several test helpers below.
+    fn index_with_one_entry(media_type: &str) -> OciImageIndex {
+        OciImageIndex {
+            schema_version: 2,
+            media_type: None,
+            artifact_type: None,
+            manifests: vec![ImageIndexEntry {
+                media_type: media_type.to_string(),
+                digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                size: 0,
+                artifact_type: None,
+                platform: None,
+                annotations: None,
+            }],
+            annotations: None,
         }
     }
 
@@ -342,5 +366,159 @@ mod tests {
 
         assert!(reference.is_ok());
         assert_eq!(reference.unwrap(), (expected_image, image_digest));
+    }
+
+    // -------------------------------------------------------------------------
+    // fetch_signature_layers_from_tag
+    // -------------------------------------------------------------------------
+
+    /// Registry errors and unsupported manifest types must be propagated as
+    /// Err, not silently swallowed.
+    #[rstest]
+    #[case::registry_error_is_propagated(
+        MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: Some(Err(anyhow::anyhow!("registry unavailable"))),
+            pull_response: None,
+            push_response: None,
+            pull_referrers_response: None,
+        }
+    )]
+    #[case::image_index_instead_of_manifest_is_rejected(
+        MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: Some(Ok((
+                OciManifest::ImageIndex(OciImageIndex {
+                    schema_version: 2,
+                    media_type: None,
+                    artifact_type: None,
+                    manifests: vec![],
+                    annotations: None,
+                }),
+                String::new(),
+            ))),
+            pull_response: Some(Ok(ImageData {
+                layers: vec![],
+                digest: None,
+                config: Config::new(vec![], String::new(), None),
+                manifest: None,
+            })),
+            push_response: None,
+            pull_referrers_response: None,
+        }
+    )]
+    #[tokio::test]
+    async fn fetch_from_tag_returns_err(#[case] mock_client: MockOciClient) {
+        let mut client = build_test_client(mock_client);
+        let cosign_image = "docker.io/library/busybox:sha256-abc.sig"
+            .parse()
+            .unwrap();
+
+        let result = client
+            .fetch_signature_layers_from_tag(&Auth::Anonymous, "sha256:abc", &cosign_image)
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    // -------------------------------------------------------------------------
+    // fetch_signature_layers_from_referrers
+    // -------------------------------------------------------------------------
+
+    /// A registry error from pull_referrers must be propagated as an Err, not
+    /// silently swallowed.
+    #[cfg(any(feature = "verify", feature = "sign"))]
+    #[tokio::test]
+    async fn fetch_from_referrers_propagates_registry_error() {
+        let mock_client = MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: None,
+            pull_response: None,
+            push_response: None,
+            pull_referrers_response: Some(Err(anyhow::anyhow!("registry unavailable"))),
+        };
+        let mut client = build_test_client(mock_client);
+        let source_image = "docker.io/library/busybox:latest".parse().unwrap();
+
+        let result = client
+            .fetch_signature_layers_from_referrers(
+                &Auth::Anonymous,
+                &source_image,
+                "sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b",
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    /// Conditions that must all produce Ok(vec![]) — i.e. partial or total
+    /// absence of valid bundle layers must never abort the whole call.
+    ///
+    /// Note: MockOciClient has a single pull_response field, so only
+    /// single-referrer scenarios can be exercised here without extending the
+    /// mock.
+    #[cfg(any(feature = "verify", feature = "sign"))]
+    #[rstest]
+    #[case::empty_referrers_index_yields_no_layers(
+        MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: None,
+            pull_response: None,
+            push_response: None,
+            pull_referrers_response: Some(Ok(OciImageIndex {
+                schema_version: 2,
+                media_type: None,
+                artifact_type: None,
+                manifests: vec![],
+                annotations: None,
+            })),
+        }
+    )]
+    #[case::failed_referrer_pull_is_skipped_not_propagated(
+        MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: None,
+            pull_response: Some(Err(anyhow::anyhow!("pull failed"))),
+            push_response: None,
+            pull_referrers_response: Some(Ok(index_with_one_entry(
+                SIGSTORE_BUNDLE_V03_MEDIA_TYPE,
+            ))),
+        }
+    )]
+    #[case::layers_with_non_bundle_media_type_are_skipped(
+        MockOciClient {
+            fetch_manifest_digest_response: None,
+            pull_manifest_response: None,
+            pull_response: Some(Ok(ImageData {
+                layers: vec![ImageLayer {
+                    data: b"not a bundle".as_ref().into(),
+                    media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
+                    annotations: None,
+                }],
+                digest: None,
+                config: Config::new(vec![], String::new(), None),
+                manifest: None,
+            })),
+            push_response: None,
+            pull_referrers_response: Some(Ok(index_with_one_entry(
+                "application/vnd.oci.image.manifest.v1+json",
+            ))),
+        }
+    )]
+    #[tokio::test]
+    async fn fetch_from_referrers_returns_empty(#[case] mock_client: MockOciClient) {
+        let mut client = build_test_client(mock_client);
+        let source_image = "docker.io/library/busybox:latest".parse().unwrap();
+
+        let result = client
+            .fetch_signature_layers_from_referrers(
+                &Auth::Anonymous,
+                &source_image,
+                "sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b",
+            )
+            .await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 }
