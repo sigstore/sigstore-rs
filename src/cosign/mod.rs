@@ -123,6 +123,14 @@ pub trait CosignCapabilities {
     /// These returned objects can then be verified against
     /// [`VerificationConstraints`](crate::cosign::verification_constraint::VerificationConstraint)
     /// using the [`verify_constraints`] function.
+    ///
+    /// ## Image reference formats
+    ///
+    /// `source_image` may be either a tag reference (e.g. `registry/repo:tag`)
+    /// or a digest reference (e.g. `registry/repo@sha256:...`). Triangulation
+    /// is performed internally by issuing a `HEAD` request against the registry,
+    /// which works for both forms: digest references simply cause the registry to
+    /// echo back the same digest in the response header.
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
