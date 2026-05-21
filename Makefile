@@ -21,15 +21,14 @@ check-features:
 
 .PHONY: check-features-native-tls
 check-features-native-tls:
-	cargo hack check --feature-powerset --features native-tls --skip wasm --skip test-registry --skip test-remote-registry --skip rustls-tls --skip rustls-tls-native-roots
+	cargo hack check --feature-powerset --features native-tls --skip test-registry --skip test-remote-registry --skip rustls-tls
 
 .PHONY: check-features-rustls-tls
 check-features-rustls-tls:
-	cargo hack check --feature-powerset --features rustls-tls --skip wasm --skip test-registry --skip test-remote-registry --skip native-tls --skip rustls-tls-native-roots
+	cargo hack check --feature-powerset --features rustls-tls --skip test-registry --skip test-remote-registry --skip native-tls
 
-.PHONY: check-wasm
-check-wasm:
-	cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+.PHONY: check-all-features
+check-all-features: check-features check-features-native-tls check-features-rustls-tls
 
 .PHONY: test
 test: fmt lint doc

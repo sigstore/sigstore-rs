@@ -22,40 +22,7 @@ jobs:
       - uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
         with:
           tool: cargo-hack
-
-      # cosign, full, mock-client, registry will ONLY compile with a *-tls feature
-      - run: |
-          cargo hack check --each-feature --skip cosign --skip full --skip mock-client --skip registry --skip test-remote-registry
-
-  check-native-tls:
-    name: Check native-tls features
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
-        with:
-          tool: cargo-hack
-      - run: |
-          cargo hack check --feature-powerset --features native-tls --skip test-registry --skip test-remote-registry --skip rustls-tls --skip rustls-tls-native-roots
-
-  check-rustls-tls:
-    name: Check rusttls-tls features
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
-        with:
-          tool: cargo-hack
-      - run: |
-          cargo hack check --feature-powerset --features rustls-tls --skip test-registry --skip test-remote-registry --skip native-tls
+      - run: make check-all-features
 
   test-native-tls:
     name: Test Suite
