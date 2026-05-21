@@ -15,7 +15,7 @@
 
 //! Types for verifying Sigstore bundles with policies.
 
-mod models;
+pub(crate) mod models;
 
 pub use models::{VerificationError, VerificationResult};
 

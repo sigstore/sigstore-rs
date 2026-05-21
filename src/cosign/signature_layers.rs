@@ -182,26 +182,6 @@ impl fmt::Display for SignatureLayer {
     }
 }
 
-/// Compute the DSSE Pre-Authentication Encoding (PAE) bytes.
-///
-/// ```text
-/// PAE(payloadType, payload) =
-///     "DSSEv1" SP LEN(payloadType) SP payloadType SP LEN(payload) SP payload
-/// ```
-///
-/// See <https://github.com/secure-systems-lab/dsse/blob/master/protocol.md>.
-fn compute_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    let header = format!(
-        "DSSEv1 {} {} {} ",
-        payload_type.len(),
-        payload_type,
-        payload.len()
-    );
-    let mut result = header.into_bytes();
-    result.extend_from_slice(payload);
-    result
-}
-
 impl SignatureLayer {
     /// Create a [`SignatureLayer`], this function will generate a [`SimpleSigning`]
     /// payload due to the given reference of image and the digest of the manifest.
@@ -464,7 +444,8 @@ impl SignatureLayer {
         }
 
         // Build the DSSE PAE bytes (what was actually signed)
-        let pae_bytes = compute_pae(&dsse_env.payload_type, &dsse_env.payload);
+        let pae_bytes =
+            crate::bundle::verify::models::compute_pae(&dsse_env.payload_type, &dsse_env.payload);
 
         // Extract the DSSE signature — spec requires exactly one signature.
         let sig_count = dsse_env.signatures.len();

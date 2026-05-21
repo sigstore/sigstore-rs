@@ -410,9 +410,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_from_tag_returns_err(#[case] mock_client: MockOciClient) {
         let mut client = build_test_client(mock_client);
-        let cosign_image = "docker.io/library/busybox:sha256-abc.sig"
-            .parse()
-            .unwrap();
+        let cosign_image = "docker.io/library/busybox:sha256-abc.sig".parse().unwrap();
 
         let result = client
             .fetch_signature_layers_from_tag(&Auth::Anonymous, "sha256:abc", &cosign_image)
