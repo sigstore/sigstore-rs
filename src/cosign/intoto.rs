@@ -131,6 +131,39 @@ mod tests {
     }
 
     #[rstest]
+    #[case::subject_missing_sha256_digest(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![Subject {
+                name: Some("artifact".to_string()),
+                digest: BTreeMap::new(), // no sha256 key
+                annotations: None,
+            }],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        }
+    )]
+    #[case::empty_subject_list(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        }
+    )]
+    fn subject_sha256_digest_returns_err_for_missing_digest(#[case] statement: InTotoStatementV1) {
+        assert!(statement.subject_sha256_digest().is_err());
+    }
+
+    #[test]
+    fn subject_sha256_digest_returns_err_for_invalid_json() {
+        // Simulates what callers do: deserialise raw bytes first, then call the method.
+        // Invalid JSON must produce a deserialisation error before we even reach the method.
+        let result = serde_json::from_slice::<InTotoStatementV1>(b"not valid json");
+        assert!(result.is_err());
+    }
+
+    #[rstest]
     #[case::valid(
         "https://in-toto.io/Statement/v1",
         "https://sigstore.dev/cosign/sign/v1",

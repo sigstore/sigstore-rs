@@ -17,6 +17,7 @@ use std::str::FromStr;
 
 use crate::{
     bundle::{Bundle, models::Version as BundleVersion},
+    cosign::intoto::InTotoStatementV1,
     crypto::certificate::{CertificateValidationError, is_leaf, is_root_ca},
     rekor::models as rekor,
 };
@@ -262,8 +263,10 @@ impl TryFrom<Bundle> for CheckedBundle {
                 let pae = compute_pae(&dsse.payload_type, &dsse.payload);
 
                 // Extract the subject sha256 digest from the in-toto statement.
-                let subject_sha256_digest = extract_dsse_subject_sha256(&dsse.payload)
-                    .ok_or(BundleErrorKind::DssePayloadDecode)?;
+                let subject_sha256_digest = serde_json::from_slice::<InTotoStatementV1>(&dsse.payload)
+                    .map_err(|_| BundleErrorKind::DssePayloadDecode)?
+                    .subject_sha256_digest()
+                    .map_err(|_| BundleErrorKind::DssePayloadDecode)?;
 
                 let payload_bytes = dsse.payload;
 
@@ -528,20 +531,6 @@ impl CheckedBundle {
 /// fields (`payload`, `sig`) are standard base64-encoded strings.
 ///
 /// Returns `None` if the envelope has no signatures (which is invalid for our purposes).
-/// Extract the sha256 digest string from an in-toto Statement v1 payload.
-/// Returns `None` if the payload cannot be parsed or has no sha256 subject.
-fn extract_dsse_subject_sha256(payload: &[u8]) -> Option<String> {
-    let statement: serde_json::Value = serde_json::from_slice(payload).ok()?;
-    statement
-        .get("subject")?
-        .as_array()?
-        .first()?
-        .get("digest")?
-        .get("sha256")?
-        .as_str()
-        .map(|s| s.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -711,45 +700,6 @@ mod tests {
         if let BundleErrorKind::DsseInvalidSignatureCount(n) = err {
             assert_eq!(n, count, "wrong count in error");
         }
-    }
-
-    #[rstest]
-    #[case::single_subject_with_sha256(
-        serde_json::json!({
-            "_type": "https://in-toto.io/Statement/v1",
-            "subject": [
-                {
-                    "name": "some-artifact",
-                    "digest": { "sha256": "abc123def456" }
-                }
-            ],
-            "predicateType": "https://sigstore.dev/cosign/sign/v1",
-            "predicate": {}
-        }),
-        Some("abc123def456")
-    )]
-    #[case::subject_missing_digest(
-        serde_json::json!({ "subject": [{ "name": "artifact" }] }),
-        None
-    )]
-    #[case::empty_subject_array(
-        serde_json::json!({ "subject": [] }),
-        None
-    )]
-    fn extract_dsse_subject_sha256_from_json(
-        #[case] payload: serde_json::Value,
-        #[case] expected: Option<&str>,
-    ) {
-        let bytes = serde_json::to_vec(&payload).unwrap();
-        assert_eq!(
-            extract_dsse_subject_sha256(&bytes),
-            expected.map(str::to_string)
-        );
-    }
-
-    #[test]
-    fn extract_dsse_subject_sha256_invalid_json() {
-        assert!(extract_dsse_subject_sha256(b"not valid json").is_none());
     }
 
     #[rstest]

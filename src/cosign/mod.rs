@@ -51,7 +51,7 @@ use x509_cert::Certificate;
 
 pub mod bundle;
 pub(crate) mod constants;
-mod intoto;
+pub(crate) mod intoto;
 pub mod signature_layers;
 pub use signature_layers::SignatureLayer;
 
