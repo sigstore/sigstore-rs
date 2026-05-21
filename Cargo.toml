@@ -25,6 +25,7 @@ cosign = [
     "dep:regex",
     "dep:serde_json_canonicalizer",
     "registry",
+    "verify",
 ]
 fulcio = [
     "dep:reqwest",
