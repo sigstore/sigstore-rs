@@ -27,8 +27,8 @@ use crate::cosign::bundle::Bundle;
 ///   tag-based cosign signature layers.
 ///
 /// - [`BundleContent::SigstoreBundle`]: the protobuf-based Sigstore bundle
-///   format (v0.1–v0.3), carrying a full [`TransparencyLogEntry`](sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry).  The entry
-///   is verified (SET / inclusion promise, Merkle inclusion proof, and body
+///   format (v0.1–v0.3), carrying a full [`TransparencyLogEntry`](sigstore_protobuf_specs::dev::sigstore::rekor::v1::TransparencyLogEntry).
+///   The entry is verified (SET / inclusion promise, Merkle inclusion proof, and body
 ///   consistency) during [`SignatureLayer`](super::signature_layers::SignatureLayer)
 ///   construction; the verified entry is retained here for downstream verifiers.
 #[derive(Clone, Debug, Serialize)]

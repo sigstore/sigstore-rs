@@ -213,6 +213,34 @@ impl PullManifestSettings {
     }
 }
 
+// Pulls an OCI manifest.
+// Details about this cache:
+//   * the cache is time bound: cached values are purged after 60 seconds
+//   * only successful results are cached
+#[cached(
+    time = 60,
+    result = true,
+    sync_writes = "default",
+    key = "String",
+    convert = r#"{ settings.hash() }"#,
+    with_cached_flag = true
+)]
+async fn pull_manifest_cached(
+    client: &mut oci_client::Client,
+    settings: PullManifestSettings,
+) -> Result<cached::Return<(oci_client::manifest::OciManifest, String)>> {
+    let image = settings.image();
+    let auth = settings.auth();
+    client
+        .pull_manifest(&image, &auth)
+        .await
+        .map_err(|e| SigstoreError::RegistryPullManifestError {
+            image: image.whole(),
+            error: e.to_string(),
+        })
+        .map(cached::Return::new)
+}
+
 /// Internal struct, used to calculate a unique hash of the pull referrers
 /// settings. This is required to cache pull referrers results.
 #[derive(Serialize, Debug)]
@@ -307,34 +335,6 @@ async fn pull_referrers_cached(
         })?;
     client
         .pull_referrers(&image, artifact_type)
-        .await
-        .map_err(|e| SigstoreError::RegistryPullManifestError {
-            image: image.whole(),
-            error: e.to_string(),
-        })
-        .map(cached::Return::new)
-}
-
-// Pulls an OCI manifest.
-// Details about this cache:
-//   * the cache is time bound: cached values are purged after 60 seconds
-//   * only successful results are cached
-#[cached(
-    time = 60,
-    result = true,
-    sync_writes = "default",
-    key = "String",
-    convert = r#"{ settings.hash() }"#,
-    with_cached_flag = true
-)]
-async fn pull_manifest_cached(
-    client: &mut oci_client::Client,
-    settings: PullManifestSettings,
-) -> Result<cached::Return<(oci_client::manifest::OciManifest, String)>> {
-    let image = settings.image();
-    let auth = settings.auth();
-    client
-        .pull_manifest(&image, &auth)
         .await
         .map_err(|e| SigstoreError::RegistryPullManifestError {
             image: image.whole(),
