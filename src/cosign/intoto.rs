@@ -1,4 +1,4 @@
-// Copyright 2023 The Sigstore Authors.
+// Copyright 2026 The Sigstore Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Sigstore bundle support.
+//! In-toto Statement v1 types — re-exported from [`crate::bundle::intoto`].
+//!
+//! The canonical definition lives in `bundle::intoto` so that it is available
+//! to the `bundle` feature without requiring the `cosign` feature.
 
-pub use sigstore_protobuf_specs::dev::sigstore::bundle::v1::Bundle;
-
-pub(crate) mod intoto;
-mod models;
-
-#[cfg_attr(docsrs, doc(cfg(feature = "sign")))]
-#[cfg(feature = "sign")]
-pub mod sign;
-
-#[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
-#[cfg(feature = "verify")]
-pub mod verify;
+pub(crate) use crate::bundle::intoto::InTotoStatementV1;

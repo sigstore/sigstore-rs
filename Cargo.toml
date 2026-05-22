@@ -25,6 +25,7 @@ cosign = [
     "dep:regex",
     "dep:serde_json_canonicalizer",
     "registry",
+    "verify",
 ]
 fulcio = [
     "dep:reqwest",
@@ -77,6 +78,9 @@ sigstore-trust-root = [
     "tokio/sync",
 ]
 test-registry = [] # used for testing against a test registry
+test-remote-registry = [
+    "sigstore-trust-root",
+] # integration tests against remote registries
 verify = [
     "cert",
     "dep:hex",
@@ -114,7 +118,7 @@ hex = { version = "0.4", default-features = false, optional = true, features = [
     "std",
 ] }
 hex-literal = { version = "1.1", optional = true }
-oci-client = { version = "0.16", default-features = false, optional = true }
+oci-client = { version = "0.17", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = [
     "arithmetic",

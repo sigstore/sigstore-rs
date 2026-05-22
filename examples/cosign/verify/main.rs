@@ -219,11 +219,7 @@ async fn run_app(
 
     let image = &cli.image;
 
-    let (cosign_signature_image, source_image_digest) = client.triangulate(image, auth).await?;
-
-    let trusted_layers = client
-        .trusted_signature_layers(auth, &source_image_digest, &cosign_signature_image)
-        .await?;
+    let trusted_layers = client.trusted_signature_layers(auth, image).await?;
 
     Ok((trusted_layers, verification_constraints))
 }

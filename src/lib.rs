@@ -90,16 +90,14 @@
 //!          .build()
 //!          .expect("Unexpected failure while building Client");
 //!
-//!      // Obtained via `triangulate`
-//!      let cosign_image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e.sig"
-//!      .parse().unwrap();
-//!      // Obtained via `triangulate`
-//!      let source_image_digest =
-//!          "sha256-5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e";
+//!      let image = "registry-testing.svc.lan/kubewarden/disallow-service-nodeport:v0.1.0"
+//!          .parse().unwrap();
 //!
-//!      // Obtain the list of associated signature layers that can be trusted
+//!      // Obtain the list of associated signature layers that can be trusted.
+//!      // Both SimpleSigning (.sig tag) and Sigstore Bundle (OCI referrers)
+//!      // signatures are checked transparently.
 //!      let signature_layers = client
-//!          .trusted_signature_layers(auth, source_image_digest, &cosign_image)
+//!          .trusted_signature_layers(auth, &image)
 //!          .await
 //!          .expect("Could not obtain signature layers");
 //!

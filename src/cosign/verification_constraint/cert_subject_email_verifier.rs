@@ -433,9 +433,12 @@ mod tests {
             },
         };
 
-        let certificate_signature =
-            CertificateSignature::from_certificate(&issued_cert.cert_pem, &cert_pool, &bundle)
-                .expect("Cannot create CertificateSignature");
+        let certificate_signature = CertificateSignature::from_certificate(
+            &issued_cert.cert_pem,
+            &cert_pool,
+            bundle.payload.integrated_time,
+        )
+        .expect("Cannot create CertificateSignature");
 
         let sl = SignatureLayer {
             certificate_signature: Some(certificate_signature),

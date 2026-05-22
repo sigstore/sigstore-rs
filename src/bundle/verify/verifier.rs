@@ -24,6 +24,7 @@ use x509_cert::der::Encode;
 
 use crate::{
     bundle::Bundle,
+    bundle::verify::models::{BundleContent, CheckedBundle},
     crypto::{
         CertificatePool, CosignVerificationKey, Signature,
         keyring::Keyring,
@@ -39,9 +40,49 @@ use crate::trust::sigstore::SigstoreTrustRoot;
 
 use super::{
     VerificationError, VerificationResult,
-    models::{CertificateErrorKind, CheckedBundle, SignatureErrorKind},
+    models::{CertificateErrorKind, SignatureErrorKind},
     policy::VerificationPolicy,
 };
+
+/// Verifies that `signature` over `input_digest` (or PAE bytes for DSSE) is valid for
+/// `signing_key`, and that the bundle content is consistent with the provided `input_digest`.
+///
+/// For [`BundleContent::MessageSignature`], the signature is verified as a prehash signature
+/// directly over `input_digest`.
+///
+/// For [`BundleContent::Dsse`], the signature is verified over the pre-computed PAE bytes stored
+/// in the content, and the subject digest from the in-toto statement is compared against
+/// `input_digest` to ensure the bundle describes the same artifact.
+pub(crate) fn verify_bundle_content(
+    content: &BundleContent,
+    signing_key: &CosignVerificationKey,
+    signature: &[u8],
+    input_digest: &[u8],
+) -> Result<(), SignatureErrorKind> {
+    match content {
+        BundleContent::MessageSignature => signing_key
+            .verify_prehash(Signature::Raw(signature), input_digest)
+            .map_err(SignatureErrorKind::VerificationFailed),
+        BundleContent::Dsse {
+            pae,
+            subject_sha256_digest,
+            ..
+        } => {
+            // For DSSE, verify the signature over the PAE bytes, not the artifact hash.
+            signing_key
+                .verify_signature(Signature::Raw(signature), pae)
+                .map_err(SignatureErrorKind::VerificationFailed)?;
+
+            // Also verify that the in-toto statement subject matches the artifact.
+            let expected_hex = hex::encode(input_digest);
+            if subject_sha256_digest != &expected_hex {
+                return Err(SignatureErrorKind::Transparency);
+            }
+
+            Ok(())
+        }
+    }
+}
 
 /// An asynchronous Sigstore verifier.
 ///
@@ -103,9 +144,6 @@ impl Verifier {
         // 7) Verify that the signing certificate was valid at the time of
         //    signing by comparing the expiry against the integrated timestamp.
 
-        // 1) Verify that the signing certificate is signed by the certificate
-        //    chain and that the signing certificate was valid at the time
-        //    of signing.
         let tbs_certificate = &materials.certificate.tbs_certificate;
         let issued_at = tbs_certificate.validity.not_before.to_unix_duration();
         let cert_der: CertificateDer = materials
@@ -139,9 +177,12 @@ impl Verifier {
             .try_into()
             .map_err(SignatureErrorKind::AlgoUnsupported)?;
 
-        let verify_sig =
-            signing_key.verify_prehash(Signature::Raw(&materials.signature), &input_digest);
-        verify_sig.map_err(SignatureErrorKind::VerificationFailed)?;
+        verify_bundle_content(
+            &materials.content,
+            &signing_key,
+            &materials.signature,
+            &input_digest,
+        )?;
 
         debug!("signature corresponds to public key");
 
@@ -300,5 +341,167 @@ pub mod blocking {
 
             Ok(Verifier { inner, rt })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use sha2::Digest as _;
+
+    use crate::{
+        bundle::verify::models::{BundleContent, compute_pae},
+        crypto::SigningScheme,
+    };
+
+    use super::verify_bundle_content;
+
+    /// Builds a real ECDSA P-256 signer and returns `(verification_key, sign_fn)` where
+    /// `sign_fn(msg)` produces a valid signature over `msg`.
+    fn make_signer() -> (
+        crate::crypto::CosignVerificationKey,
+        impl Fn(&[u8]) -> Vec<u8>,
+    ) {
+        let signer = SigningScheme::ECDSA_P256_SHA256_ASN1
+            .create_signer()
+            .expect("failed to create signer");
+        let vk = signer
+            .to_verification_key()
+            .expect("failed to derive verification key");
+        (vk, move |msg: &[u8]| {
+            signer.sign(msg).expect("signing failed")
+        })
+    }
+
+    // ── DSSE cases ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn dsse_valid_signature_and_matching_digest() {
+        let (vk, sign) = make_signer();
+        let pae = compute_pae("application/vnd.in-toto+json", b"{}");
+        let sig = sign(&pae);
+        let digest = [0u8; 32];
+        let subject_sha256_digest = hex::encode(digest);
+
+        let content = BundleContent::Dsse {
+            pae: pae.clone(),
+            subject_sha256_digest,
+            envelope_json: vec![],
+            payload_bytes: vec![],
+        };
+
+        assert!(verify_bundle_content(&content, &vk, &sig, &digest).is_ok());
+    }
+
+    #[test]
+    fn dsse_valid_signature_wrong_digest() {
+        let (vk, sign) = make_signer();
+        let pae = compute_pae("application/vnd.in-toto+json", b"{}");
+        let sig = sign(&pae);
+        let actual_digest = [0u8; 32];
+        // subject_sha256_digest claims a *different* digest than what's presented
+        let subject_sha256_digest = hex::encode([1u8; 32]);
+
+        let content = BundleContent::Dsse {
+            pae: pae.clone(),
+            subject_sha256_digest,
+            envelope_json: vec![],
+            payload_bytes: vec![],
+        };
+
+        let err = verify_bundle_content(&content, &vk, &sig, &actual_digest)
+            .expect_err("expected Transparency error");
+        assert!(matches!(err, super::SignatureErrorKind::Transparency));
+    }
+
+    #[test]
+    fn dsse_invalid_signature() {
+        let (vk, _) = make_signer();
+        let pae = compute_pae("application/vnd.in-toto+json", b"{}");
+        let bad_sig = vec![0u8; 64]; // garbage bytes
+        let digest = [0u8; 32];
+        let subject_sha256_digest = hex::encode(digest);
+
+        let content = BundleContent::Dsse {
+            pae,
+            subject_sha256_digest,
+            envelope_json: vec![],
+            payload_bytes: vec![],
+        };
+
+        let err = verify_bundle_content(&content, &vk, &bad_sig, &digest)
+            .expect_err("expected VerificationFailed error");
+        assert!(matches!(
+            err,
+            super::SignatureErrorKind::VerificationFailed(_)
+        ));
+    }
+
+    // ── MessageSignature cases ────────────────────────────────────────────────
+
+    // MessageSignature uses verify_prehash: the signature is produced over the full message
+    // by the signer (which hashes internally), while verify_prehash takes the pre-computed
+    // SHA-256 digest. We sign the raw message and pass its digest separately.
+    #[rstest]
+    #[case::rsa_pss(SigningScheme::RSA_PSS_SHA256(2048))]
+    #[case::rsa_pkcs1(SigningScheme::RSA_PKCS1_SHA256(2048))]
+    fn message_signature_valid(#[case] scheme: SigningScheme) {
+        let signer = scheme.create_signer().expect("failed to create signer");
+        let vk = signer
+            .to_verification_key()
+            .expect("failed to derive verification key");
+        let msg = b"test artifact";
+        let sig = signer.sign(msg).expect("signing failed");
+        // verify_prehash expects the SHA-256 digest of the original message.
+        let digest = sha2::Sha256::digest(msg).to_vec();
+
+        let content = BundleContent::MessageSignature;
+
+        assert!(verify_bundle_content(&content, &vk, &sig, &digest).is_ok());
+    }
+
+    #[rstest]
+    #[case::rsa_pss(SigningScheme::RSA_PSS_SHA256(2048))]
+    #[case::rsa_pkcs1(SigningScheme::RSA_PKCS1_SHA256(2048))]
+    fn message_signature_invalid_signature(#[case] scheme: SigningScheme) {
+        let signer = scheme.create_signer().expect("failed to create signer");
+        let vk = signer
+            .to_verification_key()
+            .expect("failed to derive verification key");
+        let msg = b"test artifact";
+        let bad_sig = vec![0u8; 64]; // garbage bytes
+        let digest = sha2::Sha256::digest(msg).to_vec();
+
+        let content = BundleContent::MessageSignature;
+
+        let err = verify_bundle_content(&content, &vk, &bad_sig, &digest)
+            .expect_err("expected VerificationFailed error");
+        assert!(matches!(
+            err,
+            super::SignatureErrorKind::VerificationFailed(_)
+        ));
+    }
+
+    #[rstest]
+    #[case::rsa_pss(SigningScheme::RSA_PSS_SHA256(2048))]
+    #[case::rsa_pkcs1(SigningScheme::RSA_PKCS1_SHA256(2048))]
+    fn message_signature_wrong_digest(#[case] scheme: SigningScheme) {
+        let signer = scheme.create_signer().expect("failed to create signer");
+        let vk = signer
+            .to_verification_key()
+            .expect("failed to derive verification key");
+        let msg = b"test artifact";
+        let sig = signer.sign(msg).expect("signing failed");
+        // Pass a digest for a *different* message.
+        let wrong_digest = sha2::Sha256::digest(b"different artifact").to_vec();
+
+        let content = BundleContent::MessageSignature;
+
+        let err = verify_bundle_content(&content, &vk, &sig, &wrong_digest)
+            .expect_err("expected VerificationFailed error");
+        assert!(matches!(
+            err,
+            super::SignatureErrorKind::VerificationFailed(_)
+        ));
     }
 }

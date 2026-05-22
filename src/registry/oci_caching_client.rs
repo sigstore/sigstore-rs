@@ -241,6 +241,108 @@ async fn pull_manifest_cached(
         .map(cached::Return::new)
 }
 
+/// Internal struct, used to calculate a unique hash of the pull referrers
+/// settings. This is required to cache pull referrers results.
+#[derive(Serialize, Debug)]
+struct PullReferrersSettings {
+    image: String,
+    auth: super::config::Auth,
+    artifact_type: Option<String>,
+}
+
+impl PullReferrersSettings {
+    fn new(
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
+        artifact_type: Option<&str>,
+    ) -> PullReferrersSettings {
+        let image_str = image.whole();
+        let auth_sigstore: super::config::Auth = From::from(auth);
+
+        PullReferrersSettings {
+            image: image_str,
+            auth: auth_sigstore,
+            artifact_type: artifact_type.map(str::to_owned),
+        }
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn image(&self) -> oci_client::Reference {
+        // we can use `unwrap` here, because this will never fail
+        let reference: oci_client::Reference = self.image.parse().unwrap();
+        reference
+    }
+
+    pub fn auth(&self) -> oci_client::secrets::RegistryAuth {
+        let internal_auth: &super::config::Auth = &self.auth;
+        let a: oci_client::secrets::RegistryAuth = internal_auth.into();
+        a
+    }
+
+    // This function returns a hash of the PullReferrersSettings struct.
+    // The hash is computed by doing a canonical JSON representation of
+    // the struct.
+    //
+    // This method cannot error, because its value is used by the `cached`
+    // macro, which doesn't allow error handling.
+    // Because of that the method will return the '0' value when something goes
+    // wrong during the serialization operation. This is very unlikely to happen
+    pub fn hash(&self) -> String {
+        let buf = match serde_json_canonicalizer::to_vec(self) {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!(err=?e, settings=?self, "Cannot perform canonical serialization");
+                return "0".to_string();
+            }
+        };
+
+        let mut hasher = Sha256::new();
+        hasher.update(&buf);
+        let result = hasher.finalize();
+        result
+            .iter()
+            .map(|v| format!("{v:x}"))
+            .collect::<Vec<String>>()
+            .join("")
+    }
+}
+
+/// Pulls OCI referrers.
+/// Details about this cache:
+///   * the cache is time bound: cached values are purged after 60 seconds
+///   * only successful results are cached
+#[cached(
+    time = 60,
+    result = true,
+    sync_writes = "default",
+    key = "String",
+    convert = r#"{ settings.hash() }"#,
+    with_cached_flag = true
+)]
+async fn pull_referrers_cached(
+    client: &mut oci_client::Client,
+    settings: PullReferrersSettings,
+) -> Result<cached::Return<oci_client::manifest::OciImageIndex>> {
+    let image = settings.image();
+    let auth = settings.auth();
+    let artifact_type = settings.artifact_type.as_deref();
+    client
+        .auth(&image, &auth, oci_client::RegistryOperation::Pull)
+        .await
+        .map_err(|e| SigstoreError::RegistryFetchManifestError {
+            image: image.whole(),
+            error: e.to_string(),
+        })?;
+    client
+        .pull_referrers(&image, artifact_type)
+        .await
+        .map_err(|e| SigstoreError::RegistryPullManifestError {
+            image: image.whole(),
+            error: e.to_string(),
+        })
+        .map(cached::Return::new)
+}
+
 impl ClientCapabilitiesDeps for OciCachingClient {}
 
 #[async_trait]
@@ -315,6 +417,25 @@ impl ClientCapabilities for OciCachingClient {
             .map_err(|e| SigstoreError::RegistryPushError {
                 image: image_ref.whole(),
                 error: e.to_string(),
+            })
+    }
+
+    async fn pull_referrers(
+        &mut self,
+        image: &oci_client::Reference,
+        auth: &oci_client::secrets::RegistryAuth,
+        artifact_type: Option<&str>,
+    ) -> Result<oci_client::manifest::OciImageIndex> {
+        let settings = PullReferrersSettings::new(image, auth, artifact_type);
+        pull_referrers_cached(&mut self.registry_client, settings)
+            .await
+            .map(|data| {
+                if data.was_cached {
+                    debug!(?image, "Got image referrers from cache");
+                } else {
+                    debug!(?image, "Got image referrers by querying remote registry");
+                }
+                data.value
             })
     }
 }

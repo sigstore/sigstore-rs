@@ -50,7 +50,9 @@ use pkcs8::der::Decode;
 use x509_cert::Certificate;
 
 pub mod bundle;
+pub mod bundle_content;
 pub(crate) mod constants;
+pub(crate) mod intoto;
 pub mod signature_layers;
 pub use signature_layers::SignatureLayer;
 
@@ -83,9 +85,16 @@ pub trait CosignCapabilities {
     ) -> Result<(OciReference, String)>;
 
     /// Returns the list of [`SignatureLayer`]
-    /// objects that are associated with the given signature object.
+    /// objects associated with the given image, checking both the cosign
+    /// SimpleSigning (`.sig` tag) format and the Sigstore Bundle (OCI referrers)
+    /// format transparently.
     ///
-    /// Each layer is verified, to ensure it contains legitimate data.
+    /// Triangulation is performed internally: the caller only needs to supply
+    /// the original image reference.  Both signature sources are attempted;
+    /// individual failures are logged as warnings.  Returns an empty vector
+    /// when no layers are found from either source.
+    ///
+    /// Each layer is verified to ensure it contains legitimate data.
     ///
     /// ## Layers with embedded certificate
     ///
@@ -101,7 +110,7 @@ pub trait CosignCapabilities {
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
     ///   have been created with Rekor integration enabled (see [`crate::trust::sigstore::ManualTrustRoot`])
     /// * The [`sigstore::cosign::Client`](crate::cosign::client::Client) must
-    ///   have been created with Fulcio integration enabled (see [`crate::trust::sigstore::ManualTrustRoot])
+    ///   have been created with Fulcio integration enabled (see [`crate::trust::sigstore::ManualTrustRoot`])
     /// * The layer must include a bundle produced by Rekor
     ///
     /// > Note well: the [`trust::sigstore`](crate::trust::sigstore) module provides helper structs and methods
@@ -115,11 +124,18 @@ pub trait CosignCapabilities {
     /// These returned objects can then be verified against
     /// [`VerificationConstraints`](crate::cosign::verification_constraint::VerificationConstraint)
     /// using the [`verify_constraints`] function.
+    ///
+    /// ## Image reference formats
+    ///
+    /// `source_image` may be either a tag reference (e.g. `registry/repo:tag`)
+    /// or a digest reference (e.g. `registry/repo@sha256:...`). Triangulation
+    /// is performed internally by issuing a `HEAD` request against the registry,
+    /// which works for both forms: digest references simply cause the registry to
+    /// echo back the same digest in the response header.
     async fn trusted_signature_layers(
         &mut self,
         auth: &Auth,
-        source_image_digest: &str,
-        cosign_image: &OciReference,
+        source_image: &OciReference,
     ) -> Result<Vec<SignatureLayer>>;
 
     /// Push [`SignatureLayer`] objects to the registry. This function will do
@@ -297,6 +313,145 @@ mod tests {
 
     #[cfg(feature = "test-registry")]
     use testcontainers::{core::WaitFor, runners::AsyncRunner};
+
+    #[cfg(feature = "test-remote-registry")]
+    mod remote_registry {
+        use crate::cosign::verification_constraint::CertSubjectUrlVerifier;
+        use crate::cosign::verification_constraint::VerificationConstraintVec;
+        use crate::cosign::{Client, ClientBuilder, CosignCapabilities, verify_constraints};
+        use crate::registry::Auth;
+        use crate::trust::sigstore::SigstoreTrustRoot;
+
+        // These tests verify against real images hosted on ghcr.io that cover all
+        // three signature scenarios supported by `trusted_signature_layers`:
+        //
+        //   - SimpleSigning only  (.sig tag, no OCI referrer bundle)
+        //   - Sigstore Bundle only (OCI referrers, no .sig tag)
+        //   - Both formats present (layers from both paths must be returned)
+        //
+        // Run with:  cargo test --features test-remote-registry
+
+        const KUBEWARDEN_CONTROLLER_IMAGE: &str = "ghcr.io/kubewarden/kubewarden-controller";
+        const GITHUB_ACTIONS_OIDC_ISSUER: &str = "https://token.actions.githubusercontent.com";
+
+        async fn build_remote_cosign_client() -> Client {
+            let trust_root = SigstoreTrustRoot::new(None)
+                .await
+                .expect("failed to fetch Sigstore trust root");
+            ClientBuilder::default()
+                .with_trust_repository(&trust_root)
+                .expect("failed to configure trust repository")
+                .build()
+                .expect("failed to build cosign client")
+        }
+
+        /// Verify an image signed **only** with a Sigstore Bundle (OCI referrers).
+        /// No SimpleSigning `.sig` tag exists for this image, so all returned layers
+        /// must come from the Sigstore Bundle path.
+        #[tokio::test]
+        async fn verify_sigstore_bundle_only() {
+            let mut client = build_remote_cosign_client().await;
+
+            let image = format!("{KUBEWARDEN_CONTROLLER_IMAGE}:v1.30.0-rc1")
+                .parse()
+                .expect("failed to parse image reference");
+
+            let layers = client
+                .trusted_signature_layers(&Auth::Anonymous, &image)
+                .await
+                .expect("failed to get trusted signature layers");
+
+            assert_eq!(
+                layers.len(),
+                1,
+                "expected exactly 1 signature layer from Sigstore Bundle path"
+            );
+            assert!(
+                layers[0].certificate_signature.is_some(),
+                "expected certificate_signature to be present (Fulcio validation passed)"
+            );
+
+            let vc = CertSubjectUrlVerifier {
+                url: "https://github.com/kubewarden/kubewarden-controller/.github/workflows/release.yml@refs/tags/v1.30.0-rc1".to_string(),
+                issuer: GITHUB_ACTIONS_OIDC_ISSUER.to_string(),
+            };
+            let constraints: VerificationConstraintVec = vec![Box::new(vc)];
+            verify_constraints(&layers, constraints.iter())
+                .expect("verification constraints should be satisfied");
+        }
+
+        /// Verify an image signed **only** with SimpleSigning (`.sig` tag).
+        /// No OCI referrer bundle exists for this image, so all returned layers
+        /// must come from the SimpleSigning path.
+        #[tokio::test]
+        async fn verify_simple_signing_only() {
+            let mut client = build_remote_cosign_client().await;
+
+            let image = format!("{KUBEWARDEN_CONTROLLER_IMAGE}:v1.29.0-rc1")
+                .parse()
+                .expect("failed to parse image reference");
+
+            let layers = client
+                .trusted_signature_layers(&Auth::Anonymous, &image)
+                .await
+                .expect("failed to get trusted signature layers");
+
+            assert_eq!(
+                layers.len(),
+                1,
+                "expected exactly 1 signature layer from SimpleSigning path"
+            );
+            assert!(
+                layers[0].certificate_signature.is_some(),
+                "expected certificate_signature to be present (Fulcio validation passed)"
+            );
+
+            let vc = CertSubjectUrlVerifier {
+                url: "https://github.com/kubewarden/kubewarden-controller/.github/workflows/release.yml@refs/tags/v1.29.0-rc1".to_string(),
+                issuer: GITHUB_ACTIONS_OIDC_ISSUER.to_string(),
+            };
+            let constraints: VerificationConstraintVec = vec![Box::new(vc)];
+            verify_constraints(&layers, constraints.iter())
+                .expect("verification constraints should be satisfied");
+        }
+
+        /// Verify an image signed with **both** SimpleSigning (`.sig` tag) and
+        /// Sigstore Bundle (OCI referrers). `trusted_signature_layers` must return
+        /// exactly 2 layers — one from each path.
+        #[tokio::test]
+        async fn verify_both_simple_signing_and_sigstore_bundle() {
+            let mut client = build_remote_cosign_client().await;
+
+            let image = format!("{KUBEWARDEN_CONTROLLER_IMAGE}:v1.31.0-rc1")
+                .parse()
+                .expect("failed to parse image reference");
+
+            let layers = client
+                .trusted_signature_layers(&Auth::Anonymous, &image)
+                .await
+                .expect("failed to get trusted signature layers");
+
+            assert_eq!(
+                layers.len(),
+                2,
+                "expected exactly 2 signature layers (one from SimpleSigning, one from Sigstore Bundle)"
+            );
+            for layer in &layers {
+                assert!(
+                    layer.certificate_signature.is_some(),
+                    "expected certificate_signature to be present on all layers (Fulcio validation passed)"
+                );
+            }
+
+            let vc = CertSubjectUrlVerifier {
+                url: "https://github.com/kubewarden/kubewarden-controller/.github/workflows/release.yml@refs/tags/v1.31.0-rc1".to_string(),
+                issuer: GITHUB_ACTIONS_OIDC_ISSUER.to_string(),
+            };
+            let constraints: VerificationConstraintVec = vec![Box::new(vc)];
+            verify_constraints(&layers, constraints.iter())
+                .expect("verification constraints should be satisfied");
+        }
+    }
 
     pub(crate) const REKOR_PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
@@ -627,12 +782,8 @@ TNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ
 
         dbg!("start to verify");
 
-        let (cosign_image, manifest_digest) = client
-            .triangulate(&image_ref, &Auth::Anonymous)
-            .await
-            .expect("triangulate failed");
         let signature_layers = client
-            .trusted_signature_layers(&Auth::Anonymous, &manifest_digest, &cosign_image)
+            .trusted_signature_layers(&Auth::Anonymous, &image_ref)
             .await
             .expect("get trusted signature layers failed");
         let pk_verifier =
