@@ -44,6 +44,29 @@ enum EcCurve {
     P521,
 }
 
+/// Decode a base64-encoded signature, tolerating ASCII whitespace.
+///
+/// Some signatures (for example image signatures pulled from a registry) carry
+/// embedded newlines in the base64 value. cosign and the common base64 decoders
+/// accept these by ignoring whitespace, so sigstore-rs must too, otherwise a
+/// valid signature is wrongly rejected (see sigstore/sigstore-rs#550).
+///
+/// Only ASCII whitespace is stripped; every other byte is still passed through
+/// to the strict STANDARD engine, so a genuinely malformed signature is rejected
+/// exactly as before.
+fn decode_base64_signature(data: &[u8]) -> Result<Vec<u8>> {
+    if data.iter().any(|b| b.is_ascii_whitespace()) {
+        let cleaned: Vec<u8> = data
+            .iter()
+            .copied()
+            .filter(|b| !b.is_ascii_whitespace())
+            .collect();
+        Ok(BASE64_STD_ENGINE.decode(cleaned)?)
+    } else {
+        Ok(BASE64_STD_ENGINE.decode(data)?)
+    }
+}
+
 /// A key that can be used to verify signatures.
 ///
 /// Currently the following key formats are supported:
@@ -178,7 +201,7 @@ impl CosignVerificationKey {
     pub fn verify_signature(&self, signature: Signature, msg: &[u8]) -> Result<()> {
         let sig = match signature {
             Signature::Raw(data) => data.to_owned(),
-            Signature::Base64Encoded(data) => BASE64_STD_ENGINE.decode(data)?,
+            Signature::Base64Encoded(data) => decode_base64_signature(data)?,
         };
 
         match self {
@@ -221,7 +244,7 @@ impl CosignVerificationKey {
     pub(crate) fn verify_prehash(&self, signature: Signature, msg: &[u8]) -> Result<()> {
         let sig = match signature {
             Signature::Raw(data) => data.to_owned(),
-            Signature::Base64Encoded(data) => BASE64_STD_ENGINE.decode(data)?,
+            Signature::Base64Encoded(data) => decode_base64_signature(data)?,
         };
 
         match self {
@@ -288,6 +311,26 @@ mod tests {
     }
 
     #[test]
+    fn verify_signature_success_with_embedded_newlines() {
+        // Same valid signature as `verify_signature_success`, but with newlines
+        // embedded inside the base64 string (and a trailing newline). cosign
+        // accepts this; sigstore-rs must too. See sigstore/sigstore-rs#550.
+        let signature = Signature::Base64Encoded(
+            b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI5\n5zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=\n",
+        );
+        let verification_key =
+            CosignVerificationKey::from_pem(PUBLIC_KEY.as_bytes(), &SigningScheme::default())
+                .expect("Cannot create CosignVerificationKey");
+        let msg = r#"{"critical":{"identity":{"docker-reference":"registry-testing.svc.lan/busybox"},"image":{"docker-manifest-digest":"sha256:f3cfc9d0dbf931d3db4685ec659b7ac68e2a578219da4aae65427886e649b06b"},"type":"cosign container image signature"},"optional":null}"#;
+
+        let outcome = verification_key.verify_signature(signature, msg.as_bytes());
+        assert!(
+            outcome.is_ok(),
+            "signature with embedded newlines should verify, got {outcome:?}"
+        );
+    }
+
+    #[test]
     fn verify_signature_failure_because_wrong_msg() {
         let signature = Signature::Base64Encoded(b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=");
         let verification_key =
@@ -304,7 +347,10 @@ mod tests {
 
     #[test]
     fn verify_signature_failure_because_wrong_signature() {
-        let signature = Signature::Base64Encoded(b"this is a signature");
+        // Contains '@', which is not in the base64 alphabet and is not
+        // whitespace, so it must still fail to decode (whitespace is now
+        // tolerated, see verify_signature_success_with_embedded_newlines).
+        let signature = Signature::Base64Encoded(b"this@is@a@signature");
         let verification_key =
             CosignVerificationKey::from_pem(PUBLIC_KEY.as_bytes(), &SigningScheme::default())
                 .expect("Cannot create CosignVerificationKey");
