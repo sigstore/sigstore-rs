@@ -34,7 +34,6 @@ pub(crate) struct OciCachingClient {
 
 #[cached(
     ttl = 60,
-    result = true,
     sync_writes = "default",
     key = "String",
     convert = r#"{ format!("{}", image) }"#,
@@ -127,7 +126,6 @@ impl<'a> PullSettings<'a> {
 //   * only successful results are cached
 #[cached(
     ttl = 60,
-    result = true,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -219,7 +217,6 @@ impl PullManifestSettings {
 //   * only successful results are cached
 #[cached(
     ttl = 60,
-    result = true,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -313,7 +310,6 @@ impl PullReferrersSettings {
 ///   * only successful results are cached
 #[cached(
     ttl = 60,
-    result = true,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
