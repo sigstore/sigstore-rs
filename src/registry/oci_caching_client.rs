@@ -17,7 +17,7 @@ use super::{ClientCapabilities, ClientCapabilitiesDeps};
 use crate::errors::{Result, SigstoreError};
 
 use async_trait::async_trait;
-use cached::proc_macro::cached;
+use cached::macros::cached;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error};
@@ -33,8 +33,7 @@ pub(crate) struct OciCachingClient {
 }
 
 #[cached(
-    time = 60,
-    result = true,
+    ttl = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ format!("{}", image) }"#,
@@ -126,8 +125,7 @@ impl<'a> PullSettings<'a> {
 //   * the cache is time bound: cached values are purged after 60 seconds
 //   * only successful results are cached
 #[cached(
-    time = 60,
-    result = true,
+    ttl = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -218,8 +216,7 @@ impl PullManifestSettings {
 //   * the cache is time bound: cached values are purged after 60 seconds
 //   * only successful results are cached
 #[cached(
-    time = 60,
-    result = true,
+    ttl = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -312,8 +309,7 @@ impl PullReferrersSettings {
 ///   * the cache is time bound: cached values are purged after 60 seconds
 ///   * only successful results are cached
 #[cached(
-    time = 60,
-    result = true,
+    ttl = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
