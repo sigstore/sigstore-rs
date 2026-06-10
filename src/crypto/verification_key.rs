@@ -44,26 +44,29 @@ enum EcCurve {
     P521,
 }
 
-/// Decode a base64-encoded signature, tolerating ASCII whitespace.
+/// Newline bytes that base64 producers may insert (PEM-style line wrapping, or
+/// signatures pulled from a registry). cosign decodes via Go's encoding/json,
+/// which ignores `\n` and `\r`, so sigstore-rs strips exactly those two bytes
+/// and nothing else: any other stray byte still fails the strict decode, which
+/// keeps catching genuine corruption.
+const BASE64_IGNORED_NEWLINES: &[u8] = b"\n\r";
+
+/// Decode a base64-encoded signature, tolerating embedded newlines.
 ///
-/// Some signatures (for example image signatures pulled from a registry) carry
-/// embedded newlines in the base64 value. cosign and the common base64 decoders
-/// accept these by ignoring whitespace, so sigstore-rs must too, otherwise a
-/// valid signature is wrongly rejected (see sigstore/sigstore-rs#550).
-///
-/// Only ASCII whitespace is stripped; every other byte is still passed through
-/// to the strict STANDARD engine, so a genuinely malformed signature is rejected
-/// exactly as before.
+/// The strict STANDARD engine is tried first, so the common case (no newlines)
+/// pays nothing. Only if that fails are `\n`/`\r` removed and the decode retried
+/// (see sigstore/sigstore-rs#550).
 fn decode_base64_signature(data: &[u8]) -> Result<Vec<u8>> {
-    if data.iter().any(|b| b.is_ascii_whitespace()) {
-        let cleaned: Vec<u8> = data
-            .iter()
-            .copied()
-            .filter(|b| !b.is_ascii_whitespace())
-            .collect();
-        Ok(BASE64_STD_ENGINE.decode(cleaned)?)
-    } else {
-        Ok(BASE64_STD_ENGINE.decode(data)?)
+    match BASE64_STD_ENGINE.decode(data) {
+        Ok(decoded) => Ok(decoded),
+        Err(_) => {
+            let cleaned: Vec<u8> = data
+                .iter()
+                .copied()
+                .filter(|b| !BASE64_IGNORED_NEWLINES.contains(b))
+                .collect();
+            Ok(BASE64_STD_ENGINE.decode(cleaned)?)
+        }
     }
 }
 
@@ -315,9 +318,16 @@ mod tests {
         // Same valid signature as `verify_signature_success`, but with newlines
         // embedded inside the base64 string (and a trailing newline). cosign
         // accepts this; sigstore-rs must too. See sigstore/sigstore-rs#550.
-        let signature = Signature::Base64Encoded(
-            b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI5\n5zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=\n",
-        );
+        // Build the wrapped input from the unwrapped signature plus explicit
+        // newline bytes, so it is obvious the test exercises newline tolerance
+        // and a formatter cannot silently drop the newlines.
+        const NEWLINE: u8 = b'\n';
+        let unwrapped =
+            b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=";
+        let mut wrapped = unwrapped.to_vec();
+        wrapped.insert(44, NEWLINE); // a newline within the base64 body
+        wrapped.push(NEWLINE); // and a trailing newline
+        let signature = Signature::Base64Encoded(&wrapped);
         let verification_key =
             CosignVerificationKey::from_pem(PUBLIC_KEY.as_bytes(), &SigningScheme::default())
                 .expect("Cannot create CosignVerificationKey");
@@ -347,8 +357,8 @@ mod tests {
 
     #[test]
     fn verify_signature_failure_because_wrong_signature() {
-        // Contains '@', which is not in the base64 alphabet and is not
-        // whitespace, so it must still fail to decode (whitespace is now
+        // Contains '@', which is not in the base64 alphabet and is not a
+        // newline, so it must still fail to decode (only newlines are now
         // tolerated, see verify_signature_success_with_embedded_newlines).
         let signature = Signature::Base64Encoded(b"this@is@a@signature");
         let verification_key =
