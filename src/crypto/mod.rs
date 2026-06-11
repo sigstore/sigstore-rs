@@ -15,6 +15,8 @@
 
 //! Structures and constants required to perform cryptographic operations.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
+
 use crate::errors::*;
 
 pub use signing_key::SigStoreSigner;
@@ -127,6 +129,40 @@ pub enum Signature<'a> {
     Base64Encoded(&'a [u8]),
 }
 
+/// Newline bytes that base64 producers may insert (PEM-style line wrapping, or
+/// signatures pulled from a registry). cosign decodes via Go's encoding/json,
+/// which ignores `\n` and `\r`, so sigstore-rs strips exactly those two bytes
+/// and nothing else: any other stray byte still fails the strict decode, which
+/// keeps catching genuine corruption.
+const BASE64_IGNORED_NEWLINES: &[u8] = b"\n\r";
+
+impl Signature<'_> {
+    /// Returns the raw signature bytes, decoding at the source.
+    ///
+    /// [`Signature::Raw`] is returned unchanged. [`Signature::Base64Encoded`]
+    /// is base64-decoded, tolerating embedded newlines: the strict STANDARD
+    /// engine is tried first (the common, unwrapped case pays nothing), and only
+    /// on failure are `\n`/`\r` removed and the decode retried (see
+    /// sigstore/sigstore-rs#550). Any other stray byte still fails, so genuine
+    /// corruption is caught.
+    pub fn decode_bytes(&self) -> Result<Vec<u8>> {
+        match self {
+            Signature::Raw(data) => Ok(data.to_vec()),
+            Signature::Base64Encoded(data) => match BASE64_STD_ENGINE.decode(data) {
+                Ok(decoded) => Ok(decoded),
+                Err(_) => {
+                    let cleaned: Vec<u8> = data
+                        .iter()
+                        .copied()
+                        .filter(|b| !BASE64_IGNORED_NEWLINES.contains(b))
+                        .collect();
+                    Ok(BASE64_STD_ENGINE.decode(cleaned)?)
+                }
+            },
+        }
+    }
+}
+
 #[cfg(feature = "cert")]
 pub(crate) mod certificate;
 #[cfg(feature = "cert")]
@@ -158,6 +194,44 @@ pub(crate) mod tests {
         PKCS_ED25519, PKCS_RSA_SHA256, SanType,
     };
     use time::OffsetDateTime;
+
+    #[test]
+    fn signature_decode_bytes() {
+        use super::Signature;
+
+        // Raw signatures are returned unchanged.
+        let raw = [1u8, 2, 3, 4];
+        assert_eq!(Signature::Raw(&raw).decode_bytes().unwrap(), raw.to_vec());
+
+        // A clean base64 signature decodes.
+        let der = Signature::Base64Encoded(b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=")
+            .decode_bytes()
+            .expect("clean base64 should decode");
+
+        // The same value with an embedded newline and a trailing newline decodes
+        // identically (cosign tolerates these). Built from explicit newline bytes
+        // so the intent is clear and a formatter cannot silently drop them.
+        const NEWLINE: u8 = b'\n';
+        let unwrapped =
+            b"MEUCIQD6q/COgzOyW0YH1Dk+CCYSt4uAhm3FDHUwvPI55zwnlwIgE0ZK58ZOWpZw8YVmBapJhBqCfdPekIknimuO0xH8Jh8=";
+        let mut wrapped = unwrapped.to_vec();
+        wrapped.insert(44, NEWLINE);
+        wrapped.push(NEWLINE);
+        assert_eq!(
+            Signature::Base64Encoded(&wrapped).decode_bytes().unwrap(),
+            der,
+            "newlines should be tolerated and decode to the same bytes"
+        );
+
+        // A byte that is neither in the base64 alphabet nor a newline still
+        // fails, so genuine corruption is caught.
+        assert!(
+            Signature::Base64Encoded(b"this@is@a@signature")
+                .decode_bytes()
+                .is_err(),
+            "non-base64, non-newline input must fail to decode"
+        );
+    }
 
     pub(crate) const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENptdY/l3nB0yqkXLBWkZWQwo6+cu
