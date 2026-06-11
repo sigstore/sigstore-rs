@@ -1,0 +1,27 @@
+name: Release Drafter
+
+on:
+  workflow_dispatch:
+  push:
+    # branches to consider in the event; optional, defaults to all
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update_release_draft:
+    name: Update GH release draft
+    permissions:
+      contents: write # create and edit github releases
+      pull-requests: read # read pr titles to create changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
