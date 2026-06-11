@@ -21,10 +21,14 @@ Full test suite requires Docker daemon to be running (and the user must have per
    new or changed configuration values.
 5. Correctly format your commit message see [Commit Messages](#commit-message-guidelines)
    below.
-6. Ensure that CI passes, if it fails, fix the failures.
-7. Every pull request requires a review from the [core sigstore-rs team](https://github.com/orgs/github.com/sigstore/teams/sigstore-rs-codeowners)
+6. Format your PR title in a [conventional
+   commit](https://www.conventionalcommits.org/en/v1.0.0/) style, for
+   [release-drafter](https://github.com/release-drafter/release-drafter) to
+   draft the changelog in a GH draft release.
+7. Ensure that CI passes, if it fails, fix the failures.
+8. Every pull request requires a review from the [core sigstore-rs team](https://github.com/orgs/github.com/sigstore/teams/sigstore-rs-codeowners)
    before merging.
-8. If your pull request consists of more than one commit, please squash your
+9. If your pull request consists of more than one commit, please squash your
    commits as described in [Squash Commits](#squash-commits)
 
 ## Commit Message Guidelines
