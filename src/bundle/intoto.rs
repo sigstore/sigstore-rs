@@ -17,12 +17,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 use crate::errors::{Result, SigstoreError};
 
 const IN_TOTO_STATEMENT_V1_TYPE: &str = "https://in-toto.io/Statement/v1";
-const COSIGN_SIGN_V1_PREDICATE_TYPE: &str = "https://sigstore.dev/cosign/sign/v1";
 
 /// An in-toto Statement v1 as defined in <https://in-toto.io/Statement/v1>.
 ///
@@ -44,34 +42,31 @@ pub(crate) struct InTotoStatementV1 {
 
 impl InTotoStatementV1 {
     /// Parse an in-toto Statement v1 from raw JSON bytes.
-    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn from_json(bytes: &[u8]) -> Result<Self> {
         serde_json::from_slice(bytes).map_err(|e| {
             SigstoreError::UnexpectedError(format!("cannot parse in-toto statement: {e}"))
         })
     }
 
-    /// Enforce that the statement satisfies the subset of the
-    /// [in-toto Statement v1 spec](https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md)
-    /// that Sigstore / cosign sign-v1 cares about:
+    /// Validate the in-toto statement and verify that at least one subject
+    /// carries a digest matching `expected_digest`.
+    ///
+    /// `expected_digest` must be in `algorithm:hex` form (e.g.
+    /// `"sha256:abc123"`, `"sha512:def456"`).  An error is returned if the
+    /// `':'` separator is missing.
+    ///
+    /// Checks performed:
     ///
     /// - `_type` must be `https://in-toto.io/Statement/v1`
-    /// - `predicateType` must be `https://sigstore.dev/cosign/sign/v1`
-    /// - `subject` must be non-empty
-    /// - `subject[0]` must carry a `sha256` digest entry
+    /// - `expected_digest` must be in `algorithm:hex` format
+    /// - At least one subject must have a digest entry for the extracted
+    ///   algorithm whose value equals the extracted hex digest
     ///
-    /// # What we currently ignore (and why)
-    ///
-    /// - **Multiple subjects**: the spec allows any number of subjects.
-    ///   Go cosign and sigstore-go both iterate all subjects when matching
-    ///   against an artifact digest; we only consume `subject[0]` for now.
-    ///   A warning is emitted if more than one subject is present so that
-    ///   the behaviour is visible.
-    /// - **Extra digest algorithms**: subject digest maps may contain
-    ///   entries beyond `sha256` (e.g. `sha512`).  We only read `sha256`
-    ///   and silently ignore the rest, matching Go cosign's behaviour.
-    /// - **`predicate` field**: not inspected; callers that need to verify
-    ///   the predicate payload must do so themselves.
-    pub fn validate_cosign_v1(&self) -> Result<()> {
+    /// The `predicateType` is **not** restricted — any predicate type is
+    /// accepted (e.g. `cosign/sign/v1`, SLSA provenance, SBOM, etc.).
+    /// Callers that need to enforce a specific predicate type should inspect
+    /// [`Self::predicate_type`] after validation.
+    pub fn validate(&self, expected_digest: &str) -> Result<()> {
         if self.statement_type != IN_TOTO_STATEMENT_V1_TYPE {
             return Err(SigstoreError::UnexpectedError(format!(
                 "unsupported in-toto _type: expected {IN_TOTO_STATEMENT_V1_TYPE}, got {}",
@@ -79,30 +74,22 @@ impl InTotoStatementV1 {
             )));
         }
 
-        if self.predicate_type != COSIGN_SIGN_V1_PREDICATE_TYPE {
+        let (algorithm, digest) = expected_digest.split_once(':').ok_or_else(|| {
+            SigstoreError::UnexpectedError(format!(
+                "expected_digest must be in 'algorithm:hex' format, got '{expected_digest}'"
+            ))
+        })?;
+
+        let found = self
+            .subject
+            .iter()
+            .any(|s| s.digest.get(algorithm).is_some_and(|d| d == digest));
+
+        if !found {
             return Err(SigstoreError::UnexpectedError(format!(
-                "unsupported in-toto predicateType: expected {COSIGN_SIGN_V1_PREDICATE_TYPE}, got {}",
-                self.predicate_type
+                "unable to find subject with mathcing digest; digest: '{algorithm}:{digest}'; subjects: {:?}",
+                self.subject
             )));
-        }
-
-        if self.subject.is_empty() {
-            return Err(SigstoreError::UnexpectedError(
-                "in-toto statement has no subjects".to_string(),
-            ));
-        }
-
-        if self.subject.len() > 1 {
-            warn!(
-                subject_count = self.subject.len(),
-                "in-toto statement has multiple subjects; only the first will be used"
-            );
-        }
-
-        if !self.subject[0].digest.contains_key("sha256") {
-            return Err(SigstoreError::UnexpectedError(
-                "in-toto statement subject[0] has no sha256 digest".to_string(),
-            ));
         }
 
         Ok(())
@@ -111,7 +98,7 @@ impl InTotoStatementV1 {
     /// Return the SHA-256 digest of the first subject as a hex string (no
     /// `sha256:` prefix), or an error if the subject list is empty or the
     /// digest is absent.
-    pub fn subject_sha256_digest(&self) -> Result<String> {
+    pub(crate) fn subject_sha256_digest(&self) -> Result<String> {
         self.subject
             .first()
             .and_then(|s| s.digest.get("sha256").cloned())
@@ -159,73 +146,33 @@ mod tests {
         let statement =
             InTotoStatementV1::from_json(&payload_bytes).expect("must parse as in-toto statement");
 
-        assert_eq!(
-            statement.subject_sha256_digest().unwrap(),
-            "c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172"
-        );
+        let has_expected_digest = statement.subject.iter().any(|s| {
+            s.digest.get("sha256")
+                == Some(
+                    &"c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172".to_string(),
+                )
+        });
+        assert!(has_expected_digest);
         assert_eq!(
             statement.predicate_type,
             "https://sigstore.dev/cosign/sign/v1"
         );
         statement
-            .validate_cosign_v1()
-            .expect("real fixture should satisfy cosign v1 statement constraints");
-    }
-
-    #[rstest]
-    #[case::subject_missing_sha256_digest(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![Subject {
-                name: Some("artifact".to_string()),
-                digest: BTreeMap::new(), // no sha256 key
-                annotations: None,
-            }],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    #[case::empty_subject_list(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    fn subject_sha256_digest_returns_err_for_missing_digest(#[case] statement: InTotoStatementV1) {
-        assert!(statement.subject_sha256_digest().is_err());
+            .validate("sha256:c811d58de79c92f03214e63aa339484e488d694ae8a6283b5f3f17a9faf50172")
+            .expect("real fixture should satisfy statement constraints");
     }
 
     #[test]
-    fn subject_sha256_digest_returns_err_for_invalid_json() {
-        // Simulates what callers do: deserialise raw bytes first, then call the method.
-        // Invalid JSON must produce a deserialisation error before we even reach the method.
+    fn validate_returns_err_for_invalid_json() {
+        // Invalid JSON must produce a deserialisation error before we even reach validate.
         let result = serde_json::from_slice::<InTotoStatementV1>(b"not valid json");
         assert!(result.is_err());
     }
 
     #[rstest]
-    #[case::valid(
-        "https://in-toto.io/Statement/v1",
-        "https://sigstore.dev/cosign/sign/v1",
-        true
-    )]
-    #[case::wrong_statement_type(
-        "https://example.com/Statement/v1",
-        "https://sigstore.dev/cosign/sign/v1",
-        false
-    )]
-    #[case::wrong_predicate_type(
-        "https://in-toto.io/Statement/v1",
-        "https://example.com/predicate/v1",
-        false
-    )]
-    fn validate_cosign_v1_type_enforcement(
-        #[case] statement_type: &str,
-        #[case] predicate_type: &str,
-        #[case] expected_ok: bool,
-    ) {
+    #[case::valid_statement_type("https://in-toto.io/Statement/v1", true)]
+    #[case::wrong_statement_type("https://example.com/Statement/v1", false)]
+    fn validate_type_enforcement(#[case] statement_type: &str, #[case] expected_ok: bool) {
         let statement = InTotoStatementV1 {
             statement_type: statement_type.to_string(),
             subject: vec![Subject {
@@ -233,10 +180,36 @@ mod tests {
                 digest: BTreeMap::from([("sha256".to_string(), "abc".to_string())]),
                 annotations: None,
             }],
-            predicate_type: predicate_type.to_string(),
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
             predicate: None,
         };
-        assert_eq!(statement.validate_cosign_v1().is_ok(), expected_ok);
+        assert_eq!(statement.validate("sha256:abc").is_ok(), expected_ok);
+    }
+
+    #[test]
+    fn validate_accepts_any_predicate_type() {
+        // Any predicate type should be accepted — SLSA provenance, SBOM, etc.
+        for predicate_type in [
+            "https://sigstore.dev/cosign/sign/v1",
+            "https://slsa.dev/provenance/v1",
+            "https://cyclonedx.org/bom/v1.4",
+            "https://example.com/custom/v1",
+        ] {
+            let statement = InTotoStatementV1 {
+                statement_type: "https://in-toto.io/Statement/v1".to_string(),
+                subject: vec![Subject {
+                    name: Some("artifact".to_string()),
+                    digest: BTreeMap::from([("sha256".to_string(), "abc".to_string())]),
+                    annotations: None,
+                }],
+                predicate_type: predicate_type.to_string(),
+                predicate: None,
+            };
+            assert!(
+                statement.validate("sha256:abc").is_ok(),
+                "predicate type {predicate_type} should be accepted"
+            );
+        }
     }
 
     #[rstest]
@@ -246,7 +219,8 @@ mod tests {
             subject: vec![],
             predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
             predicate: None,
-        }
+        },
+        "sha256:abc"
     )]
     #[case::subject_without_sha256(
         InTotoStatementV1 {
@@ -258,16 +232,44 @@ mod tests {
             }],
             predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
             predicate: None,
-        }
+        },
+        "sha256:abc"
     )]
-    fn validate_cosign_v1_rejects_invalid_subject(#[case] statement: InTotoStatementV1) {
-        assert!(statement.validate_cosign_v1().is_err());
+    #[case::no_matching_digest(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![Subject {
+                name: Some("artifact".to_string()),
+                digest: BTreeMap::from([("sha256".to_string(), "aaa".to_string())]),
+                annotations: None,
+            }],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        },
+        "sha256:bbb"
+    )]
+    #[case::missing_algorithm_prefix(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![Subject {
+                name: Some("artifact".to_string()),
+                digest: BTreeMap::from([("sha256".to_string(), "abc".to_string())]),
+                annotations: None,
+            }],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        },
+        "abc"
+    )]
+    fn validate_rejects_invalid_subject(
+        #[case] statement: InTotoStatementV1,
+        #[case] expected_digest: &str,
+    ) {
+        assert!(statement.validate(expected_digest).is_err());
     }
 
-    // Multiple subjects are accepted (with a warn!); only subject[0] is used.
-    // Extra digest algorithms beyond sha256 are tolerated and ignored.
     #[rstest]
-    #[case::multiple_subjects(
+    #[case::digest_in_first_subject(
         InTotoStatementV1 {
             statement_type: "https://in-toto.io/Statement/v1".to_string(),
             subject: vec![
@@ -284,7 +286,28 @@ mod tests {
             ],
             predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
             predicate: None,
-        }
+        },
+        "sha256:aaa"
+    )]
+    #[case::digest_in_second_subject(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![
+                Subject {
+                    name: Some("artifact-a".to_string()),
+                    digest: BTreeMap::from([("sha256".to_string(), "aaa".to_string())]),
+                    annotations: None,
+                },
+                Subject {
+                    name: Some("artifact-b".to_string()),
+                    digest: BTreeMap::from([("sha256".to_string(), "bbb".to_string())]),
+                    annotations: None,
+                },
+            ],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        },
+        "sha256:bbb"
     )]
     #[case::extra_digest_algorithms(
         InTotoStatementV1 {
@@ -299,9 +322,39 @@ mod tests {
             }],
             predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
             predicate: None,
-        }
+        },
+        "sha256:abc"
     )]
-    fn validate_cosign_v1_accepts_tolerated_cases(#[case] statement: InTotoStatementV1) {
-        assert!(statement.validate_cosign_v1().is_ok());
+    #[case::sha256_prefix(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![Subject {
+                name: Some("artifact".to_string()),
+                digest: BTreeMap::from([("sha256".to_string(), "abc".to_string())]),
+                annotations: None,
+            }],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        },
+        "sha256:abc"
+    )]
+    #[case::sha512_algorithm(
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: vec![Subject {
+                name: Some("artifact".to_string()),
+                digest: BTreeMap::from([("sha512".to_string(), "def456".to_string())]),
+                annotations: None,
+            }],
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        },
+        "sha512:def456"
+    )]
+    fn validate_accepts_valid_cases(
+        #[case] statement: InTotoStatementV1,
+        #[case] expected_digest: &str,
+    ) {
+        assert!(statement.validate(expected_digest).is_ok());
     }
 }

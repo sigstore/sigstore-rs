@@ -119,6 +119,15 @@ pub enum CertificateSubject {
 pub struct SignatureLayer {
     /// The Simple Signing object associated with this layer
     pub simple_signing: SimpleSigning,
+    /// The in-toto attestation from a verified Sigstore Bundle (DSSE envelope).
+    ///
+    /// This is `Some` when the layer was constructed from a Sigstore Bundle
+    /// containing a DSSE envelope with an in-toto Statement v1 payload.
+    /// It is `None` for tag-based SimpleSigning layers.
+    ///
+    /// The attestation is available for inspection after cryptographic
+    /// verification (e.g. to check the `predicate_type` or `predicate`).
+    pub(crate) attestation: Option<super::intoto::InTotoStatementV1>,
     /// The digest of the layer
     pub oci_digest: String,
     /// The certificate holding the identity of the signer, plus his
@@ -225,6 +234,7 @@ impl SignatureLayer {
         let digest = format!("sha256:{:x}", sha2::Sha256::digest(&payload));
         Ok(SignatureLayer {
             simple_signing,
+            attestation: None,
             oci_digest: digest,
             certificate_signature: None,
             bundle: None,
@@ -295,6 +305,7 @@ impl SignatureLayer {
             oci_digest: descriptor.digest.clone(),
             raw_data: layer.data.to_vec(),
             simple_signing,
+            attestation: None,
             signature: Some(signature),
             bundle,
             certificate_signature,
@@ -444,18 +455,12 @@ impl SignatureLayer {
         // Decode the in-toto Statement v1 from the envelope payload
         // dsse_env.payload is already raw bytes (proto bytes field).
         let statement = InTotoStatementV1::from_json(&dsse_env.payload)?;
-        statement.validate_cosign_v1()?;
+        statement.validate(source_image_digest)?;
 
-        // Verify that the in-toto statement covers the expected image digest.
-        let subject_digest = statement.subject_sha256_digest()?;
-        let expected_digest = source_image_digest
+        // Extract the first matching subject digest for the synthesised SimpleSigning.
+        let subject_digest = source_image_digest
             .strip_prefix("sha256:")
             .unwrap_or(source_image_digest);
-        if subject_digest != expected_digest {
-            return Err(SigstoreError::UnexpectedError(format!(
-                "Sigstore bundle subject digest {subject_digest} does not match source image digest {source_image_digest}"
-            )));
-        }
 
         // Build the DSSE PAE bytes (what was actually signed)
         let pae_bytes =
@@ -563,6 +568,7 @@ impl SignatureLayer {
 
         Ok(SignatureLayer {
             simple_signing,
+            attestation: Some(statement),
             oci_digest: layer_digest.to_string(),
             certificate_signature,
             bundle: Some(BundleContent::SigstoreBundle(tlog_entry)),
@@ -1253,6 +1259,7 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
         (
             SignatureLayer {
                 simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
+                attestation: None,
                 oci_digest: String::from("digest"),
                 signature: Some(signature),
                 bundle: None,
@@ -1320,6 +1327,7 @@ oXqqo/C9QnOHTto=
 
         SignatureLayer {
             simple_signing: serde_json::from_value(ss_value.clone()).unwrap(),
+            attestation: None,
             oci_digest: String::from(
                 "sha256:5f481572d088dc4023afb35fced9530ced3d9b03bf7299c6f492163cb9f0452e",
             ),
@@ -1976,10 +1984,6 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
         #[rstest]
         #[case::wrong_payload_type(V3BundleMutation::Payload, "unsupported DSSE payloadType")]
         #[case::wrong_statement_type(V3BundleMutation::Statement, "unsupported in-toto _type")]
-        #[case::wrong_predicate_type(
-            V3BundleMutation::Predicate,
-            "unsupported in-toto predicateType"
-        )]
         fn from_sigstore_bundle_rejects_unexpected_types(
             #[case] mutation: V3BundleMutation,
             #[case] expected_error_fragment: &str,

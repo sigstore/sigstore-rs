@@ -455,6 +455,7 @@ mod tests {
             signature: None,
             bundle: None,
             raw_data: vec![],
+            attestation: None,
         };
 
         // Correct email + correct issuer: must pass

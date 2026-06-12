@@ -228,6 +228,7 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
             bundle: Some(BundleContent::RekorBundle(bundle)),
             certificate_signature: None,
             raw_data: serde_json::to_vec(&ss_value).unwrap(),
+            attestation: None,
         };
 
         (signature_layer, cert_pem_raw)
