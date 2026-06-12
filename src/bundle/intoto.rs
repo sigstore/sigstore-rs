@@ -51,14 +51,14 @@ impl InTotoStatementV1 {
     /// Validate the in-toto statement and verify that at least one subject
     /// carries a digest matching `expected_digest`.
     ///
-    /// `expected_digest` must be in `algorithm:hex` form (e.g.
-    /// `"sha256:abc123"`, `"sha512:def456"`).  An error is returned if the
-    /// `':'` separator is missing.
+    /// `expected_digest` should be in `algorithm:hex` form (e.g.
+    /// `"sha256:abc123"`, `"sha512:def456"`).  If the `':'` separator is
+    /// missing, no subject will match and the error message will include the
+    /// full subject list for debuggability.
     ///
     /// Checks performed:
     ///
     /// - `_type` must be `https://in-toto.io/Statement/v1`
-    /// - `expected_digest` must be in `algorithm:hex` format
     /// - At least one subject must have a digest entry for the extracted
     ///   algorithm whose value equals the extracted hex digest
     ///
@@ -74,11 +74,9 @@ impl InTotoStatementV1 {
             )));
         }
 
-        let (algorithm, digest) = expected_digest.split_once(':').ok_or_else(|| {
-            SigstoreError::UnexpectedError(format!(
-                "expected_digest must be in 'algorithm:hex' format, got '{expected_digest}'"
-            ))
-        })?;
+        let (algorithm, digest) = expected_digest
+            .split_once(':')
+            .unwrap_or(("", expected_digest));
 
         let found = self
             .subject
@@ -87,7 +85,7 @@ impl InTotoStatementV1 {
 
         if !found {
             return Err(SigstoreError::UnexpectedError(format!(
-                "unable to find subject with mathcing digest; digest: '{algorithm}:{digest}'; subjects: {:?}",
+                "unable to find subject with matching digest; expected: '{expected_digest}'; subjects: {:?}",
                 self.subject
             )));
         }

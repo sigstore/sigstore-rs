@@ -80,3 +80,6 @@ pub use cert_subject_url_verifier::CertSubjectUrlVerifier;
 
 pub mod annotation_verifier;
 pub use annotation_verifier::AnnotationVerifier;
+
+pub mod attestation_verifier;
+pub use attestation_verifier::AttestationVerifier;

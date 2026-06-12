@@ -16,8 +16,8 @@
 extern crate sigstore;
 use sigstore::cosign::verification_constraint::cert_subject_email_verifier::StringVerifier;
 use sigstore::cosign::verification_constraint::{
-    AnnotationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier, CertificateVerifier,
-    PublicKeyVerifier, VerificationConstraintVec,
+    AnnotationVerifier, AttestationVerifier, CertSubjectEmailVerifier, CertSubjectUrlVerifier,
+    CertificateVerifier, PublicKeyVerifier, VerificationConstraintVec,
 };
 use sigstore::cosign::{CosignCapabilities, SignatureLayer};
 use sigstore::crypto::SigningScheme;
@@ -99,6 +99,10 @@ struct Cli {
 
     /// Name of the image to verify
     image: OciReference,
+
+    /// Require an in-toto attestation with this predicate type (e.g. https://slsa.dev/provenance/v1)
+    #[clap(long, required(false))]
+    predicate_type: Option<String>,
 
     /// Whether the registry uses HTTP
     #[clap(long)]
@@ -217,6 +221,11 @@ async fn run_app(
         }
     }
 
+    if let Some(predicate_type) = cli.predicate_type.as_ref() {
+        let verifier = AttestationVerifier::new().with_predicate_type(predicate_type);
+        verification_constraints.push(Box::new(verifier));
+    }
+
     let image = &cli.image;
 
     let trusted_layers = client.trusted_signature_layers(auth, image).await?;
@@ -296,6 +305,18 @@ pub async fn main() {
                 match filter_result {
                     Ok(()) => {
                         println!("Image successfully verified");
+                        for layer in &trusted_layers {
+                            if let Some(predicate_type) = layer.attestation_predicate_type() {
+                                println!("  attestation predicate type: {predicate_type}");
+                                if let Some(predicate) = layer.attestation_predicate() {
+                                    println!(
+                                        "  attestation predicate: {}",
+                                        serde_json::to_string_pretty(predicate)
+                                            .unwrap_or_else(|_| format!("{predicate:?}"))
+                                    );
+                                }
+                            }
+                        }
                     }
                     Err(SigstoreVerifyConstraintsError {
                         unsatisfied_constraints,

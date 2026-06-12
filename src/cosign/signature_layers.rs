@@ -201,6 +201,18 @@ impl fmt::Display for SignatureLayer {
 }
 
 impl SignatureLayer {
+    /// Returns the in-toto attestation's `predicateType`, if this layer
+    /// carries an attestation.
+    pub fn attestation_predicate_type(&self) -> Option<&str> {
+        self.attestation.as_ref().map(|a| a.predicate_type.as_str())
+    }
+
+    /// Returns the in-toto attestation's `predicate` JSON value, if this
+    /// layer carries an attestation that includes a predicate.
+    pub fn attestation_predicate(&self) -> Option<&serde_json::Value> {
+        self.attestation.as_ref().and_then(|a| a.predicate.as_ref())
+    }
+
     /// Create a [`SignatureLayer`], this function will generate a [`SimpleSigning`]
     /// payload due to the given reference of image and the digest of the manifest.
     /// However, the resulted [`SignatureLayer`] does not have a signature, and it
