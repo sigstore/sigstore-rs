@@ -97,7 +97,7 @@ impl<'ctx> SigningSession<'ctx> {
                             oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
                             value: AttributeValue::new(
                                 pkcs8::der::Tag::Utf8String,
-                                token.unverified_claims().email.as_ref(),
+                                token.unverified_claims().email.as_str().as_bytes(),
                             )?,
                         }
                     ].try_into()?
