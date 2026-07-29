@@ -177,9 +177,6 @@ pub(crate) enum BundleContent {
         pae: Vec<u8>,
         /// The sha-256 hex digest extracted from the in-toto statement subject.
         subject_sha256_digest: String,
-        /// Canonical JSON serialization of the DSSE envelope (used to verify `envelopeHash`
-        /// in the tlog body consistency check).
-        envelope_json: Vec<u8>,
         /// Raw payload bytes from the DSSE envelope (used to verify `payloadHash`).
         payload_bytes: Vec<u8>,
     },
@@ -237,12 +234,6 @@ impl TryFrom<Bundle> for CheckedBundle {
         {
             bundle::Content::MessageSignature(s) => (s.signature, BundleContent::MessageSignature),
             bundle::Content::DsseEnvelope(dsse) => {
-                // Serialize the DSSE envelope to canonical JSON for envelopeHash
-                // verification.
-                // Must happen before .into_iter() consumes signatures below.
-                let envelope_json =
-                    serde_json::to_vec(&dsse).map_err(|_| BundleErrorKind::DssePayloadDecode)?;
-
                 // The signature inside the envelope is raw bytes (not base64 in the
                 // protobuf representation). Spec requires exactly one signature —
                 // reject if count != 1.
@@ -275,7 +266,6 @@ impl TryFrom<Bundle> for CheckedBundle {
                     BundleContent::Dsse {
                         pae,
                         subject_sha256_digest,
-                        envelope_json,
                         payload_bytes,
                     },
                 )
@@ -439,38 +429,29 @@ impl CheckedBundle {
             return None;
         }
 
-        let BundleContent::Dsse {
-            envelope_json,
-            payload_bytes,
-            ..
-        } = &self.content
-        else {
+        let BundleContent::Dsse { payload_bytes, .. } = &self.content else {
             return None;
         };
 
         let spec = actual.get("spec")?;
 
-        // 1. Verify envelopeHash algorithm is sha256 and value matches sha256(canonical envelope JSON).
-        let env_hash_algo = spec
-            .get("envelopeHash")?
-            .get("algorithm")
-            .and_then(|v| v.as_str())?;
-        if env_hash_algo != "sha256" {
-            warn!(env_hash_algo, "unsupported envelopeHash algorithm");
-            return None;
-        }
-        let actual_env_hash = spec
-            .get("envelopeHash")?
-            .get("value")
-            .and_then(|v| v.as_str())?;
-        let expected_env_hash: [u8; 32] = Sha256::digest(envelope_json).into();
-        let actual_env_hash_bytes: [u8; 32] = hex::decode(actual_env_hash)
-            .ok()
-            .and_then(|v| v.try_into().ok())?;
-        if actual_env_hash_bytes != expected_env_hash {
-            warn!("tlog dsse envelopeHash mismatch");
-            return None;
-        }
+        // 1. envelopeHash: intentionally NOT re-checked.
+        //
+        //    The tlog `spec.envelopeHash` is Rekor's sha256 over the RAW client-submitted
+        //    DSSE envelope bytes. Recomputing it here as `sha256(serde_json::to_vec(&dsse))`
+        //    does not reliably reproduce those bytes: for `cosign attest-blob
+        //    --new-bundle-format` v0.3 bundles the submitted form is cosign's Go
+        //    `json.Marshal` output (payloadType-first field order, `"keyid":""` present),
+        //    whereas re-serializing the protobuf `DsseEnvelope` yields the protobuf-JSON form
+        //    (payload-first tag order, `keyid` omitted). Those byte-strings differ, so the
+        //    check rejects otherwise-valid bundles with a transparency error. The client bytes
+        //    are not canonicalized or spec-pinned, and vary across cosign's own code paths.
+        //
+        //    The check is also redundant: the entry<->bundle binding (CVE-2022-36056) is
+        //    fully carried by checks 2-4 below (payloadHash == sha256(payload); tlog signature
+        //    == bundle signature; tlog verifier cert == bundle cert) together with the DSSE
+        //    signature verified over the PAE (which canonically binds payloadType + payload).
+        //    sigstore-python's reference verifier does not check envelopeHash either.
 
         // 2. Verify payloadHash algorithm is sha256 and value matches sha256(payload bytes).
         let payload_hash_algo = spec
@@ -528,12 +509,6 @@ impl CheckedBundle {
     }
 }
 
-/// Builds the canonical JSON representation of a DSSE envelope that Rekor uses when
-/// computing `envelopeHash`.  The format matches the JSON serialization produced by
-/// the Rekor `dsse` entry type (v0.0.1): keys are in alphabetical order, binary
-/// fields (`payload`, `sig`) are standard base64-encoded strings.
-///
-/// Returns `None` if the envelope has no signatures (which is invalid for our purposes).
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -595,21 +570,8 @@ mod tests {
             body["kind"] = serde_json::json!("hashedrekord");
         }) as Box<dyn FnOnce(&mut serde_json::Value)>
     )]
-    // envelopeHash value is a different (all-zeros) 64-hex string.
-    #[case::envelope_hash_mismatch(
-        "envelope hash mismatch",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["envelopeHash"]["value"] =
-                serde_json::json!("0000000000000000000000000000000000000000000000000000000000000000");
-        })
-    )]
-    // envelopeHash algorithm replaced with something other than sha256.
-    #[case::unsupported_envelope_hash_algo(
-        "unsupported envelopeHash algorithm",
-        Box::new(|body: &mut serde_json::Value| {
-            body["spec"]["envelopeHash"]["algorithm"] = serde_json::json!("sha512");
-        })
-    )]
+    // (envelopeHash cases removed: envelopeHash is no longer checked — see check 1 in
+    // `tlog_entry_for_dsse`. The remaining cases cover checks 2-4, which carry the binding.)
     // payloadHash value is a different (all-zeros) 64-hex string.
     #[case::payload_hash_mismatch(
         "payload hash mismatch",
