@@ -386,7 +386,6 @@ mod tests {
         let content = BundleContent::Dsse {
             pae: pae.clone(),
             subject_sha256_digest,
-            envelope_json: vec![],
             payload_bytes: vec![],
         };
 
@@ -405,7 +404,6 @@ mod tests {
         let content = BundleContent::Dsse {
             pae: pae.clone(),
             subject_sha256_digest,
-            envelope_json: vec![],
             payload_bytes: vec![],
         };
 
@@ -425,7 +423,6 @@ mod tests {
         let content = BundleContent::Dsse {
             pae,
             subject_sha256_digest,
-            envelope_json: vec![],
             payload_bytes: vec![],
         };
 
