@@ -59,6 +59,13 @@ impl InTotoStatementV1 {
     /// - `subject` must be non-empty
     /// - `subject[0]` must carry a `sha256` digest entry
     ///
+    /// This validator is specific to the cosign SimpleSigning path, whose only
+    /// consumer ([`subject_sha256_digest`](Self::subject_sha256_digest)) reads
+    /// `subject[0]`'s `sha256` entry and nothing else.  Sigstore bundle
+    /// verification does not go through here: it accepts any predicate type and
+    /// matches against every subject, via
+    /// [`subject_digests`](Self::subject_digests).
+    ///
     /// # What we currently ignore (and why)
     ///
     /// - **Multiple subjects**: the spec allows any number of subjects.
@@ -108,9 +115,23 @@ impl InTotoStatementV1 {
         Ok(())
     }
 
+    /// Return the digest map (algorithm → hex digest) of every subject, in
+    /// statement order.
+    ///
+    /// All subjects are returned: an artifact matches the statement if *any*
+    /// subject carries its digest, which is the behaviour of sigstore-go and
+    /// `gh attestation verify`.
+    pub fn subject_digests(&self) -> impl Iterator<Item = &BTreeMap<String, String>> {
+        self.subject.iter().map(|s| &s.digest)
+    }
+
     /// Return the SHA-256 digest of the first subject as a hex string (no
     /// `sha256:` prefix), or an error if the subject list is empty or the
     /// digest is absent.
+    ///
+    /// This is the single-subject, SHA-256-only accessor used by the cosign
+    /// SimpleSigning path, where the subject is always an OCI image digest.
+    /// Bundle verification uses [`Self::subject_digests`] instead.
     pub fn subject_sha256_digest(&self) -> Result<String> {
         self.subject
             .first()
@@ -239,69 +260,87 @@ mod tests {
         assert_eq!(statement.validate_cosign_v1().is_ok(), expected_ok);
     }
 
+    /// Builds a cosign-v1 statement whose subjects carry the given
+    /// `(algorithm, digest)` pairs, one inner vec per subject.
+    fn statement_with_subjects(subjects: Vec<Vec<(&str, &str)>>) -> InTotoStatementV1 {
+        InTotoStatementV1 {
+            statement_type: "https://in-toto.io/Statement/v1".to_string(),
+            subject: subjects
+                .iter()
+                .enumerate()
+                .map(|(i, digests)| Subject {
+                    name: Some(format!("artifact-{i}")),
+                    digest: digests
+                        .iter()
+                        .map(|(algo, digest)| (algo.to_string(), digest.to_string()))
+                        .collect(),
+                    annotations: None,
+                })
+                .collect(),
+            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
+            predicate: None,
+        }
+    }
+
+    // `validate_cosign_v1` gates the cosign SimpleSigning path only, and stays
+    // strict: `subject[0]` must carry a sha256 digest, because that is the one
+    // entry its consumer reads.
     #[rstest]
-    #[case::empty_subjects(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    #[case::subject_without_sha256(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![Subject {
-                name: Some("artifact".to_string()),
-                digest: BTreeMap::from([("sha512".to_string(), "abc".to_string())]),
-                annotations: None,
-            }],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    fn validate_cosign_v1_rejects_invalid_subject(#[case] statement: InTotoStatementV1) {
-        assert!(statement.validate_cosign_v1().is_err());
+    #[case::empty_subjects(vec![])]
+    #[case::subject_without_sha256(vec![vec![("sha512", "abc")]])]
+    #[case::first_subject_without_sha256(vec![vec![("sha512", "abc")], vec![("sha256", "def")]])]
+    fn validate_cosign_v1_rejects_invalid_subject(#[case] subjects: Vec<Vec<(&str, &str)>>) {
+        assert!(
+            statement_with_subjects(subjects)
+                .validate_cosign_v1()
+                .is_err()
+        );
     }
 
     // Multiple subjects are accepted (with a warn!); only subject[0] is used.
     // Extra digest algorithms beyond sha256 are tolerated and ignored.
     #[rstest]
-    #[case::multiple_subjects(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![
-                Subject {
-                    name: Some("artifact-a".to_string()),
-                    digest: BTreeMap::from([("sha256".to_string(), "aaa".to_string())]),
-                    annotations: None,
-                },
-                Subject {
-                    name: Some("artifact-b".to_string()),
-                    digest: BTreeMap::from([("sha256".to_string(), "bbb".to_string())]),
-                    annotations: None,
-                },
-            ],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    #[case::extra_digest_algorithms(
-        InTotoStatementV1 {
-            statement_type: "https://in-toto.io/Statement/v1".to_string(),
-            subject: vec![Subject {
-                name: Some("artifact".to_string()),
-                digest: BTreeMap::from([
-                    ("sha256".to_string(), "abc".to_string()),
-                    ("sha512".to_string(), "def".to_string()),
-                ]),
-                annotations: None,
-            }],
-            predicate_type: "https://sigstore.dev/cosign/sign/v1".to_string(),
-            predicate: None,
-        }
-    )]
-    fn validate_cosign_v1_accepts_tolerated_cases(#[case] statement: InTotoStatementV1) {
-        assert!(statement.validate_cosign_v1().is_ok());
+    #[case::multiple_subjects(vec![vec![("sha256", "aaa")], vec![("sha256", "bbb")]])]
+    #[case::extra_digest_algorithms(vec![vec![("sha256", "abc"), ("sha512", "def")]])]
+    fn validate_cosign_v1_accepts_tolerated_cases(#[case] subjects: Vec<Vec<(&str, &str)>>) {
+        assert!(
+            statement_with_subjects(subjects)
+                .validate_cosign_v1()
+                .is_ok()
+        );
+    }
+
+    /// sigstore-rs#596: one attestation may list every artifact of a release as
+    /// a subject, so every subject has to be visible to the matching logic.
+    #[test]
+    fn subject_digests_yields_every_subject() {
+        let statement = statement_with_subjects(vec![
+            vec![("sha256", "aaa")],
+            vec![("sha256", "bbb")],
+            vec![("sha256", "ccc"), ("sha512", "ddd")],
+        ]);
+
+        let digests: Vec<_> = statement.subject_digests().collect();
+        assert_eq!(digests.len(), 3);
+        assert_eq!(digests[1]["sha256"], "bbb");
+        assert_eq!(digests[2]["sha256"], "ccc");
+        assert_eq!(digests[2]["sha512"], "ddd");
+    }
+
+    /// The cosign SimpleSigning path always signs a single OCI image digest, so
+    /// this accessor deliberately stays first-subject / sha256 only.
+    #[test]
+    fn subject_sha256_digest_reads_only_the_first_subject() {
+        let statement =
+            statement_with_subjects(vec![vec![("sha256", "aaa")], vec![("sha256", "bbb")]]);
+
+        assert_eq!(statement.subject_sha256_digest().unwrap(), "aaa");
+    }
+
+    #[test]
+    fn subject_sha256_digest_returns_err_for_sha512_only_subject() {
+        let statement = statement_with_subjects(vec![vec![("sha512", "abc")]]);
+
+        assert!(statement.subject_sha256_digest().is_err());
     }
 }
