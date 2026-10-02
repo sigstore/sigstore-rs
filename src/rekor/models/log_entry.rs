@@ -23,6 +23,7 @@ use crate::errors::SigstoreError::UnexpectedError;
 use crate::rekor::models::InclusionProof;
 use crate::rekor::models::checkpoint::SignedCheckpoint;
 
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Value, json};
 use std::collections::HashMap;
@@ -52,16 +53,16 @@ impl FromStr for LogEntry {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut log_entry_map = serde_json::from_str::<HashMap<&str, Value>>(s)?;
-        log_entry_map.entry("body").and_modify(|body| {
-            let decoded_body = serde_json::to_value(
-                decode_body(body.as_str().expect("Failed to parse Body"))
-                    .expect("Failed to decode Body"),
-            )
-            .expect("Serialization failed");
-            *body = json!(decoded_body);
-        });
+        if let Some(body) = log_entry_map.get_mut("body") {
+            let encoded_body = body
+                .as_str()
+                .ok_or_else(|| Error::custom("expected \"body\" field to be a string"))?;
+            let decoded_body = decode_body(encoded_body)
+                .map_err(|e| Error::custom(format!("failed to decode \"body\" field: {e}")))?;
+            *body = json!(serde_json::to_value(decoded_body)?);
+        }
         let log_entry_str = serde_json::to_string(&log_entry_map)?;
-        Ok(serde_json::from_str::<LogEntry>(&log_entry_str).expect("Serialization failed"))
+        serde_json::from_str::<LogEntry>(&log_entry_str)
     }
 }
 
@@ -352,5 +353,29 @@ mod tests {
             let res = case.verify_inclusion(&rekor_key);
             assert!(res.is_err(), "accepted invalid proof: {desc}");
         }
+    }
+
+    #[test]
+    fn from_str_rejects_non_string_body() {
+        let json = r#"{
+            "body": 42,
+            "integratedTime": 1656448131,
+            "logID": "d32f30a3c32d639c2b762205a21c7bb07788e68283a4ae6f42118723a1bea496",
+            "logIndex": 1688,
+            "verification": { "signedEntryTimestamp": "" }
+        }"#;
+        LogEntry::from_str(json).expect_err("body field is not a string");
+    }
+
+    #[test]
+    fn from_str_rejects_invalid_base64_body() {
+        let json = r#"{
+            "body": "not valid base64!!!",
+            "integratedTime": 1656448131,
+            "logID": "d32f30a3c32d639c2b762205a21c7bb07788e68283a4ae6f42118723a1bea496",
+            "logIndex": 1688,
+            "verification": { "signedEntryTimestamp": "" }
+        }"#;
+        LogEntry::from_str(json).expect_err("body field is not valid base64");
     }
 }

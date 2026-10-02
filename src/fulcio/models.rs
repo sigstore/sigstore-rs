@@ -58,7 +58,12 @@ where
 
     // The first two bytes indicate the signature and hash algorithms so let's skip those.
     // The next two bytes indicate the size of the signature.
-    let signature_size = u16::from_be_bytes(buf[2..4].try_into().expect("unexpected length"));
+    if buf.len() < 4 {
+        return Err(serde::de::Error::custom(
+            "detached SCT signature too short to contain a length prefix",
+        ));
+    }
+    let signature_size = u16::from_be_bytes([buf[2], buf[3]]);
 
     // This should be equal to the length of the remainder of the signature buffer.
     let signature = buf[4..].to_vec();
@@ -124,4 +129,43 @@ pub struct CertificateResponse {
     pub cert: Certificate,
     pub chain: Vec<Certificate>,
     pub detached_sct: Option<SigningCertificateDetachedSCT>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
+
+    #[derive(Deserialize)]
+    struct SignatureWrapper {
+        #[serde(deserialize_with = "deserialize_inner_detached_sct_signature")]
+        sig: Vec<u8>,
+    }
+
+    fn decode(raw: &[u8]) -> Result<Vec<u8>, serde_json::Error> {
+        let encoded = BASE64_STD_ENGINE.encode(raw);
+        let json = format!(r#"{{"sig": "{encoded}"}}"#);
+        serde_json::from_str::<SignatureWrapper>(&json).map(|w| w.sig)
+    }
+
+    #[test]
+    fn rejects_buffer_shorter_than_the_length_prefix() {
+        // 3 bytes: not enough to hold the 2-byte algorithm prefix plus the
+        // 2-byte signature length prefix.
+        decode(&[0u8, 1, 2]).expect_err("buffer too short to contain a length prefix");
+    }
+
+    #[test]
+    fn accepts_buffer_at_the_minimum_length() {
+        // 4 bytes: 2-byte algorithm prefix + 2-byte length prefix declaring
+        // a zero-length signature, with no trailing signature bytes.
+        let signature = decode(&[0u8, 1, 0, 0]).expect("minimal valid buffer");
+        assert!(signature.is_empty());
+    }
+
+    #[test]
+    fn rejects_signature_length_mismatch() {
+        // Length prefix claims 1 byte, but 2 bytes of signature follow.
+        decode(&[0u8, 1, 0, 1, 0xaa, 0xbb]).expect_err("declared length does not match buffer");
+    }
 }
