@@ -14,7 +14,7 @@
 
 //! # Ed25519 Keys
 //!
-//! This module provides Ed25519 key pair operations backed by `aws-lc-rs`.
+//! This module provides Ed25519 key pair operations.
 //! There are two main types:
 //! * [`Ed25519Keys`]: provides key pair operations
 //! * [`Ed25519Signer`]: provides signing operations
@@ -59,12 +59,6 @@
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature), message).is_ok());
 //! ```
 
-use aws_lc_rs::{
-    encoding::AsDer,
-    rand::SystemRandom,
-    signature::{Ed25519KeyPair, KeyPair as AwsKeyPair},
-};
-
 use crate::{
     crypto::{SigningScheme, verification_key::CosignVerificationKey},
     errors::*,
@@ -94,22 +88,16 @@ impl Ed25519Keys {
     /// Create a new `Ed25519Keys` object.
     /// The private key will be randomly generated.
     pub fn new() -> Result<Self> {
-        let rng = SystemRandom::new();
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
-        Self::from_pkcs8_der(pkcs8.as_ref())
+        let (pkcs8_der, spki_der) = crate::crypto::backend::ed25519_generate()?;
+        Ok(Self {
+            pkcs8_der,
+            spki_der,
+        })
     }
 
     /// Build from raw PKCS#8 DER bytes.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
-        let kp = Ed25519KeyPair::from_pkcs8(der)
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-        let spki_der = kp
-            .public_key()
-            .as_der()
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?
-            .as_ref()
-            .to_vec();
+        let spki_der = crate::crypto::backend::ed25519_spki_from_pkcs8(der)?;
         Ok(Self {
             pkcs8_der: zeroize::Zeroizing::new(der.to_vec()),
             spki_der,
@@ -236,9 +224,7 @@ impl Signer for Ed25519Signer {
 
     /// Sign the given message using Ed25519.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let kp = Ed25519KeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
-            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
-        Ok(kp.sign(msg).as_ref().to_vec())
+        crate::crypto::backend::ed25519_sign(self.key_pair.pkcs8_der.as_ref(), msg)
     }
 }
 

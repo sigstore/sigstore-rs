@@ -51,11 +51,6 @@
 //! assert!(verification_key.verify_signature(Signature::Raw(&signature_data), message).is_ok());
 //! ```
 
-use aws_lc_rs::{
-    rand::SystemRandom,
-    signature::{RSA_PKCS1_SHA256, RSA_PSS_SHA256, RsaKeyPair},
-};
-
 use self::keypair::RSAKeys;
 use super::{KeyPair, Signer};
 use crate::{crypto::CosignVerificationKey, errors::*};
@@ -139,19 +134,11 @@ impl RSASigner {
 impl Signer for RSASigner {
     /// `sign` will sign the given data, and return the signature.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let rng = SystemRandom::new();
-        let kp = RsaKeyPair::from_pkcs8(&self.key_pair.pkcs8_der)
-            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
-
-        let alg = match (&self.digest, &self.padding) {
-            (DigestAlgorithm::Sha256, PaddingScheme::PSS) => &RSA_PSS_SHA256,
-            (DigestAlgorithm::Sha256, PaddingScheme::PKCS1v15) => &RSA_PKCS1_SHA256,
-        };
-
-        let mut sig = vec![0u8; kp.public_modulus_len()];
-        kp.sign(alg, &rng, msg, &mut sig)
-            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
-        Ok(sig)
+        let pss = matches!(
+            (&self.digest, &self.padding),
+            (DigestAlgorithm::Sha256, PaddingScheme::PSS)
+        );
+        crate::crypto::backend::rsa_sign(self.key_pair.pkcs8_der.as_ref(), pss, msg)
     }
 
     /// Return the ref to the [`KeyPair`] trait object inside the `RSASigner`.

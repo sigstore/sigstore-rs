@@ -21,6 +21,7 @@ use crate::errors::*;
 
 pub use signing_key::SigStoreSigner;
 pub use verification_key::CosignVerificationKey;
+pub(crate) mod backend;
 pub(crate) mod merkle;
 
 /// Different digital signature algorithms.

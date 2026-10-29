@@ -218,8 +218,8 @@
 //!
 //! One of these features must be enabled:
 //!
-//! - `native-tls`: Enables support for `native-tls` as the underlying tls for all the features.
-//! - `rustls-tls`: Enables support for `rustls-tls` as the underlying tls for all the features.
+//! - `native-tls`: Use `native-tls` for HTTPS and OpenSSL for signing, verification, and certificate-chain checks.
+//! - `rustls-tls`: Use `rustls` for HTTPS and `aws-lc-rs` for signing, verification, and certificate-chain checks.
 //!
 //! ## Features
 //!
@@ -233,7 +233,7 @@
 //! - `sign`: Enables support for signing.
 //! - `verify`: Enables support for verification.
 //! - `bundle`: Includes both `sign` and `verify`.
-//! - `sigstore-trust-root`: Enables support for Sigstore trust root.
+//! - `sigstore-trust-root`: Enables support for Sigstore trust root. This depends on `tough`, which links `aws-lc-rs` even when `native-tls` is selected.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::unwrap_used, clippy::panic)]

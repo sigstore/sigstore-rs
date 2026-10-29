@@ -104,7 +104,7 @@ impl CertificatePool {
     where
         'a: 'cert,
     {
-        let signing_algs = webpki::ALL_VERIFICATION_ALGS;
+        let signing_algs = super::backend::verification_algs();
         let eku_code_signing = ID_KP_CODE_SIGNING.as_bytes();
 
         cert.verify_for_usage(

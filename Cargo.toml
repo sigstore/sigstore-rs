@@ -16,7 +16,7 @@ default = ["full", "native-tls"]
 
 bundle = ["sign", "verify"]
 cached-client = ["dep:cached"]
-cert = ["rustls-webpki/aws-lc-rs"]
+cert = []
 cosign = [
     "cert",
     "dep:async-trait",
@@ -44,7 +44,7 @@ full = [
     "sigstore-trust-root",
 ]
 mock-client = ["dep:async-trait", "dep:oci-client"]
-native-tls = ["oci-client?/native-tls", "reqwest?/native-tls"]
+native-tls = ["dep:openssl", "oci-client?/native-tls", "reqwest?/native-tls"]
 oauth = ["dep:openidconnect", "dep:reqwest", "reqwest?/blocking"]
 registry = ["dep:async-trait", "dep:oci-client", "dep:serde_json_canonicalizer"]
 rekor = [
@@ -54,7 +54,12 @@ rekor = [
     "dep:serde_json_canonicalizer",
     "reqwest?/query",
 ]
-rustls-tls = ["oci-client?/rustls-tls", "reqwest?/rustls"]
+rustls-tls = [
+    "dep:aws-lc-rs",
+    "oci-client?/rustls-tls",
+    "reqwest?/rustls",
+    "rustls-webpki/aws-lc-rs",
+]
 sign = [
     "cert",
     "dep:ecdsa",
@@ -120,6 +125,7 @@ hex = { version = "0.4", default-features = false, optional = true, features = [
 hex-literal = { version = "1.1", optional = true }
 oci-client = { version = "0.17", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, optional = true }
+openssl = { version = "0.10", optional = true }
 p256 = { version = "0.13", default-features = false, features = [
     "arithmetic",
     "ecdsa",
@@ -209,10 +215,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_arch = "powerpc64"))'.dependencies]
-aws-lc-rs = { version = "1" }
+aws-lc-rs = { version = "1", optional = true }
 
 [target.'cfg(target_arch = "powerpc64")'.dependencies]
-aws-lc-rs = { version = "1", features = ["bindgen"] }
+aws-lc-rs = { version = "1", optional = true, features = ["bindgen"] }
 
 # cosign example mappings
 
