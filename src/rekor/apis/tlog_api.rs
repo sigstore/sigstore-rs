@@ -90,7 +90,7 @@ pub async fn get_log_info(
 ///
 /// # Arguments
 /// * `configuration` - Rekor API client configuration.
-/// * `last_size` - The size of the newer tree (as an integer).
+/// * `last_size` - The size of the newer tree.
 /// * `first_size` - The size of the older tree (as a string, optional).
 /// * `tree_id` - The tree ID to query (optional).
 ///
@@ -98,7 +98,7 @@ pub async fn get_log_info(
 /// cannot be converted from the raw API format.
 pub async fn get_log_proof(
     configuration: &configuration::Configuration,
-    last_size: i32,
+    last_size: u64,
     first_size: Option<&str>,
     tree_id: Option<&str>,
 ) -> Result<crate::rekor::models::ConsistencyProof, Error<GetLogProofError>> {

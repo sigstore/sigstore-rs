@@ -52,7 +52,7 @@ async fn main() {
 
     let log_proof: ConsistencyProof = tlog_api::get_log_proof(
         &configuration,
-        i32::from_str(
+        u64::from_str(
             flags
                 .get_one::<String>("last_size")
                 .unwrap_or(&LAST_SIZE.to_string()),

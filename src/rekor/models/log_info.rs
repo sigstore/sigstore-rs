@@ -116,7 +116,7 @@ impl LogInfo {
     ///     // get a proof using log_info1 as the previous tree state
     ///     let proof = get_log_proof(
     ///         &rekor_config,
-    ///         log_info2.tree_size as _,
+    ///         log_info2.tree_size,
     ///         Some(&log_info1.tree_size.to_string()),
     ///         None,
     ///     )

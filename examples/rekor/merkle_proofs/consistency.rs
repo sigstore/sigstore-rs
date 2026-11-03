@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let proof = get_log_proof(
         &rekor_config,
-        log_info.tree_size as _,
+        log_info.tree_size,
         Some(&args.old_size.to_string()),
         tree_id,
     )
