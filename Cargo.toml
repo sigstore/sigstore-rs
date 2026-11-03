@@ -164,7 +164,7 @@ tough = { version = "0.23", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false }
 url = { version = "2.5", default-features = false }
 webbrowser = { version = "1.0", default-features = false, optional = true }
-x509-cert = { version = "0.2", default-features = false, features = [
+x509-cert = { version = "0.3", default-features = false, features = [
     "builder",
     "pem",
     "sct",
