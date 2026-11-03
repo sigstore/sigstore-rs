@@ -160,7 +160,7 @@ tokio = { version = "1", default-features = false, features = ["rt"] }
 tokio-util = { version = "0.7", default-features = false, features = [
     "io-util",
 ] }
-tough = { version = "0.23", default-features = false, optional = true }
+tough = { version = "0.24", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false }
 url = { version = "2.5", default-features = false }
 webbrowser = { version = "1.0", default-features = false, optional = true }
