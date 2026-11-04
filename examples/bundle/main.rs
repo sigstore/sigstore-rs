@@ -118,7 +118,7 @@ fn verify(artifact_path: &PathBuf, identity: &str, issuer: &str) {
     bundle_path.set_file_name(format!("{}.sigstore.json", filename));
 
     let bundle = fs::File::open(&bundle_path)
-        .unwrap_or_else(|_| panic!("Failed to open signature bundle {}", &bundle_path.display()));
+        .unwrap_or_else(|_| panic!("Failed to open signature bundle {}", bundle_path.display()));
     let mut artifact = fs::File::open(artifact_path)
         .unwrap_or_else(|_| panic!("Failed to read artifact {}", artifact_path.display()));
 
