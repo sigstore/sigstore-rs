@@ -19,7 +19,6 @@
 //! Please refer to <https://github.com/theupdateframework/go-tuf/blob/master/encrypted/encrypted.go>
 //! for golang version.
 
-use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STD_ENGINE};
 use crypto_secretbox::aead::{AeadMut, KeyInit};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -202,9 +201,8 @@ struct Data {
 
 /// Generate a random Vec<u8> of given length.
 fn generate_random(len: u32) -> Vec<u8> {
-    let rng = SystemRandom::new();
     let mut buf = vec![0u8; len as usize];
-    rng.fill(&mut buf).expect("SystemRandom::fill failed");
+    super::super::backend::fill_random(&mut buf);
     buf
 }
 

@@ -14,7 +14,7 @@
 
 //! # ECDSA Keys
 //!
-//! This module provides ECDSA key pair operations backed by `aws-lc-rs`.
+//! This module provides ECDSA key pair operations.
 //! The curve is selected at runtime rather than via generic type parameters.
 //! There are two main types:
 //! * [`EcdsaKeys`]: provides key pair operations (P-256, P-384, P-521)
@@ -58,15 +58,6 @@
 //! let signature = ec_signer.sign(b"some message").unwrap();
 //! ```
 
-use aws_lc_rs::{
-    encoding::AsDer,
-    rand::SystemRandom,
-    signature::{
-        ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P384_SHA384_ASN1_SIGNING,
-        ECDSA_P521_SHA512_ASN1_SIGNING, EcdsaKeyPair, EcdsaSigningAlgorithm, KeyPair as AwsKeyPair,
-    },
-};
-
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use pkcs8::PrivateKeyInfo;
 use x509_cert::der::Decode;
@@ -85,12 +76,11 @@ use crate::{
 
 use super::EllipticCurve;
 
-/// Maps an [`EllipticCurve`] to the matching aws-lc-rs signing algorithm.
-fn signing_alg(curve: EllipticCurve) -> &'static EcdsaSigningAlgorithm {
+fn backend_curve(curve: EllipticCurve) -> crate::crypto::backend::EcdsaCurve {
     match curve {
-        EllipticCurve::P256 => &ECDSA_P256_SHA256_ASN1_SIGNING,
-        EllipticCurve::P384 => &ECDSA_P384_SHA384_ASN1_SIGNING,
-        EllipticCurve::P521 => &ECDSA_P521_SHA512_ASN1_SIGNING,
+        EllipticCurve::P256 => crate::crypto::backend::EcdsaCurve::P256,
+        EllipticCurve::P384 => crate::crypto::backend::EcdsaCurve::P384,
+        EllipticCurve::P521 => crate::crypto::backend::EcdsaCurve::P521,
     }
 }
 
@@ -143,21 +133,10 @@ impl EcdsaKeys {
     /// Create a new `EcdsaKeys` object for the given elliptic curve.
     /// The secret key (private key) will be randomly generated.
     pub fn new(curve: EllipticCurve) -> Result<Self> {
-        let rng = SystemRandom::new();
-        let alg = signing_alg(curve);
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(alg, &rng)
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
-        let kp = EcdsaKeyPair::from_pkcs8(alg, pkcs8.as_ref())
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
-        let spki_der = kp
-            .public_key()
-            .as_der()
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?
-            .as_ref()
-            .to_vec();
+        let (pkcs8_der, spki_der) = crate::crypto::backend::ecdsa_generate(backend_curve(curve))?;
         Ok(Self {
             curve,
-            pkcs8_der: zeroize::Zeroizing::new(pkcs8.as_ref().to_vec()),
+            pkcs8_der,
             spki_der,
         })
     }
@@ -166,15 +145,7 @@ impl EcdsaKeys {
     /// The elliptic curve is detected automatically from the key's OID.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
         let curve = curve_from_pkcs8_der(der)?;
-        let alg = signing_alg(curve);
-        let kp = EcdsaKeyPair::from_pkcs8(alg, der)
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-        let spki_der = kp
-            .public_key()
-            .as_der()
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?
-            .as_ref()
-            .to_vec();
+        let spki_der = crate::crypto::backend::ecdsa_spki_from_pkcs8(der)?;
         Ok(Self {
             curve,
             pkcs8_der: zeroize::Zeroizing::new(der.to_vec()),
@@ -279,8 +250,8 @@ impl KeyPair for EcdsaKeys {
 /// An ECDSA signer.
 pub struct EcdsaSigner {
     key_pair: EcdsaKeys,
-    inner: EcdsaKeyPair,
-    rng: SystemRandom,
+    /// Backend key imported once by [`Self::from_ecdsa_keys`].
+    signing_key: crate::crypto::backend::EcdsaSigningKey,
 }
 
 impl std::fmt::Debug for EcdsaSigner {
@@ -293,15 +264,17 @@ impl std::fmt::Debug for EcdsaSigner {
 
 impl EcdsaSigner {
     /// Create a new `EcdsaSigner` from the given `EcdsaKeys`.
+    ///
+    /// The PKCS#8 private key is imported and validated once. Later
+    /// [`Signer::sign`] calls reuse that parsed key.
     pub fn from_ecdsa_keys(keys: &EcdsaKeys) -> Result<Self> {
-        let rng = SystemRandom::new();
-        let alg = signing_alg(keys.curve);
-        let inner = EcdsaKeyPair::from_pkcs8(alg, &keys.pkcs8_der)
-            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
+        let signing_key = crate::crypto::backend::EcdsaSigningKey::from_pkcs8(
+            backend_curve(keys.curve),
+            keys.pkcs8_der.as_ref(),
+        )?;
         Ok(Self {
             key_pair: keys.clone(),
-            inner,
-            rng,
+            signing_key,
         })
     }
 
@@ -314,11 +287,7 @@ impl EcdsaSigner {
 impl Signer for EcdsaSigner {
     /// Sign the given message and generate an ASN.1 DER-encoded ECDSA signature.
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>> {
-        let sig = self
-            .inner
-            .sign(&self.rng, msg)
-            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
-        Ok(sig.as_ref().to_vec())
+        self.signing_key.sign(msg)
     }
 
     /// Return the ref to the keypair inside the signer.

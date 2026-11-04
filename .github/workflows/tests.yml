@@ -102,3 +102,4 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
           cargo clippy --workspace -- -D warnings
+          cargo clippy --workspace --no-default-features --features full,rustls-tls -- -D warnings

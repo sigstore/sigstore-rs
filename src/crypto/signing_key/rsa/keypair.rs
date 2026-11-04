@@ -14,7 +14,7 @@
 
 //! # RSA Key Pair
 //!
-//! This module provides RSA key pair operations backed by `aws-lc-rs`.
+//! This module provides RSA key pair operations.
 //! [`RSAKeys`] implements the [`KeyPair`] trait and provides import and
 //! export operations from/to DER and PEM bytes.
 //!
@@ -39,12 +39,6 @@
 //! let rsa_keys2 = RSAKeys::from_encrypted_pem(privkey_pem.as_bytes(), b"password").unwrap();
 //! ```
 
-use aws_lc_rs::{
-    encoding::AsDer,
-    rsa::KeySize,
-    signature::{KeyPair as AwsKeyPair, RsaKeyPair},
-};
-
 use crate::{
     crypto::{CosignVerificationKey, SigStoreSigner, SigningScheme},
     errors::*,
@@ -56,17 +50,6 @@ use crate::crypto::signing_key::{
 };
 
 use super::{DigestAlgorithm, PaddingScheme, RSASigner};
-
-fn bit_size_to_key_size(bit_size: usize) -> Result<KeySize> {
-    match bit_size {
-        2048 => Ok(KeySize::Rsa2048),
-        3072 => Ok(KeySize::Rsa3072),
-        4096 => Ok(KeySize::Rsa4096),
-        other => Err(SigstoreError::InvalidKeyFormat {
-            error: format!("Unsupported RSA key size {other}; must be 2048, 3072, or 4096"),
-        }),
-    }
-}
 
 /// An RSA key pair.
 #[derive(Clone, Debug)]
@@ -82,35 +65,20 @@ impl RSAKeys {
     /// The private key will be randomly generated.
     /// `bit_size` must be 2048, 3072, or 4096.
     pub fn new(bit_size: usize) -> Result<Self> {
-        let key_size = bit_size_to_key_size(bit_size)?;
-        let kp = RsaKeyPair::generate(key_size)
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
-        let pkcs8 = kp
-            .as_der()
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
-        let spki = kp
-            .public_key()
-            .as_der()
-            .map_err(|e| SigstoreError::KeyGenerationError(e.to_string()))?;
+        let (pkcs8_der, spki_der) = crate::crypto::backend::rsa_generate(bit_size)?;
         Ok(Self {
-            pkcs8_der: zeroize::Zeroizing::new(pkcs8.as_ref().to_vec()),
-            spki_der: spki.as_ref().to_vec(),
+            pkcs8_der,
+            spki_der,
         })
     }
 
     /// Builds a `RSAKeys` from a pkcs8 asn.1 private key.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self> {
-        let kp = RsaKeyPair::from_pkcs8(der)
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-        let spki = kp
-            .public_key()
-            .as_der()
-            .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-        // Validate key size.
-        modulus_to_key_size(kp.public_modulus_len())?;
+        let (spki_der, modulus_len) = crate::crypto::backend::rsa_from_pkcs8(der)?;
+        modulus_to_key_size(modulus_len)?;
         Ok(Self {
             pkcs8_der: zeroize::Zeroizing::new(der.to_vec()),
-            spki_der: spki.as_ref().to_vec(),
+            spki_der,
         })
     }
 
@@ -146,20 +114,12 @@ impl RSAKeys {
         match key.tag() {
             PRIVATE_KEY_PEM_LABEL => Self::from_pkcs8_der(key.contents()),
             RSA_PRIVATE_KEY_PEM_LABEL => {
-                // Traditional PKCS#1 format — aws-lc-rs can import via from_der.
-                let kp = RsaKeyPair::from_der(key.contents())
-                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-                let pkcs8 = kp
-                    .as_der()
-                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-                let spki = kp
-                    .public_key()
-                    .as_der()
-                    .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
-                modulus_to_key_size(kp.public_modulus_len())?;
+                let (pkcs8_der, spki_der, modulus_len) =
+                    crate::crypto::backend::rsa_from_pkcs1(key.contents())?;
+                modulus_to_key_size(modulus_len)?;
                 Ok(Self {
-                    pkcs8_der: zeroize::Zeroizing::new(pkcs8.as_ref().to_vec()),
-                    spki_der: spki.as_ref().to_vec(),
+                    pkcs8_der,
+                    spki_der,
                 })
             }
             tag => Err(SigstoreError::PrivateKeyDecryptError(format!(

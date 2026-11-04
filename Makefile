@@ -10,6 +10,7 @@ fmt:
 .PHONY: lint
 lint:
 	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --no-default-features --features full,rustls-tls -- -D warnings
 
 .PHONY: doc
 doc:
@@ -17,7 +18,8 @@ doc:
 
 .PHONY: check-features
 check-features:
-	cargo hack check --each-feature --skip cosign --skip full --skip mock-client --skip registry --skip test-remote-registry
+	cargo hack check --each-feature --features native-tls --skip rustls-tls --skip cosign --skip full --skip mock-client --skip registry --skip test-remote-registry
+	cargo hack check --each-feature --features rustls-tls --skip native-tls --skip cosign --skip full --skip mock-client --skip registry --skip test-remote-registry
 
 .PHONY: check-features-native-tls
 check-features-native-tls:

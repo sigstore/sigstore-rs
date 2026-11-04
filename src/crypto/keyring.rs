@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use aws_lc_rs::{signature as aws_lc_rs_signature, signature::UnparsedPublicKey};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_256_R_1};
 use digest::Digest;
 use thiserror::Error;
@@ -38,9 +37,18 @@ pub enum KeyringError {
 }
 type Result<T> = std::result::Result<T, KeyringError>;
 
+/// Public key bytes for one algorithm the keyring can verify.
+///
+/// [`Key::new`] is the only place that decides which algorithms are accepted.
+/// [`Key::verify`] only dispatches on the variant that was stored.
+enum KeyMaterial {
+    /// Raw SEC1-encoded P-256 point.
+    P256(Vec<u8>),
+}
+
 /// A CT signing key.
 struct Key {
-    inner: UnparsedPublicKey<Vec<u8>>,
+    material: KeyMaterial,
     /// The key's RFC 6962-style "key ID".
     /// <https://datatracker.ietf.org/doc/html/rfc6962#section-3.2>
     fingerprint: [u8; 32],
@@ -65,10 +73,7 @@ impl Key {
         match (algo, params) {
             // TODO(tnytown): should we also accept ed25519, p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
-                inner: UnparsedPublicKey::new(
-                    &aws_lc_rs_signature::ECDSA_P256_SHA256_ASN1,
-                    spki.subject_public_key.raw_bytes().to_owned(),
-                ),
+                material: KeyMaterial::P256(spki.subject_public_key.raw_bytes().to_owned()),
                 fingerprint: {
                     let mut hasher = sha2::Sha256::new();
                     spki.encode(&mut hasher).expect("failed to hash key!");
@@ -76,6 +81,12 @@ impl Key {
                 },
             }),
             _ => Err(KeyringError::AlgoUnsupported),
+        }
+    }
+
+    fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
+        match &self.material {
+            KeyMaterial::P256(point) => super::backend::verify_p256_point(point, data, signature),
         }
     }
 }
@@ -99,11 +110,11 @@ impl Keyring {
     pub fn verify(&self, key_id: &[u8; 32], signature: &[u8], data: &[u8]) -> Result<()> {
         let key = self.0.get(key_id).ok_or(KeyringError::KeyNotFound)?;
 
-        key.inner
-            .verify(data, signature)
-            .or(Err(KeyringError::VerificationFailed))?;
-
-        Ok(())
+        if key.verify(data, signature) {
+            Ok(())
+        } else {
+            Err(KeyringError::VerificationFailed)
+        }
     }
 }
 
