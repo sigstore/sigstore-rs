@@ -69,12 +69,12 @@ impl CertificateVerifier {
             cert_pool.verify_der_cert(cert_bytes, None)?;
         }
 
-        let subject_public_key_info = &cert.tbs_certificate.subject_public_key_info;
+        let subject_public_key_info = cert.tbs_certificate().subject_public_key_info();
         let cosign_verification_key = CosignVerificationKey::try_from(subject_public_key_info)?;
 
         Ok(Self {
             cert_verification_key: cosign_verification_key,
-            cert_validity: cert.tbs_certificate.validity,
+            cert_validity: *cert.tbs_certificate().validity(),
             require_rekor_bundle,
         })
     }
@@ -322,10 +322,7 @@ RAIgPixAn47x4qLpu7Y/d0oyvbnOGtD5cY7rywdMOO7LYRsCIDsCyGUZIYMFfSrt
                 .expect("cannot add 60s to now"),
         )
         .expect("cannot create not_after");
-        vc.cert_validity = Validity {
-            not_before: Time::UtcTime(not_before),
-            not_after: Time::UtcTime(not_after),
-        };
+        vc.cert_validity = Validity::new(Time::UtcTime(not_before), Time::UtcTime(not_after));
 
         assert!(!vc.verify(&signature_layer).expect("error while verifying"));
     }

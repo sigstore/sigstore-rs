@@ -40,8 +40,8 @@ pub(crate) fn is_trusted(certificate: &Certificate, integrated_time: i64) -> Res
 
 pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
     let (_, key_usage) = certificate
-        .tbs_certificate
-        .get::<KeyUsage>()
+        .tbs_certificate()
+        .get_extension::<KeyUsage>()
         .map_err(|_| SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?
         .ok_or(SigstoreError::CertificateWithoutDigitalSignatureKeyUsage)?;
 
@@ -50,8 +50,8 @@ pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
     }
 
     let (_, key_ext_usage) = certificate
-        .tbs_certificate
-        .get::<ExtendedKeyUsage>()
+        .tbs_certificate()
+        .get_extension::<ExtendedKeyUsage>()
         .map_err(|_| SigstoreError::CertificateWithoutCodeSigningKeyUsage)?
         .ok_or(SigstoreError::CertificateWithoutCodeSigningKeyUsage)?;
 
@@ -65,8 +65,8 @@ pub(crate) fn verify_key_usages(certificate: &Certificate) -> Result<()> {
 
 pub(crate) fn verify_has_san(certificate: &Certificate) -> Result<()> {
     if certificate
-        .tbs_certificate
-        .get::<SubjectAltName>()
+        .tbs_certificate()
+        .get_extension::<SubjectAltName>()
         .map_err(|_| SigstoreError::CertificateWithoutSubjectAlternativeName)?
         .is_some()
     {
@@ -81,7 +81,7 @@ pub(crate) fn verify_validity(certificate: &Certificate) -> Result<()> {
     // THIS IS IMPORTANT: WE DO NOT CHECK TIMES HERE
     // THE CERTIFICATE IS TREATED AS TRUSTED FOREVER
     // WE CHECK THAT THE SIGNATURES WERE CREATED DURING THIS WINDOW
-    let validity = &certificate.tbs_certificate.validity;
+    let validity = certificate.tbs_certificate().validity();
     if std::time::SystemTime::now() < validity.not_before.to_system_time() {
         Err(SigstoreError::CertificateValidityError(
             validity.not_before.to_string(),
@@ -98,7 +98,7 @@ fn verify_expiration(certificate: &Certificate, integrated_time: i64) -> Result<
             .naive_utc(),
         Utc,
     );
-    let validity = &certificate.tbs_certificate.validity;
+    let validity = certificate.tbs_certificate().validity();
     let not_before: DateTime<Utc> = validity.not_before.to_system_time().into();
     if it < not_before {
         return Err(
@@ -180,11 +180,11 @@ pub(crate) fn is_leaf(
 ) -> core::result::Result<(), CertificateValidationError> {
     // NOTE(jl): following structure of sigstore-python over the slightly different handling found
     // in `verify_key_usages`.
-    let tbs = &certificate.tbs_certificate;
+    let tbs = certificate.tbs_certificate();
 
     // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
     // extensions and have ambiguous CA behavior.
-    if tbs.version != x509_cert::Version::V3 {
+    if tbs.version() != x509_cert::Version::V3 {
         Err(CertificateValidationError::VersionUnsupported)?;
     }
 
@@ -193,7 +193,7 @@ pub(crate) fn is_leaf(
     };
 
     let digital_signature = match tbs
-        .get::<KeyUsage>()
+        .get_extension::<KeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
         None => Err(ExtensionErrorKind::Missing("KeyUsage"))?,
@@ -209,7 +209,7 @@ pub(crate) fn is_leaf(
     // never issue a leaf that doesn't have this extended usage.
 
     let extended_key_usage = match tbs
-        .get::<ExtendedKeyUsage>()
+        .get_extension::<ExtendedKeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
         None => Err(ExtensionErrorKind::Missing("ExtendedKeyUsage"))?,
@@ -235,11 +235,11 @@ pub(crate) fn is_leaf(
 pub(crate) fn is_ca(
     certificate: &Certificate,
 ) -> core::result::Result<(), CertificateValidationError> {
-    let tbs = &certificate.tbs_certificate;
+    let tbs = certificate.tbs_certificate();
 
     // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
     // extensions and have ambiguous CA behavior.
-    if tbs.version != x509_cert::Version::V3 {
+    if tbs.version() != x509_cert::Version::V3 {
         return Err(CertificateValidationError::VersionUnsupported);
     }
 
@@ -252,7 +252,7 @@ pub(crate) fn is_ca(
     // that we won't treat the certificate as neither a leaf nor a CA.
 
     let ca = match tbs
-        .get::<constraints::BasicConstraints>()
+        .get_extension::<constraints::BasicConstraints>()
         .map_err(CertificateValidationError::Malformed)?
     {
         None => Err(ExtensionErrorKind::Missing("BasicConstraints"))?,
@@ -264,7 +264,7 @@ pub(crate) fn is_ca(
     };
 
     let key_cert_sign = match tbs
-        .get::<KeyUsage>()
+        .get_extension::<KeyUsage>()
         .map_err(CertificateValidationError::Malformed)?
     {
         None => Err(ExtensionErrorKind::Missing("KeyUsage"))?,
@@ -295,11 +295,11 @@ pub(crate) fn is_root_ca(
     // NOTE(ww): This function is obnoxiously long to make the different
     // states explicit.
 
-    let tbs = &certificate.tbs_certificate;
+    let tbs = certificate.tbs_certificate();
 
     // Only V3 certificates should appear in the context of Sigstore; earlier versions of X.509 lack
     // extensions and have ambiguous CA behavior.
-    if tbs.version != x509_cert::Version::V3 {
+    if tbs.version() != x509_cert::Version::V3 {
         return Err(CertificateValidationError::VersionUnsupported);
     }
 
@@ -307,7 +307,7 @@ pub(crate) fn is_root_ca(
     is_ca(certificate)?;
 
     // A certificate that is its own issuer and signer is considered a root CA.
-    if tbs.issuer != tbs.subject {
+    if tbs.issuer() != tbs.subject() {
         Err(NotCAErrorKind::NotRootCA)?
     }
 

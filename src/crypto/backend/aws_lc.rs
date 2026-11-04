@@ -237,11 +237,11 @@ fn ecdsa_signing_alg(curve: EcdsaCurve) -> &'static aws_lc_rs::signature::EcdsaS
 
 fn ecdsa_curve_from_pkcs8(der: &[u8]) -> Result<EcdsaCurve> {
     use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
-    use pkcs8::PrivateKeyInfo;
+    use pkcs8::PrivateKeyInfoRef;
     use x509_cert::der::Decode;
 
-    let pki =
-        PrivateKeyInfo::from_der(der).map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
+    let pki = PrivateKeyInfoRef::from_der(der)
+        .map_err(|e| SigstoreError::KeyParsingError(e.to_string()))?;
     let params = pki
         .algorithm
         .parameters

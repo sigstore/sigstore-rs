@@ -20,10 +20,14 @@ use thiserror::Error;
 use tls_codec::{SerializeBytes, TlsByteVecU16, TlsByteVecU24, TlsSerializeBytes, TlsSize};
 use tracing::debug;
 use x509_cert::{
-    Certificate, der,
-    der::{Decode, Encode},
-    ext::pkix::{
-        ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList, sct::Version,
+    Certificate, TbsCertificate, der,
+    der::{Decode, Encode, TagMode, TagNumber, Tagged, asn1::ContextSpecific},
+    ext::{
+        Extensions,
+        pkix::{
+            ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList,
+            sct::Version,
+        },
     },
 };
 
@@ -34,7 +38,7 @@ use super::{
 use crate::fulcio::SigningCertificateDetachedSCT;
 
 fn cert_is_preissuer(cert: &Certificate) -> bool {
-    let eku: ExtendedKeyUsage = match cert.tbs_certificate.get() {
+    let eku: ExtendedKeyUsage = match cert.tbs_certificate().get_extension() {
         Ok(Some((_, ext))) => ext,
         _ => return false,
     };
@@ -155,7 +159,7 @@ pub struct CertificateEmbeddedSCT<'a> {
 
 impl<'a> CertificateEmbeddedSCT<'a> {
     fn new_with_spki(cert: &'a Certificate, spki: &[u8]) -> Result<Self, SCTError> {
-        let scts: SignedCertificateTimestampList = match cert.tbs_certificate.get() {
+        let scts: SignedCertificateTimestampList = match cert.tbs_certificate().get_extension() {
             Ok(Some((_, ext))) => ext,
             _ => return Err(SCTError::Parsing(CertificateErrorKind::LeafSCTMissing))?,
         };
@@ -191,8 +195,8 @@ impl<'a> CertificateEmbeddedSCT<'a> {
         let issuer = find_issuer_cert(chain);
         let spki = issuer
             .ok_or(CertificateErrorKind::IssuerMissing)?
-            .tbs_certificate
-            .subject_public_key_info
+            .tbs_certificate()
+            .subject_public_key_info()
             .to_der()
             .map_err(CertificateErrorKind::from)?;
 
@@ -206,11 +210,11 @@ impl<'a> CertificateEmbeddedSCT<'a> {
         let issuer_spki = if let Some(issuer) = chain.intermediate_certificates().next() {
             debug!("intermediate is the leaf's issuer");
 
-            let issuer = Certificate::from_der(&issuer.der())
-                .map_err(CertificateErrorKind::from)?
-                .tbs_certificate;
+            let issuer =
+                Certificate::from_der(&issuer.der()).map_err(CertificateErrorKind::from)?;
             issuer
-                .subject_public_key_info
+                .tbs_certificate()
+                .subject_public_key_info()
                 .to_der()
                 .map_err(CertificateErrorKind::from)?
         } else {
@@ -231,20 +235,40 @@ impl<'a> CertificateEmbeddedSCT<'a> {
     }
 }
 
+/// Re-encodes `tbs` with the SCT list extension filtered out, producing the precertificate's
+/// TBSCertificate.
+///
+/// `TbsCertificate` fields cannot be mutated, so the extensions (the `[3]` element of the
+/// TBSCertificate SEQUENCE) are swapped out at the DER level.
+fn precert_tbs_der(tbs: &TbsCertificate) -> der::Result<Vec<u8>> {
+    const EXTENSIONS_TAG_NUMBER: TagNumber = TagNumber(3);
+
+    let mut fields = Vec::<der::Any>::from_der(&tbs.to_der()?)?;
+
+    if let Some(exts) = tbs.extensions() {
+        let filtered: Extensions = exts
+            .iter()
+            .filter(|v| v.extn_id != CT_PRECERT_SCTS)
+            .cloned()
+            .collect();
+        let filtered = der::Any::encode_from(&ContextSpecific {
+            tag_number: EXTENSIONS_TAG_NUMBER,
+            tag_mode: TagMode::Explicit,
+            value: filtered,
+        })?;
+
+        if let Some(field) = fields.iter_mut().find(|f| f.tag() == filtered.tag()) {
+            *field = filtered;
+        }
+    }
+
+    fields.to_der()
+}
+
 impl From<&CertificateEmbeddedSCT<'_>> for DigitallySigned {
     fn from(value: &CertificateEmbeddedSCT) -> Self {
         // Construct the precert by filtering out the SCT extension.
-        let mut tbs_precert = value.cert.tbs_certificate.clone();
-        tbs_precert.extensions = tbs_precert.extensions.map(|exts| {
-            exts.iter()
-                .filter(|v| v.extn_id != CT_PRECERT_SCTS)
-                .cloned()
-                .collect()
-        });
-
-        let mut tbs_precert_der = Vec::new();
-        tbs_precert
-            .encode_to_vec(&mut tbs_precert_der)
+        let tbs_precert_der = precert_tbs_der(value.cert.tbs_certificate())
             .expect("failed to re-encode Precertificate!");
 
         DigitallySigned {

@@ -104,17 +104,17 @@ chrono = { version = "0.4", default-features = false, features = [
     "now",
     "serde",
 ] }
-const-oid = { version = "0.9", default-features = false, features = ["db"] }
+const-oid = { version = "0.10", default-features = false, features = ["db"] }
 crypto_secretbox = { version = "0.1", default-features = false, features = [
     "alloc",
     "salsa20",
 ] }
-digest = { version = "0.10", default-features = false }
-ecdsa = { version = "0.16", default-features = false, features = [
+digest = { version = "0.11", default-features = false }
+ecdsa = { version = "0.17", default-features = false, features = [
+    "algorithm",
     "der",
     "digest",
     "pkcs8",
-    "signing",
     "std",
 ], optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
@@ -126,14 +126,14 @@ hex-literal = { version = "1.1", optional = true }
 oci-client = { version = "0.17", default-features = false, optional = true }
 openidconnect = { version = "4.0", default-features = false, optional = true }
 openssl = { version = "0.10", optional = true }
-p256 = { version = "0.13", default-features = false, features = [
+p256 = { version = "0.14", default-features = false, features = [
     "arithmetic",
     "ecdsa",
     "pem",
     "std",
 ], optional = true }
 pem = { version = "3.0", default-features = false, features = ["serde", "std"] }
-pkcs8 = { version = "0.10", default-features = false, features = [
+pkcs8 = { version = "0.11", default-features = false, features = [
     "encryption",
     "pem",
     "pkcs5",
@@ -157,7 +157,7 @@ serde_with = { version = "3.9", default-features = false, features = [
     "base64",
     "json",
 ], optional = true }
-sha2 = { version = "0.10", default-features = false, features = ["oid"] }
+sha2 = { version = "0.11", default-features = false, features = ["oid"] }
 signature = { version = "3.0", default-features = false, optional = true }
 sigstore_protobuf_specs = { version = "0.5", default-features = false, optional = true }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
@@ -170,7 +170,7 @@ tough = { version = "0.24", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false }
 url = { version = "2.5", default-features = false }
 webbrowser = { version = "1.0", default-features = false, optional = true }
-x509-cert = { version = "0.2", default-features = false, features = [
+x509-cert = { version = "0.3", default-features = false, features = [
     "builder",
     "pem",
     "sct",
