@@ -24,6 +24,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
           cargo build --manifest-path=tests/conformance/Cargo.toml
-      - uses: sigstore/sigstore-conformance@main
+      - uses: sigstore/sigstore-conformance@21533cde107c734ebc153c3e3a24d75fc9811a36 # v0.0.29
         with:
           entrypoint: ${{ github.workspace }}/tests/conformance/target/debug/sigstore
