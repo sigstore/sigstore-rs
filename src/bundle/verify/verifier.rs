@@ -256,7 +256,7 @@ impl Verifier {
             .to_unix_duration()
             .as_secs();
         if integrated_time < not_before || integrated_time > not_after {
-            return Err(CertificateErrorKind::Expired)?;
+            return Err(CertificateErrorKind::Expired.into());
         }
         debug!("data signed during validity period");
 

@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let signature_data = signer.sign(DATA_TO_BE_SIGNED.as_bytes())?;
     println!("Signed the example data.");
     println!("Data: {}", DATA_TO_BE_SIGNED);
-    println!("Signature: {:x?}\n", &signature_data);
+    println!("Signature: {:x?}\n", signature_data);
 
     let verification_key = signer.to_verification_key()?;
     println!("Derive verification key from the signer.\n");

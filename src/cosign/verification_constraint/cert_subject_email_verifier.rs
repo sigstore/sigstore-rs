@@ -122,11 +122,7 @@ impl Debug for CertSubjectEmailVerifier {
         if let Some(issuer) = &self.issuer {
             issuer_str.push_str(&format!(" and {issuer}"));
         }
-        f.write_fmt(format_args!(
-            "email {}{}",
-            &self.email.to_string(),
-            issuer_str
-        ))
+        f.write_fmt(format_args!("email {}{}", self.email, issuer_str))
     }
 }
 

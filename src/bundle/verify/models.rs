@@ -461,7 +461,7 @@ impl TryFrom<Bundle> for CheckedBundle {
         // https://github.com/sigstore/sigstore-python/pull/634#discussion_r1182769140
         let check_01_bundle = || -> Result<(), BundleProfileErrorKind> {
             if inclusion_promise.is_none() {
-                return Err(Bundle01ProfileErrorKind::InclusionPromiseMissing)?;
+                return Err(Bundle01ProfileErrorKind::InclusionPromiseMissing.into());
             }
 
             if matches!(
@@ -479,7 +479,7 @@ impl TryFrom<Bundle> for CheckedBundle {
         let check_02_bundle = || -> Result<(), BundleProfileErrorKind> {
             if inclusion_proof.is_none() {
                 error!("bundle must contain inclusion proof");
-                return Err(Bundle02ProfileErrorKind::InclusionProofMissing)?;
+                return Err(Bundle02ProfileErrorKind::InclusionProofMissing.into());
             }
 
             if matches!(
@@ -490,7 +490,7 @@ impl TryFrom<Bundle> for CheckedBundle {
                 })
             ) {
                 error!("bundle must contain checkpoint");
-                return Err(Bundle02ProfileErrorKind::CheckpointMissing)?;
+                return Err(Bundle02ProfileErrorKind::CheckpointMissing.into());
             }
 
             Ok(())
