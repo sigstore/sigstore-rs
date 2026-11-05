@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use crate::{
     bundle::{Bundle, intoto::InTotoStatementV1, models::Version as BundleVersion},
-    crypto::certificate::{CertificateValidationError, is_leaf, is_root_ca},
+    crypto::certificate::{CertificateValidationError, der_to_pem, is_leaf, is_root_ca},
     rekor::models as rekor,
 };
 
@@ -29,10 +29,7 @@ use sigstore_protobuf_specs::dev::sigstore::{
 };
 use thiserror::Error;
 use tracing::{debug, error, warn};
-use x509_cert::{
-    Certificate,
-    der::{Decode, EncodePem},
-};
+use x509_cert::{Certificate, der::Decode};
 
 use super::policy::PolicyError;
 
@@ -321,6 +318,8 @@ pub(crate) enum BundleContent {
 
 pub struct CheckedBundle {
     pub(crate) certificate: Certificate,
+    /// The DER bytes of `certificate`, as they are in the bundle.
+    pub(crate) certificate_der: Vec<u8>,
     pub(crate) signature: Vec<u8>,
     pub(crate) content: BundleContent,
 
@@ -339,21 +338,22 @@ impl TryFrom<Bundle> for CheckedBundle {
         // Parse the certificates. The first entry in the chain MUST be a leaf certificate, and the
         // rest of the chain MUST NOT include a root CA or any intermediate CAs that appear in an
         // independent root of trust.
-        let certs = match content {
+        let certs_der = match content {
             Some(verification_material::Content::X509CertificateChain(ch)) => ch.certificates,
             Some(verification_material::Content::Certificate(cert)) => {
                 vec![cert]
             }
             _ => return Err(BundleErrorKind::VerificationMaterialContentUnsupported),
         };
-        let certs = certs
+        let certs = certs_der
             .iter()
             .map(|c| c.raw_bytes.as_slice())
             .map(Certificate::from_der)
             .collect::<Result<Vec<_>, _>>()
             .map_err(BundleErrorKind::CertificateMalformed)?;
 
-        let [leaf_cert, chain_certs @ ..] = &certs[..] else {
+        let ([leaf_cert, chain_certs @ ..], [leaf_cert_der, ..]) = (&certs[..], &certs_der[..])
+        else {
             return Err(BundleErrorKind::CertificatesMissing);
         };
 
@@ -509,6 +509,7 @@ impl TryFrom<Bundle> for CheckedBundle {
 
         Ok(Self {
             certificate: leaf_cert.clone(),
+            certificate_der: leaf_cert_der.raw_bytes.clone(),
             signature,
             content: bundle_content,
             tlog_entry,
@@ -532,8 +533,7 @@ impl CheckedBundle {
         offline: bool,
         input_digest: &[u8],
     ) -> Option<&TransparencyLogEntry> {
-        let base64_pem_certificate =
-            base64.encode(self.certificate.to_pem(pkcs8::LineEnding::LF).ok()?);
+        let base64_pem_certificate = base64.encode(der_to_pem(&self.certificate_der).ok()?);
 
         let expected_entry = rekor::Hashedrekord {
             kind: "hashedrekord".to_owned(),
@@ -678,11 +678,7 @@ impl CheckedBundle {
             .get("verifier")
             .and_then(|v| v.as_str())?;
         let verifier_pem = base64.decode(verifier_b64).ok()?;
-        let expected_cert_pem = self
-            .certificate
-            .to_pem(pkcs8::LineEnding::LF)
-            .ok()?
-            .into_bytes();
+        let expected_cert_pem = der_to_pem(&self.certificate_der).ok()?.into_bytes();
         if verifier_pem != expected_cert_pem {
             warn!("tlog dsse verifier certificate mismatch");
             return None;
@@ -1075,6 +1071,51 @@ mod tests {
         assert!(
             bundle.tlog_entry(true, &[]).is_some(),
             "real fixture should produce a valid tlog entry"
+        );
+    }
+
+    #[test]
+    fn dsse_tlog_entry_accepts_generalized_time_certificate() {
+        let mut proto: ProtoBundle =
+            serde_json::from_str(REAL_BUNDLE_V03).expect("fixture must parse");
+        let material = proto
+            .verification_material
+            .as_mut()
+            .expect("must have verification_material");
+
+        let Some(verification_material::Content::Certificate(cert)) = material.content.as_mut()
+        else {
+            panic!("expected Certificate");
+        };
+        let cert_der = crate::crypto::tests::with_generalized_time_validity(&cert.raw_bytes);
+        cert.raw_bytes = cert_der.clone();
+        let cert_pem = x509_cert::der::pem::encode_string(
+            "CERTIFICATE",
+            x509_cert::der::pem::LineEnding::LF,
+            &cert_der,
+        )
+        .unwrap();
+
+        let tlog = material
+            .tlog_entries
+            .get_mut(0)
+            .expect("must have one tlog entry");
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&tlog.canonicalized_body).expect("body must be valid JSON");
+        body["spec"]["signatures"][0]["verifier"] = serde_json::json!(base64.encode(cert_pem));
+        tlog.canonicalized_body = serde_json::to_vec(&body).expect("re-serialise must succeed");
+
+        let bundle = CheckedBundle::try_from(Bundle {
+            media_type: proto.media_type,
+            verification_material: proto.verification_material,
+            content: proto.content,
+        })
+        .expect("should build CheckedBundle");
+
+        assert_eq!(bundle.certificate_der, cert_der);
+        assert!(
+            bundle.tlog_entry(true, &[]).is_some(),
+            "the tlog entry must match the original certificate bytes"
         );
     }
 

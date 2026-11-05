@@ -20,7 +20,6 @@ use pki_types::{CertificateDer, UnixTime};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::debug;
-use x509_cert::der::Encode;
 
 use crate::{
     bundle::verify::models::{ArtifactDigest, BundleContent, CheckedBundle},
@@ -187,11 +186,7 @@ impl Verifier {
 
         let tbs_certificate = materials.certificate.tbs_certificate();
         let issued_at = tbs_certificate.validity().not_before.to_unix_duration();
-        let cert_der: CertificateDer = materials
-            .certificate
-            .to_der()
-            .expect("failed to DER-encode constructed Certificate!")
-            .into();
+        let cert_der = CertificateDer::from(materials.certificate_der.as_slice());
         let ee_cert = (&cert_der)
             .try_into()
             .map_err(CertificateErrorKind::Malformed)?;
