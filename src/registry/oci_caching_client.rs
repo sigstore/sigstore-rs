@@ -33,7 +33,7 @@ pub(crate) struct OciCachingClient {
 }
 
 #[cached(
-    ttl = 60,
+    ttl_secs = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ format!("{}", image) }"#,
@@ -125,7 +125,7 @@ impl<'a> PullSettings<'a> {
 //   * the cache is time bound: cached values are purged after 60 seconds
 //   * only successful results are cached
 #[cached(
-    ttl = 60,
+    ttl_secs = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -216,7 +216,7 @@ impl PullManifestSettings {
 //   * the cache is time bound: cached values are purged after 60 seconds
 //   * only successful results are cached
 #[cached(
-    ttl = 60,
+    ttl_secs = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -309,7 +309,7 @@ impl PullReferrersSettings {
 ///   * the cache is time bound: cached values are purged after 60 seconds
 ///   * only successful results are cached
 #[cached(
-    ttl = 60,
+    ttl_secs = 60,
     sync_writes = "default",
     key = "String",
     convert = r#"{ settings.hash() }"#,
@@ -351,12 +351,12 @@ impl ClientCapabilities for OciCachingClient {
         fetch_manifest_digest_cached(&mut self.registry_client, image, auth)
             .await
             .map(|digest| {
-                if digest.was_cached {
+                if digest.was_cached() {
                     debug!(?image, "Got image digest from cache");
                 } else {
                     debug!(?image, "Got image digest by querying remote registry");
                 }
-                digest.value
+                digest.into_inner()
             })
     }
 
@@ -371,12 +371,12 @@ impl ClientCapabilities for OciCachingClient {
         pull_cached(&mut self.registry_client, pull_settings)
             .await
             .map(|data| {
-                if data.was_cached {
+                if data.was_cached() {
                     debug!(?image, "Got image data from cache");
                 } else {
                     debug!(?image, "Got image data by querying remote registry");
                 }
-                data.value
+                data.into_inner()
             })
     }
 
@@ -390,12 +390,12 @@ impl ClientCapabilities for OciCachingClient {
         pull_manifest_cached(&mut self.registry_client, pull_manifest_settings)
             .await
             .map(|data| {
-                if data.was_cached {
+                if data.was_cached() {
                     debug!(?image, "Got image manifest from cache");
                 } else {
                     debug!(?image, "Got image manifest by querying remote registry");
                 }
-                data.value
+                data.into_inner()
             })
     }
 
@@ -426,12 +426,12 @@ impl ClientCapabilities for OciCachingClient {
         pull_referrers_cached(&mut self.registry_client, settings)
             .await
             .map(|data| {
-                if data.was_cached {
+                if data.was_cached() {
                     debug!(?image, "Got image referrers from cache");
                 } else {
                     debug!(?image, "Got image referrers by querying remote registry");
                 }
-                data.value
+                data.into_inner()
             })
     }
 }
