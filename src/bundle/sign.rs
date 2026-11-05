@@ -24,7 +24,7 @@ use ecdsa::signature::hazmat::PrehashSigner;
 use hex;
 use p256::NistP256;
 use p256::elliptic_curve::Generate;
-use pkcs8::der::{Decode, Encode, EncodePem};
+use pkcs8::der::{Decode, Encode};
 use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
@@ -44,6 +44,7 @@ use x509_cert::name::{Name, RdnSequence};
 
 use crate::bundle::DigestWriter;
 use crate::bundle::models::Version;
+use crate::crypto::certificate::der_to_pem;
 use crate::crypto::keyring::Keyring;
 use crate::crypto::transparency::{CertificateEmbeddedSCT, verify_sct};
 use crate::errors::{Result as SigstoreResult, SigstoreError};
@@ -144,7 +145,7 @@ impl<'ctx> SigningSession<'ctx> {
         if let Some(detached_sct) = &self.certs.detached_sct {
             verify_sct(detached_sct, &self.context.ctfe_keyring)?;
         } else {
-            let sct = CertificateEmbeddedSCT::new(&self.certs.cert, &self.certs.chain)?;
+            let sct = CertificateEmbeddedSCT::new(&self.certs.cert_der, &self.certs.chain)?;
             verify_sct(&sct, &self.context.ctfe_keyring)?;
         }
 
@@ -156,7 +157,7 @@ impl<'ctx> SigningSession<'ctx> {
             .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         let signature_bytes = artifact_signature.to_der().as_bytes().to_owned();
 
-        let cert = &self.certs.cert;
+        let cert_der = &self.certs.cert_der;
 
         // Create the transparency log entry.
         let proposed_entry = ProposedLogEntry::Hashedrekord {
@@ -164,9 +165,7 @@ impl<'ctx> SigningSession<'ctx> {
             spec: hashedrekord::Spec {
                 signature: hashedrekord::Signature {
                     content: base64.encode(&signature_bytes),
-                    public_key: hashedrekord::PublicKey::new(
-                        base64.encode(cert.to_pem(pkcs8::LineEnding::LF)?),
-                    ),
+                    public_key: hashedrekord::PublicKey::new(base64.encode(der_to_pem(cert_der)?)),
                 },
                 data: hashedrekord::Data {
                     hash: hashedrekord::Hash {
@@ -190,7 +189,7 @@ impl<'ctx> SigningSession<'ctx> {
 
         Ok(SigningArtifact {
             input_digest: input_hash.to_owned(),
-            cert: cert.to_der()?,
+            cert: cert_der.clone(),
             signature: signature_bytes,
             log_entry,
         })

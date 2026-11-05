@@ -20,10 +20,10 @@ use thiserror::Error;
 use tls_codec::{SerializeBytes, TlsByteVecU16, TlsByteVecU24, TlsSerializeBytes, TlsSize};
 use tracing::debug;
 use x509_cert::{
-    Certificate, TbsCertificate, der,
-    der::{Decode, Encode, TagMode, TagNumber, Tagged, asn1::ContextSpecific},
+    Certificate, der,
+    der::{Decode, Encode, Tag, TagNumber, Tagged},
     ext::{
-        Extensions,
+        Extension,
         pkix::{
             ExtendedKeyUsage, SignedCertificateTimestamp, SignedCertificateTimestampList,
             sct::Version,
@@ -151,14 +151,15 @@ pub struct DigitallySigned {
 }
 
 #[derive(Debug)]
-pub struct CertificateEmbeddedSCT<'a> {
-    cert: &'a Certificate,
+pub struct CertificateEmbeddedSCT {
+    tbs_precert_der: Vec<u8>,
     sct: SignedCertificateTimestamp,
     issuer_id: [u8; 32],
 }
 
-impl<'a> CertificateEmbeddedSCT<'a> {
-    fn new_with_spki(cert: &'a Certificate, spki: &[u8]) -> Result<Self, SCTError> {
+impl CertificateEmbeddedSCT {
+    fn new_with_spki(leaf_der: &[u8], spki: &[u8]) -> Result<Self, SCTError> {
+        let cert = Certificate::from_der(leaf_der).map_err(CertificateErrorKind::from)?;
         let scts: SignedCertificateTimestampList = match cert.tbs_certificate().get_extension() {
             Ok(Some((_, ext))) => ext,
             _ => return Err(SCTError::Parsing(CertificateErrorKind::LeafSCTMissing))?,
@@ -183,14 +184,16 @@ impl<'a> CertificateEmbeddedSCT<'a> {
             hasher.finalize().into()
         };
 
+        let tbs_precert_der = precert_tbs_der(leaf_der).map_err(CertificateErrorKind::from)?;
+
         Ok(Self {
-            cert,
+            tbs_precert_der,
             sct,
             issuer_id,
         })
     }
 
-    pub fn new(leaf: &'a Certificate, chain: &[Certificate]) -> Result<Self, SCTError> {
+    pub fn new(leaf_der: &[u8], chain: &[Certificate]) -> Result<Self, SCTError> {
         // Traverse chain to find the issuer we're verifying against.
         let issuer = find_issuer_cert(chain);
         let spki = issuer
@@ -200,11 +203,11 @@ impl<'a> CertificateEmbeddedSCT<'a> {
             .to_der()
             .map_err(CertificateErrorKind::from)?;
 
-        Self::new_with_spki(leaf, &spki)
+        Self::new_with_spki(leaf_der, &spki)
     }
 
     pub fn new_with_verified_path(
-        leaf: &'a Certificate,
+        leaf_der: &[u8],
         chain: &webpki::VerifiedPath,
     ) -> Result<Self, SCTError> {
         let issuer_spki = if let Some(issuer) = chain.intermediate_certificates().next() {
@@ -231,46 +234,43 @@ impl<'a> CertificateEmbeddedSCT<'a> {
             [prefix, body].concat()
         };
 
-        Self::new_with_spki(leaf, &issuer_spki)
+        Self::new_with_spki(leaf_der, &issuer_spki)
     }
 }
 
-/// Re-encodes `tbs` with the SCT list extension filtered out, producing the precertificate's
-/// TBSCertificate.
+/// Returns the precertificate's TBSCertificate: the leaf's TBSCertificate without the SCT list
+/// extension.
 ///
-/// `TbsCertificate` fields cannot be mutated, so the extensions (the `[3]` element of the
-/// TBSCertificate SEQUENCE) are swapped out at the DER level.
-fn precert_tbs_der(tbs: &TbsCertificate) -> der::Result<Vec<u8>> {
-    const EXTENSIONS_TAG_NUMBER: TagNumber = TagNumber(3);
+/// The SCT signs these exact bytes, so this works on the original DER. A decoded
+/// `TbsCertificate` does not re-encode byte for byte: x509-cert writes validity times before
+/// 2050 as UTCTime, also when the certificate uses GeneralizedTime.
+fn precert_tbs_der(leaf_der: &[u8]) -> der::Result<Vec<u8>> {
+    const EXTENSIONS_TAG: Tag = Tag::ContextSpecific {
+        constructed: true,
+        number: TagNumber(3),
+    };
 
-    let mut fields = Vec::<der::Any>::from_der(&tbs.to_der()?)?;
+    let cert_fields = Vec::<der::Any>::from_der(leaf_der)?;
+    let tbs = cert_fields
+        .first()
+        .ok_or_else(|| Tag::Sequence.value_error())?;
+    let mut tbs_fields: Vec<der::Any> = tbs.decode_as()?;
 
-    if let Some(exts) = tbs.extensions() {
-        let filtered: Extensions = exts
-            .iter()
-            .filter(|v| v.extn_id != CT_PRECERT_SCTS)
-            .cloned()
-            .collect();
-        let filtered = der::Any::encode_from(&ContextSpecific {
-            tag_number: EXTENSIONS_TAG_NUMBER,
-            tag_mode: TagMode::Explicit,
-            value: filtered,
-        })?;
-
-        if let Some(field) = fields.iter_mut().find(|f| f.tag() == filtered.tag()) {
-            *field = filtered;
+    if let Some(extensions) = tbs_fields.iter_mut().find(|f| f.tag() == EXTENSIONS_TAG) {
+        let mut kept = Vec::new();
+        for extension in Vec::<der::Any>::from_der(extensions.value())? {
+            if extension.decode_as::<Extension>()?.extn_id != CT_PRECERT_SCTS {
+                kept.push(extension);
+            }
         }
+        *extensions = der::Any::new(EXTENSIONS_TAG, kept.to_der()?)?;
     }
 
-    fields.to_der()
+    tbs_fields.to_der()
 }
 
-impl From<&CertificateEmbeddedSCT<'_>> for DigitallySigned {
+impl From<&CertificateEmbeddedSCT> for DigitallySigned {
     fn from(value: &CertificateEmbeddedSCT) -> Self {
-        // Construct the precert by filtering out the SCT extension.
-        let tbs_precert_der = precert_tbs_der(value.cert.tbs_certificate())
-            .expect("failed to re-encode Precertificate!");
-
         DigitallySigned {
             // XX(tnytown): This match is needed because `sct::Version` does not implement Copy.
             version: match value.sct.version {
@@ -280,7 +280,7 @@ impl From<&CertificateEmbeddedSCT<'_>> for DigitallySigned {
             timestamp: value.sct.timestamp,
             signed_entry: SignedEntry::PrecertEntry(PreCert {
                 issuer_key_hash: value.issuer_id,
-                tbs_certificate: tbs_precert_der.as_slice().into(),
+                tbs_certificate: value.tbs_precert_der.as_slice().into(),
             }),
             extensions: value.sct.extensions.clone(),
 
@@ -331,18 +331,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{CertificateEmbeddedSCT, verify_sct};
+    use super::{CertificateEmbeddedSCT, precert_tbs_der, verify_sct};
     use crate::crypto::keyring::Keyring;
     use crate::fulcio::SigningCertificateDetachedSCT;
+    use const_oid::db::rfc6962::CT_PRECERT_SCTS;
     use p256::ecdsa::VerifyingKey;
     use std::str::FromStr;
     use x509_cert::Certificate;
-    use x509_cert::der::DecodePem;
+    use x509_cert::der::{Any, Decode, DecodePem, Tag, Tagged, pem};
+    use x509_cert::ext::Extension;
     use x509_cert::spki::EncodePublicKey;
 
-    #[test]
-    fn verify_embedded_sct() {
-        let cert_pem = r#"-----BEGIN CERTIFICATE-----
+    /// A Fulcio leaf certificate with an embedded SCT.
+    const EMBEDDED_SCT_LEAF_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIICzDCCAlGgAwIBAgIUF96OLbM9/tDVHKCJliXLTFvnfjAwCgYIKoZIzj0EAwMw
 NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
 cm1lZGlhdGUwHhcNMjMxMjEzMDU1MDU1WhcNMjMxMjEzMDYwMDU1WjAAMFkwEwYH
@@ -360,6 +361,12 @@ W9PQ/5h7VROVIWPaxUo3LhrL2sZanw4bzTDBDY0dRR19ZFzjtAph1RzpQqppAjEA
 plAvxwkAIR2jurboJZ4Zm9rNAx8KvA+A5yQFzNkGgKDLjTJrKmSKoIcWV3j7WfdL
 -----END CERTIFICATE-----"#;
 
+    fn pem_to_der(pem_str: &str) -> Vec<u8> {
+        pem::decode_vec(pem_str.as_bytes()).unwrap().1
+    }
+
+    #[test]
+    fn verify_embedded_sct() {
         let chain_pem = [
             r#"-----BEGIN CERTIFICATE-----
 MIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMw
@@ -395,9 +402,9 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiPSlFi0CmFTfEjCUqF9HuCEcYXNK
 AaYalIJmBZ8yyezPjTqhxrKBpMnaocVtLJBI1eM3uXnQzQGAJdJ4gs9Fyw==
 -----END PUBLIC KEY-----"#;
 
-        let cert = Certificate::from_pem(cert_pem).unwrap();
+        let leaf_der = pem_to_der(EMBEDDED_SCT_LEAF_PEM);
         let chain = chain_pem.map(|c| Certificate::from_pem(c).unwrap());
-        let sct = CertificateEmbeddedSCT::new(&cert, &chain).unwrap();
+        let sct = CertificateEmbeddedSCT::new(&leaf_der, &chain).unwrap();
         let ctfe_key: VerifyingKey = VerifyingKey::from_str(ctfe_pem).unwrap();
         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
 
@@ -418,5 +425,43 @@ mnuk5d670MTXR3p+LIAcxd5MhqIHpLmyYJ5mDKLEoZ/pC0nPuje3JueBcA==
         let keyring = Keyring::new([ctfe_key.to_public_key_der().unwrap().as_bytes()]).unwrap();
 
         assert!(verify_sct(&sct, &keyring).is_ok());
+    }
+
+    #[test]
+    fn precert_tbs_der_keeps_the_original_encoding() {
+        let leaf_der = crate::crypto::tests::with_generalized_time_validity(&pem_to_der(
+            EMBEDDED_SCT_LEAF_PEM,
+        ));
+        Certificate::from_der(&leaf_der).expect("the fixture must be a valid certificate");
+
+        let extensions = |field: &Any| -> Vec<Any> { Vec::<Any>::from_der(field.value()).unwrap() };
+        let is_sct_list = |extension: &Any| {
+            extension.decode_as::<Extension>().unwrap().extn_id == CT_PRECERT_SCTS
+        };
+
+        let original: Vec<Any> = Vec::<Any>::from_der(&leaf_der).unwrap()[0]
+            .decode_as()
+            .unwrap();
+        let precert = Vec::<Any>::from_der(&precert_tbs_der(&leaf_der).unwrap()).unwrap();
+
+        assert_eq!(original.len(), precert.len());
+        let mut found_extensions = false;
+        for (original, precert) in original.iter().zip(&precert) {
+            if original.tag().is_context_specific() && original.tag().number().value() == 3 {
+                found_extensions = true;
+                let expected: Vec<Any> = extensions(original)
+                    .into_iter()
+                    .filter(|e| !is_sct_list(e))
+                    .collect();
+                assert_eq!(extensions(original).len(), expected.len() + 1);
+                assert_eq!(extensions(precert), expected);
+            } else {
+                assert_eq!(original, precert);
+            }
+        }
+        assert!(found_extensions);
+
+        let validity: Vec<Any> = precert[4].decode_as().unwrap();
+        assert!(validity.iter().all(|t| t.tag() == Tag::GeneralizedTime));
     }
 }

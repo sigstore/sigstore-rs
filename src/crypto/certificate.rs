@@ -23,6 +23,23 @@ use x509_cert::{
 
 use crate::errors::{Result, SigstoreError};
 
+/// Encodes certificate DER bytes as PEM.
+///
+/// Use this function with the original DER, and not `EncodePem::to_pem` on a decoded
+/// [`Certificate`]: x509-cert does not re-encode every certificate byte for byte. For example, it
+/// writes validity times before 2050 as UTCTime, also when the certificate uses GeneralizedTime.
+/// The changed bytes do not match the issuer signature or the transparency log entry.
+#[cfg(any(feature = "sign", feature = "verify"))]
+pub(crate) fn der_to_pem(cert_der: &[u8]) -> x509_cert::der::Result<String> {
+    use x509_cert::der::{pem, pem::PemLabel};
+
+    Ok(pem::encode_string(
+        Certificate::PEM_LABEL,
+        pem::LineEnding::LF,
+        cert_der,
+    )?)
+}
+
 /// Ensure the given certificate can be trusted for verifying cosign
 /// signatures.
 ///

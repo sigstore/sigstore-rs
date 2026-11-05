@@ -127,6 +127,11 @@ pub enum SCTVersion {
 
 pub struct CertificateResponse {
     pub cert: Certificate,
+    /// The DER bytes of `cert`, as Fulcio returned them.
+    ///
+    /// Use these bytes and not `cert.to_der()`: x509-cert does not re-encode every certificate
+    /// byte for byte.
+    pub cert_der: Vec<u8>,
     pub chain: Vec<Certificate>,
     pub detached_sct: Option<SigningCertificateDetachedSCT>,
 }

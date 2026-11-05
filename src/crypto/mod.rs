@@ -398,4 +398,35 @@ OSWS1X9vPavpiQOoTTGC0xX57OojUadxF1cdQmrsiReWg2Wn4FneJfa8xw==
             ca_params,
         })
     }
+
+    /// Returns `cert_der` with its validity times encoded as GeneralizedTime instead of UTCTime.
+    ///
+    /// RFC 5280 requires UTCTime for dates before 2050, but some CAs use GeneralizedTime. x509-cert
+    /// does not re-encode such a certificate byte for byte. The issuer signature of the returned
+    /// certificate is not valid.
+    pub(crate) fn with_generalized_time_validity(cert_der: &[u8]) -> Vec<u8> {
+        use x509_cert::der::{
+            Any, Decode, Encode,
+            asn1::{GeneralizedTime, UtcTime},
+        };
+
+        // TBSCertificate fields of a v3 certificate: version, serialNumber, signature, issuer,
+        // validity, ...
+        const VALIDITY_INDEX: usize = 4;
+
+        let mut cert_fields = Vec::<Any>::from_der(cert_der).unwrap();
+        let mut tbs_fields: Vec<Any> = cert_fields[0].decode_as().unwrap();
+        let validity: Vec<Any> = tbs_fields[VALIDITY_INDEX]
+            .decode_as::<Vec<Any>>()
+            .unwrap()
+            .iter()
+            .map(|time| {
+                let time: UtcTime = time.decode_as().unwrap();
+                Any::encode_from(&GeneralizedTime::from_date_time(time.to_date_time())).unwrap()
+            })
+            .collect();
+        tbs_fields[VALIDITY_INDEX] = Any::encode_from(&validity).unwrap();
+        cert_fields[0] = Any::encode_from(&tbs_fields).unwrap();
+        cert_fields.to_der().unwrap()
+    }
 }
