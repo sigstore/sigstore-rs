@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use tracing::{debug, info, warn};
 use x509_cert::Certificate;
-use x509_cert::der::{Decode, DecodePem, Encode};
+use x509_cert::der::{Decode, DecodePem};
 use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::ext::pkix::name::GeneralName;
 
@@ -773,8 +773,8 @@ fn verify_bundle_tlog_entry(
 /// - `spec.payloadHash` matches `sha256(raw DSSE payload bytes)`.
 /// - `spec.signatures[0].signature` decodes to the same bytes as the
 ///   bundle's DSSE signature.
-/// - `spec.signatures[0].verifier` is `base64(PEM cert)` that round-trips
-///   to the same DER bytes as the bundle's certificate.
+/// - `spec.signatures[0].verifier` is `base64(PEM cert)` that contains the
+///   same DER bytes as the bundle's certificate.
 ///
 /// Without these checks, a valid SET + Merkle proof would only prove that
 /// `canonicalized_body` was logged at some point, but it would *not* prove
@@ -793,6 +793,7 @@ fn verify_bundle_tlog_body_consistency(
 ) -> Result<()> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
     use sha2::{Digest as _, Sha256};
+    use x509_cert::der::pem::PemLabel;
 
     let body: serde_json::Value =
         serde_json::from_slice(&tlog_entry.canonicalized_body).map_err(|e| {
@@ -946,23 +947,21 @@ fn verify_bundle_tlog_body_consistency(
     let tlog_verifier_pem = base64.decode(tlog_verifier_b64).map_err(|e| {
         SigstoreError::UnexpectedError(format!("cannot base64-decode tlog body verifier: {e}"))
     })?;
-    // Parse the PEM cert from the tlog body and compare DER bytes.
-    let tlog_cert_der = {
-        let pem_str = std::str::from_utf8(&tlog_verifier_pem).map_err(|_| {
-            SigstoreError::UnexpectedError("tlog body verifier is not valid UTF-8 PEM".to_string())
-        })?;
-        x509_cert::Certificate::from_pem(pem_str)
-            .map_err(|e| {
-                SigstoreError::UnexpectedError(format!(
-                    "cannot parse tlog body verifier PEM certificate: {e}"
-                ))
-            })?
-            .to_der()
-            .map_err(|e| {
-                SigstoreError::UnexpectedError(format!(
-                    "cannot re-encode tlog body verifier certificate to DER: {e}"
-                ))
-            })?
+    // Compare the DER bytes in the PEM. Do not decode and re-encode the certificate, because
+    // x509-cert does not re-encode every certificate byte for byte.
+    let tlog_cert_der = match x509_cert::der::pem::decode_vec(&tlog_verifier_pem) {
+        Ok((label, der)) if label == Certificate::PEM_LABEL => der,
+        Ok((label, _)) => {
+            return Err(SigstoreError::UnexpectedError(format!(
+                "tlog body verifier PEM has label '{label}', expected '{}'",
+                Certificate::PEM_LABEL
+            )));
+        }
+        Err(e) => {
+            return Err(SigstoreError::UnexpectedError(format!(
+                "cannot parse tlog body verifier PEM certificate: {e}"
+            )));
+        }
     };
     if tlog_cert_der != cert_der {
         return Err(SigstoreError::UnexpectedError(
@@ -2246,6 +2245,33 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
             .expect("real fixture must pass consistency check");
         }
 
+        #[test]
+        fn tlog_body_consistency_accepts_generalized_time_certificate() {
+            use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+
+            let mut inputs = real_bundle_consistency_inputs();
+            inputs.cert_der =
+                crate::crypto::tests::with_generalized_time_validity(&inputs.cert_der);
+            let mut body = real_tlog_body();
+            let pem = x509_cert::der::pem::encode_string(
+                "CERTIFICATE",
+                x509_cert::der::pem::LineEnding::LF,
+                &inputs.cert_der,
+            )
+            .unwrap();
+            body["spec"]["signatures"][0]["verifier"] = serde_json::json!(base64.encode(pem));
+            let entry = tlog_entry_with_body(body);
+
+            verify_bundle_tlog_body_consistency(
+                &entry,
+                &inputs.envelope_json,
+                &inputs.dsse_payload,
+                &inputs.raw_sig,
+                &inputs.cert_der,
+            )
+            .expect("a certificate with GeneralizedTime validity must pass consistency check");
+        }
+
         #[rstest]
         #[case::wrong_kind(
             "tlog body kind is 'hashedrekord', expected 'dsse'",
@@ -2295,13 +2321,38 @@ JsB89BPhZYch0U0hKANx5TY+ncrm0s8bfJxxHoenAEFhwhuXeb4PqIrtoQ==
                     serde_json::json!(base64.encode([0u8; 64]));
             }),
         )]
-        #[case::verifier_cert_mismatch(
+        #[case::verifier_not_pem(
             "cannot parse tlog body verifier PEM certificate",
             Box::new(|body: &mut serde_json::Value| {
                 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
                 // Replace the verifier with base64 of something that is not a PEM cert.
                 body["spec"]["signatures"][0]["verifier"] =
                     serde_json::json!(base64.encode(b"not-a-cert"));
+            }),
+        )]
+        #[case::verifier_wrong_pem_label(
+            "tlog body verifier PEM has label 'PUBLIC KEY', expected 'CERTIFICATE'",
+            Box::new(|body: &mut serde_json::Value| {
+                use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+                let der = real_bundle_consistency_inputs().cert_der;
+                let pem = x509_cert::der::pem::encode_string(
+                    "PUBLIC KEY",
+                    x509_cert::der::pem::LineEnding::LF,
+                    &der,
+                )
+                .unwrap();
+                body["spec"]["signatures"][0]["verifier"] = serde_json::json!(base64.encode(pem));
+            }),
+        )]
+        #[case::verifier_cert_mismatch(
+            "tlog body verifier certificate does not match bundle certificate",
+            Box::new(|body: &mut serde_json::Value| {
+                use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
+                let other = crate::crypto::tests::with_generalized_time_validity(
+                    &real_bundle_consistency_inputs().cert_der,
+                );
+                let pem = crate::crypto::certificate::der_to_pem(&other).unwrap();
+                body["spec"]["signatures"][0]["verifier"] = serde_json::json!(base64.encode(pem));
             }),
         )]
         fn tlog_body_consistency_rejects_tampered_body(
