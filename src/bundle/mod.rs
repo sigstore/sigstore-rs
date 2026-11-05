@@ -26,3 +26,18 @@ pub mod sign;
 #[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
 #[cfg(feature = "verify")]
 pub mod verify;
+
+/// Adapts a [`digest::Update`] into an [`std::io::Write`], so that readers can be hashed
+/// with [`std::io::copy`].
+pub(crate) struct DigestWriter<'a, D>(pub(crate) &'a mut D);
+
+impl<D: digest::Update> std::io::Write for DigestWriter<'_, D> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}

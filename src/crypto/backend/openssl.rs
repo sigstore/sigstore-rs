@@ -256,8 +256,11 @@ fn ed25519_pkey(der: &[u8]) -> std::result::Result<PKey<openssl::pkey::Private>,
                 use x509_cert::der::Decode;
                 let pkey = PKey::private_key_from_raw_bytes(&*seed, Id::ED25519)
                     .map_err(|e| e.to_string())?;
-                let pki = pkcs8::PrivateKeyInfo::from_der(der).map_err(|e| e.to_string())?;
+                let pki = pkcs8::PrivateKeyInfoRef::from_der(der).map_err(|e| e.to_string())?;
                 if let Some(expected) = pki.public_key {
+                    let expected = expected
+                        .as_bytes()
+                        .ok_or("Ed25519 public key is not octet-aligned")?;
                     let actual = pkey.raw_public_key().map_err(|e| e.to_string())?;
                     if actual.as_slice() != expected {
                         return Err("Ed25519 public key does not match private seed".into());
@@ -272,14 +275,14 @@ fn ed25519_pkey(der: &[u8]) -> std::result::Result<PKey<openssl::pkey::Private>,
 
 fn ed25519_seed(der: &[u8]) -> Option<Zeroizing<[u8; 32]>> {
     use const_oid::db::rfc8410::ID_ED_25519;
-    use pkcs8::PrivateKeyInfo;
+    use pkcs8::PrivateKeyInfoRef;
     use x509_cert::der::Decode;
 
-    let pki = PrivateKeyInfo::from_der(der).ok()?;
+    let pki = PrivateKeyInfoRef::from_der(der).ok()?;
     if pki.algorithm.oid != ID_ED_25519 {
         return None;
     }
-    let bytes = pki.private_key;
+    let bytes = pki.private_key.as_bytes();
     let seed = if bytes.len() == 32 {
         bytes
     } else if bytes.len() == 34 && bytes[0] == 0x04 && bytes[1] == 0x20 {

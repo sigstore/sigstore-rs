@@ -607,8 +607,8 @@ mod test_verify {
                 p.size1,
                 p.size2,
                 &p.proof.iter().map(|&h| h.into()).collect::<Vec<_>>(),
-                p.root1.as_slice().into(),
-                p.root2.as_slice().into(),
+                p.root1.as_slice().try_into().unwrap(),
+                p.root2.as_slice().try_into().unwrap(),
             )
             .err()
             .ok_or(format!("[{i} incorrectly accepted: {:?}", p.desc))?;
@@ -793,7 +793,7 @@ mod test_verify {
         let data = b"data";
         let hash = &Rfc6269Default::hash_leaf(data);
         let proof = [];
-        let zero_hash = ZERO_HASH.as_slice().into();
+        let zero_hash = ZERO_HASH.as_slice().try_into().unwrap();
         let test_cases = [
             (hash, hash, false),
             (hash, zero_hash, true),
@@ -816,26 +816,26 @@ mod test_verify {
         probes.into_iter().for_each(|(index, size)| {
             let result = Rfc6269Default::verify_inclusion(
                 index,
-                SHA256_SOME_HASH.as_slice().into(),
+                SHA256_SOME_HASH.as_slice().try_into().unwrap(),
                 size,
                 &proof,
-                ZERO_HASH.as_slice().into(),
+                ZERO_HASH.as_slice().try_into().unwrap(),
             );
             assert!(result.is_err(), "Incorrectly verified invalid root/leaf",);
             let result = Rfc6269Default::verify_inclusion(
                 index,
-                ZERO_HASH.as_slice().into(),
+                ZERO_HASH.as_slice().try_into().unwrap(),
                 size,
                 &proof,
-                SHA256_EMPTY_TREE_HASH.as_slice().into(),
+                SHA256_EMPTY_TREE_HASH.as_slice().try_into().unwrap(),
             );
             assert!(result.is_err(), "Incorrectly verified invalid root/leaf",);
             let result = Rfc6269Default::verify_inclusion(
                 index,
-                SHA256_SOME_HASH.as_slice().into(),
+                SHA256_SOME_HASH.as_slice().try_into().unwrap(),
                 size,
                 &proof,
-                SHA256_EMPTY_TREE_HASH.as_slice().into(),
+                SHA256_EMPTY_TREE_HASH.as_slice().try_into().unwrap(),
             );
             assert!(result.is_err(), "Incorrectly verified invalid root/leaf");
         });

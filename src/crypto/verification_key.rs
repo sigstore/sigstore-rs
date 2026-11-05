@@ -317,10 +317,10 @@ DwIDAQAB
         let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        let spki = cert.tbs_certificate().subject_public_key_info();
 
         let cosign_verification_key =
-            CosignVerificationKey::try_from(&spki).expect("conversion failed");
+            CosignVerificationKey::try_from(spki).expect("conversion failed");
 
         assert!(matches!(
             cosign_verification_key,
@@ -342,10 +342,10 @@ DwIDAQAB
         let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        let spki = cert.tbs_certificate().subject_public_key_info();
 
         let cosign_verification_key =
-            CosignVerificationKey::try_from(&spki).expect("conversion failed");
+            CosignVerificationKey::try_from(spki).expect("conversion failed");
 
         assert!(matches!(
             cosign_verification_key,
@@ -367,10 +367,10 @@ DwIDAQAB
         let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        let spki = cert.tbs_certificate().subject_public_key_info();
 
         let cosign_verification_key =
-            CosignVerificationKey::try_from(&spki).expect("conversion failed");
+            CosignVerificationKey::try_from(spki).expect("conversion failed");
 
         assert!(matches!(
             cosign_verification_key,
@@ -392,10 +392,10 @@ DwIDAQAB
         let issued_cert_pem = issued_cert.cert_pem.clone();
         let pem = pem::parse(issued_cert_pem)?;
         let cert = Certificate::from_der(pem.contents())?;
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        let spki = cert.tbs_certificate().subject_public_key_info();
 
         let cosign_verification_key =
-            CosignVerificationKey::try_from(&spki).expect("conversion failed");
+            CosignVerificationKey::try_from(spki).expect("conversion failed");
 
         assert!(matches!(
             cosign_verification_key,

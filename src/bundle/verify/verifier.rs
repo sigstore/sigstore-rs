@@ -23,8 +23,8 @@ use tracing::debug;
 use x509_cert::der::Encode;
 
 use crate::{
-    bundle::Bundle,
     bundle::verify::models::{ArtifactDigest, BundleContent, CheckedBundle},
+    bundle::{Bundle, DigestWriter},
     crypto::{
         CertificatePool, CosignVerificationKey, Signature,
         keyring::Keyring,
@@ -185,8 +185,8 @@ impl Verifier {
         // 7) Verify that the signing certificate was valid at the time of
         //    signing by comparing the expiry against the integrated timestamp.
 
-        let tbs_certificate = &materials.certificate.tbs_certificate;
-        let issued_at = tbs_certificate.validity.not_before.to_unix_duration();
+        let tbs_certificate = materials.certificate.tbs_certificate();
+        let issued_at = tbs_certificate.validity().not_before.to_unix_duration();
         let cert_der: CertificateDer = materials
             .certificate
             .to_der()
@@ -214,7 +214,7 @@ impl Verifier {
         debug!("signing certificate conforms to policy");
 
         // 3) Verify that the signature was signed by the public key in the signing certificate
-        let signing_key: CosignVerificationKey = (&tbs_certificate.subject_public_key_info)
+        let signing_key: CosignVerificationKey = (tbs_certificate.subject_public_key_info())
             .try_into()
             .map_err(SignatureErrorKind::AlgoUnsupported)?;
 
@@ -246,12 +246,12 @@ impl Verifier {
         //    signing by comparing the expiry against the integrated timestamp.
         let integrated_time = log_entry.integrated_time as u64;
         let not_before = tbs_certificate
-            .validity
+            .validity()
             .not_before
             .to_unix_duration()
             .as_secs();
         let not_after = tbs_certificate
-            .validity
+            .validity()
             .not_after
             .to_unix_duration()
             .as_secs();
@@ -394,7 +394,8 @@ pub mod blocking {
             P: VerificationPolicy,
         {
             let mut hasher = Sha256::new();
-            io::copy(&mut input, &mut hasher).map_err(VerificationError::Input)?;
+            io::copy(&mut input, &mut DigestWriter(&mut hasher))
+                .map_err(VerificationError::Input)?;
 
             self.verify_digest(hasher, bundle, policy, offline)
         }

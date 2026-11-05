@@ -37,7 +37,7 @@ async fn get_file_sha256sum(url: String) -> Result<(Vec<u8>, String), reqwest::E
     let body = reqwest::get(&url).await?.bytes().await?;
     let mut digester = Sha256::new();
     digester.update(body.clone());
-    let digest = format!("{:x}", digester.finalize());
+    let digest = hex::encode(digester.finalize());
     Ok((body.to_vec(), digest))
 }
 

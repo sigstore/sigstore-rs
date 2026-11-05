@@ -24,8 +24,8 @@ async fn main() {
             let cert = Certificate::from_der(pem.contents()).expect("parse certificate from der");
 
             let (_, san) = cert
-                .tbs_certificate
-                .get::<SubjectAltName>()
+                .tbs_certificate()
+                .get_extension::<SubjectAltName>()
                 .expect("get SAN failed")
                 .expect("No SAN found");
 

@@ -22,6 +22,22 @@ updates:
   open-pull-requests-limit: 10
   cooldown:
     default-days: 7
+  groups:
+    # RustCrypto crates share types (der, spki, digest, signature, ...) and
+    # must be bumped together, otherwise the build breaks.
+    rustcrypto:
+      patterns:
+      - "const-oid"
+      - "crypto_secretbox"
+      - "digest"
+      - "ecdsa"
+      - "p256"
+      - "pkcs8"
+      - "scrypt"
+      - "sha2"
+      - "signature"
+      - "tls_codec"
+      - "x509-cert"
 - package-ecosystem: "github-actions"
   directory: "/"
   schedule:

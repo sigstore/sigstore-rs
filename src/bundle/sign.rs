@@ -20,10 +20,11 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
-use ecdsa::signature::DigestSigner;
+use ecdsa::signature::hazmat::PrehashSigner;
 use hex;
 use p256::NistP256;
-use pkcs8::der::{Encode, EncodePem};
+use p256::elliptic_curve::Generate;
+use pkcs8::der::{Decode, Encode, EncodePem};
 use sha2::{Digest, Sha256};
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::bundle;
 use sigstore_protobuf_specs::dev::sigstore::bundle::v1::{
@@ -39,7 +40,9 @@ use url::Url;
 use x509_cert::attr::{AttributeTypeAndValue, AttributeValue};
 use x509_cert::builder::{Builder, RequestBuilder as CertRequestBuilder};
 use x509_cert::ext::pkix as x509_ext;
+use x509_cert::name::{Name, RdnSequence};
 
+use crate::bundle::DigestWriter;
 use crate::bundle::models::Version;
 use crate::crypto::keyring::Keyring;
 use crate::crypto::transparency::{CertificateEmbeddedSCT, verify_sct};
@@ -87,31 +90,33 @@ impl<'ctx> SigningSession<'ctx> {
         fulcio: &FulcioClient,
         token: &IdentityToken,
     ) -> SigstoreResult<(ecdsa::SigningKey<NistP256>, fulcio::CertificateResponse)> {
-        let subject =
-                // SEQUENCE OF RelativeDistinguishedName
-                vec![
-                    // SET OF AttributeTypeAndValue
-                    vec![
-                        // AttributeTypeAndValue, `emailAddress=...`
-                        AttributeTypeAndValue {
-                            oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
-                            value: AttributeValue::new(
-                                pkcs8::der::Tag::Utf8String,
-                                token.unverified_claims().email.as_bytes(),
-                            )?,
-                        }
-                    ].try_into()?
-                ].into();
+        // SEQUENCE OF RelativeDistinguishedName
+        let mut rdns = RdnSequence::default();
+        rdns.push(
+            // SET OF AttributeTypeAndValue
+            vec![
+                // AttributeTypeAndValue, `emailAddress=...`
+                AttributeTypeAndValue {
+                    oid: const_oid::db::rfc3280::EMAIL_ADDRESS,
+                    value: AttributeValue::new(
+                        pkcs8::der::Tag::Utf8String,
+                        token.unverified_claims().email.as_bytes(),
+                    )?,
+                },
+            ]
+            .try_into()?,
+        );
+        // `Name` can only be built from an `RdnSequence` through DER (or the `hazmat` feature).
+        let subject = Name::from_der(&rdns.to_der()?)?;
 
-        let private_key =
-            ecdsa::SigningKey::from(p256::SecretKey::random(&mut pkcs8::rand_core::OsRng));
-        let mut builder = CertRequestBuilder::new(subject, &private_key)?;
+        let private_key = ecdsa::SigningKey::<NistP256>::generate();
+        let mut builder = CertRequestBuilder::new(subject)?;
         builder.add_extension(&x509_ext::BasicConstraints {
             ca: false,
             path_len_constraint: None,
         })?;
 
-        let cert_req = builder.build::<p256::ecdsa::DerSignature>()?;
+        let cert_req = builder.build::<_, p256::ecdsa::DerSignature>(&private_key)?;
         Ok((private_key, fulcio.request_cert_v2(cert_req, token).await?))
     }
 
@@ -123,8 +128,8 @@ impl<'ctx> SigningSession<'ctx> {
         let not_after = self
             .certs
             .cert
-            .tbs_certificate
-            .validity
+            .tbs_certificate()
+            .validity()
             .not_after
             .to_system_time();
 
@@ -144,8 +149,11 @@ impl<'ctx> SigningSession<'ctx> {
         }
 
         // Sign artifact.
-        let input_hash: &[u8] = &hasher.clone().finalize();
-        let artifact_signature: p256::ecdsa::Signature = self.private_key.sign_digest(hasher);
+        let input_hash: &[u8] = &hasher.finalize();
+        let artifact_signature: p256::ecdsa::Signature = self
+            .private_key
+            .sign_prehash(input_hash)
+            .map_err(|e| SigstoreError::SigningError(e.to_string()))?;
         let signature_bytes = artifact_signature.to_der().as_bytes().to_owned();
 
         let cert = &self.certs.cert;
@@ -201,7 +209,7 @@ impl<'ctx> SigningSession<'ctx> {
         let mut sync_input = SyncIoBridge::new(input);
         let hasher = tokio::task::spawn_blocking(move || -> SigstoreResult<_> {
             let mut hasher = Sha256::new();
-            io::copy(&mut sync_input, &mut hasher)?;
+            io::copy(&mut sync_input, &mut DigestWriter(&mut hasher))?;
             Ok(hasher)
         })
         .await??;
@@ -246,7 +254,7 @@ pub mod blocking {
         /// [`SigstoreError::ExpiredSigningSession`] is returned.
         pub fn sign<R: Read>(&self, mut input: R) -> SigstoreResult<SigningArtifact> {
             let mut hasher = Sha256::new();
-            io::copy(&mut input, &mut hasher)?;
+            io::copy(&mut input, &mut DigestWriter(&mut hasher))?;
             self.rt.block_on(self.inner.sign_digest(hasher))
         }
     }

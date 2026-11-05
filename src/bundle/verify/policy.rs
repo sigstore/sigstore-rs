@@ -99,7 +99,11 @@ pub trait SingleX509ExtPolicy {
 
 impl<T: SingleX509ExtPolicy + const_oid::AssociatedOid> VerificationPolicy for T {
     fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
-        let extensions = cert.tbs_certificate.extensions.as_deref().unwrap_or(&[]);
+        let extensions = cert
+            .tbs_certificate()
+            .extensions()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let mut extensions = extensions.iter().filter(|ext| ext.extn_id == T::OID);
 
         // Check for exactly one extension.
@@ -264,7 +268,7 @@ impl VerificationPolicy for Identity {
     fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
         self.issuer.verify(cert)?;
 
-        let (_, san): (bool, SubjectAltName) = match cert.tbs_certificate.get() {
+        let (_, san): (bool, SubjectAltName) = match cert.tbs_certificate().get_extension() {
             Ok(Some(result)) => result,
             _ => return Err(PolicyError::ExtensionNotFound),
         };

@@ -74,11 +74,8 @@ impl Key {
             // TODO(tnytown): should we also accept ed25519, p384, ... ?
             (ID_EC_PUBLIC_KEY, SECP_256_R_1) => Ok(Key {
                 material: KeyMaterial::P256(spki.subject_public_key.raw_bytes().to_owned()),
-                fingerprint: {
-                    let mut hasher = sha2::Sha256::new();
-                    spki.encode(&mut hasher).expect("failed to hash key!");
-                    hasher.finalize().into()
-                },
+                fingerprint: sha2::Sha256::digest(spki.to_der().expect("failed to hash key!"))
+                    .into(),
             }),
             _ => Err(KeyringError::AlgoUnsupported),
         }
@@ -123,7 +120,6 @@ mod tests {
     use super::Keyring;
     use crate::crypto::signing_key::ecdsa::{ECDSAKeys, EllipticCurve};
     use digest::Digest;
-    use std::io::Write;
 
     #[test]
     fn verify_keyring() {
@@ -140,7 +136,7 @@ mod tests {
 
         // Generate the key id.
         let mut hasher = sha2::Sha256::new();
-        hasher.write_all(pub_key.as_slice()).unwrap();
+        hasher.update(pub_key.as_slice());
         let key_id: [u8; 32] = hasher.finalize().into();
 
         // Check for success.
