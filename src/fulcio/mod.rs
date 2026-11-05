@@ -249,7 +249,8 @@ impl FulcioClient {
             ));
         }
 
-        let cert = Certificate::from_der(certs[0].contents())?;
+        let cert_der = certs[0].contents().to_vec();
+        let cert = Certificate::from_der(&cert_der)?;
         let chain = certs[1..]
             .iter()
             .map(|pem| Certificate::from_der(pem.contents()))
@@ -257,6 +258,7 @@ impl FulcioClient {
 
         Ok(CertificateResponse {
             cert,
+            cert_der,
             chain,
             detached_sct,
         })
