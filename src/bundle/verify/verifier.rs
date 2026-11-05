@@ -198,9 +198,11 @@ impl Verifier {
 
         debug!("signing certificate chains back to trusted root");
 
-        let sct_context =
-            CertificateEmbeddedSCT::new_with_verified_path(&materials.certificate, &trusted_chain)
-                .map_err(CertificateErrorKind::Sct)?;
+        let sct_context = CertificateEmbeddedSCT::new_with_verified_path(
+            &materials.certificate_der,
+            &trusted_chain,
+        )
+        .map_err(CertificateErrorKind::Sct)?;
         verify_sct(&sct_context, &self.ctfe_keyring).map_err(CertificateErrorKind::Sct)?;
         debug!("signing certificate's SCT is valid");
 

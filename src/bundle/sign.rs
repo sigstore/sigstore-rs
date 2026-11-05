@@ -145,7 +145,7 @@ impl<'ctx> SigningSession<'ctx> {
         if let Some(detached_sct) = &self.certs.detached_sct {
             verify_sct(detached_sct, &self.context.ctfe_keyring)?;
         } else {
-            let sct = CertificateEmbeddedSCT::new(&self.certs.cert, &self.certs.chain)?;
+            let sct = CertificateEmbeddedSCT::new(&self.certs.cert_der, &self.certs.chain)?;
             verify_sct(&sct, &self.context.ctfe_keyring)?;
         }
 
