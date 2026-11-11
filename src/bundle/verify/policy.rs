@@ -188,14 +188,20 @@ impl<'a> AnyOf<'a> {
 
 impl VerificationPolicy for AnyOf<'_> {
     fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
-        self.children
+        // Logical OR: one matching child policy is enough. Note this is checked
+        // against success, not failure, and that an empty list fails (no child
+        // ever succeeded) instead of trivially passing.
+        if self
+            .children
             .iter()
-            .find(|policy| policy.verify(cert).is_err())
-            .map_or(Ok(()), |_| {
-                Err(PolicyError::AnyOf {
-                    total: self.children.len(),
-                })
-            })
+            .any(|policy| policy.verify(cert).is_ok())
+        {
+            return Ok(());
+        }
+
+        Err(PolicyError::AnyOf {
+            total: self.children.len(),
+        })
     }
 }
 
@@ -295,5 +301,62 @@ impl VerificationPolicy for Identity {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::tests::{CertGenerationOptions, generate_certificate};
+    use x509_cert::der::Decode;
+
+    fn cert_with_issuer(issuer: &str) -> x509_cert::Certificate {
+        let ca = generate_certificate(None, CertGenerationOptions::default())
+            .expect("cannot generate CA certificate");
+        let data = generate_certificate(
+            Some(&ca),
+            CertGenerationOptions {
+                subject_issuer: Some(issuer.to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("cannot generate certificate");
+        let pem = pem::parse(&data.cert_pem).expect("bad pem");
+        x509_cert::Certificate::from_der(pem.contents()).expect("bad der")
+    }
+
+    #[test]
+    fn any_of_accepts_when_one_policy_matches() {
+        let cert = cert_with_issuer("https://issuer.example.com");
+
+        let matching = OIDCIssuer::new("https://issuer.example.com");
+        let non_matching = OIDCIssuer::new("https://other.example.com");
+        let policy = AnyOf::new([
+            &matching as &dyn VerificationPolicy,
+            &non_matching as &dyn VerificationPolicy,
+        ]);
+
+        policy
+            .verify(&cert)
+            .expect("AnyOf must accept if a single child policy matches");
+    }
+
+    #[test]
+    fn any_of_rejects_empty_children() {
+        let cert = cert_with_issuer("https://issuer.example.com");
+        let policy = AnyOf::new(Vec::<&dyn VerificationPolicy>::new());
+        assert!(
+            policy.verify(&cert).is_err(),
+            "an empty AnyOf must not verify everything"
+        );
+    }
+
+    #[test]
+    fn any_of_rejects_when_no_policy_matches() {
+        let cert = cert_with_issuer("https://issuer.example.com");
+        let a = OIDCIssuer::new("https://a.example.com");
+        let b = OIDCIssuer::new("https://b.example.com");
+        let policy = AnyOf::new([&a as &dyn VerificationPolicy, &b as &dyn VerificationPolicy]);
+        assert!(policy.verify(&cert).is_err());
     }
 }
