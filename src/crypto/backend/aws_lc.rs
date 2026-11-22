@@ -39,6 +39,9 @@ pub(crate) fn fill_random(buf: &mut [u8]) {
 }
 
 pub(crate) fn verify_spki(scheme: VerifyScheme, spki: &[u8], msg: &[u8], sig: &[u8]) -> bool {
+    if !super::backend_accepts_key(scheme, spki) {
+        return false;
+    }
     verify_alg(scheme, spki, msg, sig).is_ok()
 }
 
@@ -48,6 +51,9 @@ pub(crate) fn verify_spki_prehash(
     digest_bytes: &[u8],
     sig: &[u8],
 ) -> bool {
+    if !super::backend_accepts_key(scheme, spki) {
+        return false;
+    }
     let alg = match scheme_alg(scheme) {
         Some(alg) => alg,
         None => return false,

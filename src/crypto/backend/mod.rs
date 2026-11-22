@@ -33,6 +33,14 @@ compile_error!(
     "sigstore requires the `native-tls` or `rustls-tls` feature to select a crypto backend"
 );
 
+/// Whether `spki` may be handed to the backend for `scheme`. Neither OpenSSL
+/// nor aws-lc rejects small-order Ed25519 keys, so those are refused here for
+/// any caller, not only for keys built through `CosignVerificationKey`.
+fn backend_accepts_key(scheme: VerifyScheme, spki: &[u8]) -> bool {
+    scheme != VerifyScheme::Ed25519
+        || crate::crypto::verification_key::check_ed25519_key_material(spki).is_ok()
+}
+
 /// Elliptic curve used by ECDSA key generation and signing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EcdsaCurve {
@@ -359,6 +367,27 @@ mod tests {
     fn ed25519_rejects(#[case] der: &[u8]) {
         assert!(super::ed25519_spki_from_pkcs8(der).is_err());
         assert!(super::ed25519_sign(der, MSG).is_err());
+    }
+
+    #[test]
+    fn ed25519_verify_rejects_identity_key() {
+        // The identity point is a small-order key and must be refused by the
+        // backend verify path.
+        let mut spki = vec![
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, 0x01,
+        ];
+        spki.extend_from_slice(&[0u8; 31]);
+        let mut sig = vec![0x01];
+        sig.extend_from_slice(&[0u8; 63]);
+        for msg in [&b"hello"[..], b"release v9.9.9"] {
+            assert!(!super::verify_spki(VerifyScheme::Ed25519, &spki, msg, &sig));
+        }
+        assert!(!super::verify_spki_prehash(
+            VerifyScheme::Ed25519,
+            &spki,
+            &[0u8; 32],
+            &sig
+        ));
     }
 
     #[test]
