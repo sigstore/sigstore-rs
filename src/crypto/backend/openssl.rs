@@ -38,6 +38,9 @@ pub(crate) fn fill_random(buf: &mut [u8]) {
 }
 
 pub(crate) fn verify_spki(scheme: VerifyScheme, spki: &[u8], msg: &[u8], sig: &[u8]) -> bool {
+    if !super::backend_accepts_key(scheme, spki) {
+        return false;
+    }
     let Ok(pkey) = PKey::public_key_from_der(spki) else {
         return false;
     };
@@ -50,6 +53,9 @@ pub(crate) fn verify_spki_prehash(
     digest: &[u8],
     sig: &[u8],
 ) -> bool {
+    if !super::backend_accepts_key(scheme, spki) {
+        return false;
+    }
     let Ok(pkey) = PKey::public_key_from_der(spki) else {
         return false;
     };
