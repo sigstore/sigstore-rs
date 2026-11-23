@@ -67,11 +67,19 @@ impl SigstoreTrustRoot {
 
     /// Constructs a new trust root backed by the Sigstore Public Good Instance.
     pub async fn new(cache_dir: Option<&Path>) -> Result<Self> {
+        Self::new_with_client(cache_dir, reqwest::Client::new()).await
+    }
+
+    /// Constructs a new trust root backed by the Sigstore Public Good Instance,
+    /// fetching the TUF repository through `client`.
+    pub async fn new_with_client(
+        cache_dir: Option<&Path>,
+        client: reqwest::Client,
+    ) -> Result<Self> {
         // These are statically defined and should always parse correctly.
         let metadata_base = url::Url::parse(constants::SIGSTORE_METADATA_BASE)?;
         let target_base = url::Url::parse(constants::SIGSTORE_TARGET_BASE)?;
 
-        let client = reqwest::Client::new();
         let transport = transport::ReqwestTransport::new(client);
 
         let repository = tough::RepositoryLoader::new(
@@ -386,6 +394,33 @@ mod tests {
 
         let data = fs::read(&trusted_root_path).expect("failed to read from trusted root cache");
         assert_ne!(data, outdated_data, "TUF cache was not properly updated");
+    }
+
+    #[tokio::test]
+    async fn trust_root_new_with_client_uses_supplied_client() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind");
+        let closed_addr = listener.local_addr().expect("failed to get local address");
+        drop(listener);
+
+        let metadata_host = url::Url::parse(constants::SIGSTORE_METADATA_BASE)
+            .expect("failed to parse metadata base URL")
+            .host_str()
+            .expect("metadata base URL has no host")
+            .to_owned();
+
+        let client = reqwest::Client::builder()
+            .resolve(&metadata_host, closed_addr)
+            .build()
+            .expect("failed to build reqwest client");
+
+        let err = SigstoreTrustRoot::new_with_client(None, client)
+            .await
+            .expect_err("fetch should fail when repository host resolves to a closed port");
+
+        assert!(
+            matches!(err, SigstoreError::TufError(_)),
+            "expected TufError from supplied client, got: {err:?}"
+        );
     }
 
     #[test]
