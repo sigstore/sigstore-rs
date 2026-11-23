@@ -188,14 +188,17 @@ impl<'a> AnyOf<'a> {
 
 impl VerificationPolicy for AnyOf<'_> {
     fn verify(&self, cert: &x509_cert::Certificate) -> PolicyResult {
-        self.children
+        if self
+            .children
             .iter()
-            .find(|policy| policy.verify(cert).is_err())
-            .map_or(Ok(()), |_| {
-                Err(PolicyError::AnyOf {
-                    total: self.children.len(),
-                })
+            .any(|policy| policy.verify(cert).is_ok())
+        {
+            Ok(())
+        } else {
+            Err(PolicyError::AnyOf {
+                total: self.children.len(),
             })
+        }
     }
 }
 
@@ -295,5 +298,120 @@ impl VerificationPolicy for Identity {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::tests::{CertGenerationOptions, generate_certificate};
+    use x509_cert::der::Decode;
+
+    fn test_cert() -> x509_cert::Certificate {
+        let ca_data =
+            generate_certificate(None, CertGenerationOptions::default()).expect("generate CA cert");
+        let issued = generate_certificate(Some(&ca_data), CertGenerationOptions::default())
+            .expect("generate leaf cert");
+        let parsed = pem::parse(&issued.cert_pem).expect("parse cert PEM");
+        x509_cert::Certificate::from_der(parsed.contents()).expect("decode cert DER")
+    }
+
+    #[test]
+    fn any_of_succeeds_when_at_least_one_child_matches() {
+        let cert = test_cert();
+        let matching = OIDCIssuer::new("https://sigstore.dev/oauth");
+        let non_matching = OIDCIssuer::new("https://other.example.com");
+
+        let first_matches = AnyOf::new([
+            &matching as &dyn VerificationPolicy,
+            &non_matching as &dyn VerificationPolicy,
+        ]);
+        assert!(first_matches.verify(&cert).is_ok());
+
+        let second_matches = AnyOf::new([
+            &non_matching as &dyn VerificationPolicy,
+            &matching as &dyn VerificationPolicy,
+        ]);
+        assert!(second_matches.verify(&cert).is_ok());
+
+        let identity = Identity::new("tests@sigstore-rs.dev", "https://sigstore.dev/oauth");
+        let all_match = AnyOf::new([
+            &matching as &dyn VerificationPolicy,
+            &identity as &dyn VerificationPolicy,
+        ]);
+        assert!(all_match.verify(&cert).is_ok());
+    }
+
+    #[test]
+    fn any_of_fails_when_no_child_matches() {
+        let cert = test_cert();
+        let first = OIDCIssuer::new("https://first.example.com");
+        let second = OIDCIssuer::new("https://second.example.com");
+        let policy = AnyOf::new([
+            &first as &dyn VerificationPolicy,
+            &second as &dyn VerificationPolicy,
+        ]);
+
+        let err = policy
+            .verify(&cert)
+            .expect_err("expected AnyOf to fail when no child matches");
+        assert!(matches!(err, PolicyError::AnyOf { total: 2 }));
+        assert_eq!(err.to_string(), "0 of 2 policies succeeded");
+    }
+
+    #[test]
+    fn any_of_fails_on_empty_policy_list() {
+        let cert = test_cert();
+        let policy = AnyOf::new(Vec::<&dyn VerificationPolicy>::new());
+
+        let err = policy
+            .verify(&cert)
+            .expect_err("expected empty AnyOf to fail");
+        assert!(matches!(err, PolicyError::AnyOf { total: 0 }));
+        assert_eq!(err.to_string(), "0 of 0 policies succeeded");
+    }
+
+    #[test]
+    fn any_of_single_child_behaves_like_child() {
+        let cert = test_cert();
+        let matching = OIDCIssuer::new("https://sigstore.dev/oauth");
+        let non_matching = OIDCIssuer::new("https://other.example.com");
+
+        assert!(
+            AnyOf::new([&matching as &dyn VerificationPolicy])
+                .verify(&cert)
+                .is_ok()
+        );
+        let err = AnyOf::new([&non_matching as &dyn VerificationPolicy])
+            .verify(&cert)
+            .expect_err("expected single failing child to fail");
+        assert!(matches!(err, PolicyError::AnyOf { total: 1 }));
+    }
+
+    #[test]
+    fn all_of_requires_all_children_and_rejects_empty() {
+        let cert = test_cert();
+        assert!(AllOf::new(Vec::<&dyn VerificationPolicy>::new()).is_none());
+
+        let matching = OIDCIssuer::new("https://sigstore.dev/oauth");
+        let non_matching = OIDCIssuer::new("https://other.example.com");
+        let identity = Identity::new("tests@sigstore-rs.dev", "https://sigstore.dev/oauth");
+
+        let both_match = AllOf::new([
+            &matching as &dyn VerificationPolicy,
+            &identity as &dyn VerificationPolicy,
+        ])
+        .expect("non-empty AllOf");
+        assert!(both_match.verify(&cert).is_ok());
+
+        let one_fails = AllOf::new([
+            &matching as &dyn VerificationPolicy,
+            &non_matching as &dyn VerificationPolicy,
+        ])
+        .expect("non-empty AllOf");
+        let err = one_fails
+            .verify(&cert)
+            .expect_err("expected AllOf to fail when one child fails");
+        assert!(matches!(err, PolicyError::AllOf { total: 2, ref errors } if errors.len() == 1));
     }
 }
